@@ -276,9 +276,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const customSkills = allSkills.filter(s => !s.isBuiltin);
 
   const getSkillIcon = (id: string) => {
-    if (id.includes('doc_generator')) return <FileText className="h-4 w-4 text-blue-500" />;
-    if (id.includes('ppt_outline')) return <Presentation className="h-4 w-4 text-orange-500" />;
-    if (id.includes('data_analysis')) return <Table2 className="h-4 w-4 text-emerald-500" />;
+    if (id.includes('word_report') || id.includes('doc_generator')) return <FileText className="h-4 w-4 text-blue-500" />;
+    if (id.includes('ppt_keynote') || id.includes('ppt_outline')) return <Presentation className="h-4 w-4 text-orange-500" />;
+    if (id.includes('excel_master') || id.includes('data_analysis')) return <Table2 className="h-4 w-4 text-emerald-500" />;
+    if (id.includes('meeting_action')) return <FileCheck2 className="h-4 w-4 text-pink-500" />;
     if (id.includes('api_architect')) return <Layers className="h-4 w-4 text-purple-500" />;
     if (id.includes('code_review')) return <ShieldCheck className="h-4 w-4 text-[var(--primary)]" />;
     if (id.includes('unit_test')) return <TestTube2 className="h-4 w-4 text-amber-500" />;
@@ -506,7 +507,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {/* Subgroup: Office & 文档类技能 */}
                 <div className="space-y-1.5">
                   <span className="text-[11px] font-semibold text-[var(--muted-foreground)] block">
-                    📑 Office 办公、方案撰写与数据分析技能
+                    📑 Anthropic & MiniMax 官方融合 Office 办公四件套
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {officeSkills.map(skill => {

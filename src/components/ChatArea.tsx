@@ -255,17 +255,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 ASTeam Agent (v1.1.2)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已内置 Office 方案文档撰写、PPT 大纲生成与数据分析等热门技能，并支持 Skill 本地导入、URL 安装与可视化创建。
+                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已全面预装 <strong>Anthropic & MiniMax 官方深度融合 Office 办公四件套</strong>（公文方案、路演 PPT、Excel 建模、会议纪要），并支持 Skill 本地导入、URL 安装与自定义创建。
               </p>
             </div>
 
             {/* Quick Prompt Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
               {[
-                { title: '本地生成架构设计文档', prompt: '请帮我在本地生成一份详细的系统架构方案设计 Markdown 文档并保存。' },
-                { title: '本机环境与网络诊断', prompt: '请帮我查询本机网络配置 (ipconfig) 与 Node/Git 运行环境状态。' },
-                { title: '开启 Grill-me 决策问答', prompt: '/grill-me 针对当前方案向我抛出关键选择题进行卡片互动。' },
-                { title: '执行代码安全走查与审查', prompt: '/review 请使用 Code Review 技能审查关键代码安全漏洞。' }
+                { title: '公文方案与深度报告撰写', prompt: '请使用【公文方案与深度报告专家】技能，为当前系统撰写一份具备高可读性与架构图的专业技术方案白皮书。' },
+                { title: '路演提案 PPT 大纲与逐字稿', prompt: '请使用【商业提案与演说 PPT 架构师】技能，为我们的产品规划生成一份 10 页高冲击力路演 Slide 大纲与讲者演说逐字稿。' },
+                { title: 'Excel 数据建模与动态公式', prompt: '请使用【表格与数据建模大师】技能，设计一套多维业务数据分析模型，并给出 XLOOKUP 与动态透视公式。' },
+                { title: '智能会议纪要与 RACI 清单', prompt: '请使用【智能会议纪要与行动清单】技能，将近期的沟通重点提炼为核心决议与标准 RACI 任务推进矩阵。' }
               ].map((item, idx) => (
                 <button
                   key={idx}

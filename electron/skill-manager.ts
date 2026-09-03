@@ -12,50 +12,74 @@ export interface SkillItem {
 }
 
 const BUILTIN_SKILLS: SkillItem[] = [
-  // 1. Office & 文档类热门技能
+  // 1. Anthropic & MiniMax 官方深度融合 Office 四件套
   {
-    id: 'doc_generator',
-    name: 'Office 方案与技术文档撰写',
-    description: '撰写严谨规范的技术方案、PRD 需求白皮书、架构报告、操作手册与会议纪要',
+    id: 'office_word_report',
+    name: '公文方案与深度报告专家 (Anthropic & MiniMax 官方融合)',
+    description: '融合 Anthropic 深度分析与 MiniMax 权威公文体系，撰写高水准技术方案白皮书、行政公文与深度研究报告',
     isBuiltin: true,
     category: 'office',
-    prompt: `【激活技能：Office 方案与专业技术文档撰写】
-- 撰写企业级高水准文档（Markdown / Word 风格），遵循清晰的层级目录结构：
-  1. 引言与项目背景（Executive Summary）；
-  2. 核心架构设计与流程图（建议使用 Mermaid 代码块直观呈现）；
-  3. 关键业务规约、接口参数与数据字典；
-  4. 风险评估、灰度演进方案与应急回滚策略；
-- 语言精炼准确，排版规范（多级标题、表格对比、高亮重点），并在结尾附录关键术语解释。`
+    prompt: `【激活技能：公文方案与深度报告专家 (Anthropic & MiniMax 官方融合)】
+- 遵循 Anthropic 深度严谨分析与 MiniMax 权威政企公文规约：
+  1. 结构标准：
+     - 执行摘要 (Executive Summary / 提要)：三句话高度概括背景、核心结论与拟采取行动；
+     - 现状剖析与痛点诊断：使用精准数据与客观事实支撑论点；
+     - 方案架构与实施细则：模块化拆解，建议配合 Mermaid 流程图或拓扑图清晰呈现；
+     - 资源保障与量化指标 (KPI/OKR)：责任落实、节点排期与交付物验收标准；
+     - 风险预案与应对策略：前置识别合规、技术、协同风险并给出兜底措施；
+  2. 语言规范：行文客观审慎、严谨得体，结构层层递进，严禁空洞陈词滥调；
+  3. 格式美学：标题层级严格规范（一、 (一) 1. (1)），重点数据加粗，善用对比表格与引用标注；
+  4. 交付形态：自动按 Markdown/排版规范输出，可直接转为 Word、PDF 或正式汇报报告。`
   },
   {
-    id: 'ppt_outline_maker',
-    name: 'PPT 演示与汇报大纲生成',
-    description: '生成结构化、视觉导向的演讲汇报 Slide 大纲、逐页要点与讲者演讲逐字稿',
+    id: 'office_excel_master',
+    name: '表格与数据建模大师 (Anthropic & MiniMax 官方融合)',
+    description: '融合高级财务建模与 MiniMax 现代复杂动态数组公式 (XLOOKUP/LET/LAMBDA)，提供数据清洗与多维透视洞察',
     isBuiltin: true,
     category: 'office',
-    prompt: `【激活技能：PPT 汇报演说大纲生成】
-- 针对用户的主题需求，生成结构化 Slide 大纲：
-  - 每页 Slide 包含：[页码] [幻灯片标题] [核心结论金句] [内容要点列表] [视觉版式/图表建议] [讲者演讲逐字稿 (Speaker Notes)]；
-  - 遵循金字塔原理与商业演说逻辑：现状痛点 -> 核心突破 -> 方案架构 -> 收益量化 -> 行动倡议；
-  - 重点突出，避免大段冗长叙述，善于使用数字量化支撑。`
+    prompt: `【激活技能：表格与数据建模大师 (Anthropic & MiniMax 官方融合)】
+- 遵循现代数据处理、商业智能与财务分析最高实践：
+  1. 高阶现代公式：优先采用健壮易维护的现代公式（XLOOKUP, LET, LAMBDA, FILTER, UNIQUE, SORT, INDEX-MATCH, SUMIFS），杜绝脆弱的嵌套 IF；
+  2. 结构化数据输出：生成符合第三范式规范的 CSV 或 Markdown 数据表格，表头清晰，严禁无规则合并单元格；
+  3. 智能指标透视：自动核算关键统计量（总量、同比环比、均值、中位数、离散极值），并附带业务归因洞察；
+  4. 落地实操指引：针对复杂计算与透视表，提供详尽的操作步骤指导（包括条件格式、切片器配置与数据有效性校验）。`
   },
   {
-    id: 'data_analysis_excel',
-    name: '表格与数据分析助手',
-    description: '自动化生成 CSV/Excel 数据格式、设计数据字典、复杂透视公式与多维汇总报表',
+    id: 'office_ppt_keynote',
+    name: '商业提案与演说 PPT 架构师 (Anthropic & MiniMax 官方融合)',
+    description: '融合 Anthropic 单页核心论点原则与 MiniMax 企划路演商业逻辑，生成逐页版式建议与讲者演说逐字稿',
     isBuiltin: true,
     category: 'office',
-    prompt: `【激活技能：Excel 表格与数据分析助手】
-- 帮助用户设计规范的表格数据结构与数据分析方案：
-  - 输出规范合规的 CSV 或 Markdown 数据表格；
-  - 提供精准的 Excel 高级公式（VLOOKUP, XLOOKUP, INDEX-MATCH, SUMIFS）；
-  - 输出数据概览、极值、均值与趋势透视建议；
-  - 指导用户在宿主环境中导出或批量处理表格文件。`
+    prompt: `【激活技能：商业提案与演说 PPT 架构师 (Anthropic & MiniMax 官方融合)】
+- 遵循路演演说金字塔原理与高冲击力视觉叙事规范：
+  1. 商业演说骨架：痛点共鸣 -> 核心突破 -> 解决方案架构 -> 商业回报量化 -> 行动倡议 (Call to Action)；
+  2. 逐页标准化输出规范：
+     - [幻灯片序号 & 标题]
+     - [单页核心金句 (1 Slide 1 Idea: 观众 3 秒即可捕捉的核心论点)]
+     - [正文精炼要点 (控制在 3-4 条以内，绝不大段堆砌文字)]
+     - [版式与图表视觉建议 (卡片并列、对比布局、环形图/漏斗图等)]
+     - [讲者演说逐字稿 (Speaker Notes: 现场口语化讲解词，包含重音与停顿提示)]；
+  3. 用数字说话，前后对比鲜明，确保汇报在商业与管理评审中具备极高说服力。`
+  },
+  {
+    id: 'office_meeting_action',
+    name: '智能会议纪要与行动清单 (Anthropic & MiniMax 官方融合)',
+    description: '从杂乱讨论中快速萃取核心决议 (Decisions)、分歧争议与 RACI 敏捷行动项追踪矩阵',
+    isBuiltin: true,
+    category: 'office',
+    prompt: `【激活技能：智能会议纪要与行动清单 (Anthropic & MiniMax 官方融合)】
+- 遵循敏捷推进与高效企业协作标准：
+  1. 会议核心摘要：主题、时间、关键决策者与各方角色；
+  2. 核心决议萃取 (Key Decisions)：精炼提炼会议已拍板定案的结论，过滤无价值闲聊与发散；
+  3. 争议焦点与后续调研 (Open Issues & Discussion Points)：客观如实记录暂未达成一致的议题及负责调研人；
+  4. 标准 RACI 交付任务矩阵 (Action Items)：
+     | 序号 | 行动项内容 (What) | 责任人 (Owner/Who) | 交付物标准 (Deliverable) | 截止时间 (When) | 依赖项 |
+  5. 重点突出“谁在什么时间交付什么结果”，确保后续有迹可循、推进闭环。`
   },
   {
     id: 'api_architect',
-    name: 'API 架构与契约规范设计',
-    description: '设计符合 OpenAPI 3.0 / RESTful 最佳实践的高可用前后端接口契约',
+    name: 'API 架构与前后端契约设计',
+    description: '设计符合 OpenAPI 3.0 / RESTful 最佳实践的高可用前后端接口契约与统一错误包装',
     isBuiltin: true,
     category: 'office',
     prompt: `【激活技能：API 架构与契约设计】
@@ -243,7 +267,17 @@ export class SkillManager {
 
   getAggregatedSkillPrompt(enabledSkillIds: string[], workspacePath: string | null): string {
     const all = this.getAllAvailableSkills(workspacePath);
-    const selected = all.filter(s => enabledSkillIds.includes(s.id));
+    // Support aliases
+    const normalizedEnabled = enabledSkillIds.map(id => {
+      if (id === 'doc_generator') return 'office_word_report';
+      if (id === 'data_analysis_excel') return 'office_excel_master';
+      if (id === 'ppt_outline_maker') return 'office_ppt_keynote';
+      return id;
+    });
+
+    const selected = all.filter(s =>
+      enabledSkillIds.includes(s.id) || normalizedEnabled.includes(s.id)
+    );
     if (selected.length === 0) return '';
 
     return '\n\n' + selected.map(s => s.prompt).join('\n\n');
