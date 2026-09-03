@@ -117,6 +117,9 @@ class WorkspaceTools {
   }
 
   viewFile(relPath: string): string {
+    if (!relPath || relPath.trim() === '') {
+      throw new Error('viewFile 失败: 未提供文件路径 (filePath 不能为空)');
+    }
     const target = this.resolveSafe(relPath);
     if (!fs.existsSync(target)) {
       throw new Error(`File not found: ${relPath}`);
@@ -136,7 +139,13 @@ class WorkspaceTools {
   }
 
   writeFile(relPath: string, content: string): string {
+    if (!relPath || relPath.trim() === '' || relPath === '.' || relPath === './') {
+      throw new Error('writeFile 失败: 必须指定具体的目标文件路径 (filePath 不能为空)');
+    }
     const target = this.resolveSafe(relPath);
+    if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
+      throw new Error(`writeFile 失败: 目标路径 "${target}" 是一个现有目录，不能直接作为文件覆盖写入。请指定具体文件名（例如 ${path.join(target, 'document.md')}）。`);
+    }
     const dir = path.dirname(target);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -318,6 +327,88 @@ async function callLLMStream(
   return fullText;
 }
 
+// Robust JSON and Tool Args Extractor (handles Windows paths, unescaped newlines/quotes)
+function parseToolArgs(raw: string): any {
+  if (!raw || !raw.trim()) return {};
+  const trimmed = raw.trim();
+
+  // 1. Try standard JSON.parse first
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  // 2. Fix unescaped Windows backslashes: e.g. "C:\Users\..." -> "C:\\Users\\..."
+  try {
+    const fixedBackslashes = trimmed.replace(/\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\');
+    return JSON.parse(fixedBackslashes);
+  } catch {}
+
+  // 3. Fix unescaped literal newlines/tabs inside string literals
+  try {
+    const sanitized = trimmed
+      .replace(/\\(?!["\\/bfnrtu]|u[0-9a-fA-F]{4})/g, '\\\\')
+      .replace(/[\u0000-\u001F]+/g, (match) => {
+        if (match === '\n') return '\\n';
+        if (match === '\r') return '\\r';
+        if (match === '\t') return '\\t';
+        return '';
+      });
+    return JSON.parse(sanitized);
+  } catch {}
+
+  // 4. Robust regex parameter extraction fallback
+  const result: any = {};
+
+  // Extract filePath or path
+  const fileMatch = trimmed.match(/"(?:filePath|path|file)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (fileMatch) {
+    result.filePath = fileMatch[1].replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+  }
+
+  // Extract dirPath
+  const dirMatch = trimmed.match(/"(?:dirPath|path|directory)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (dirMatch) {
+    result.dirPath = dirMatch[1].replace(/\\\\/g, '\\').replace(/\\"/g, '"');
+  }
+
+  // Extract command
+  const cmdMatch = trimmed.match(/"(?:command|cmd)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (cmdMatch) {
+    result.command = cmdMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+  }
+
+  // Extract question
+  const qMatch = trimmed.match(/"(?:question)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (qMatch) {
+    result.question = qMatch[1].replace(/\\"/g, '"');
+  }
+
+  // Extract content
+  const contentKeyIdx = trimmed.indexOf('"content"');
+  if (contentKeyIdx !== -1) {
+    let afterContent = trimmed.slice(contentKeyIdx + 9).replace(/^\s*:\s*/, '');
+    if (afterContent.startsWith('"')) {
+      afterContent = afterContent.slice(1);
+    }
+    const endMatch = afterContent.match(/("?\s*}\s*)$/);
+    if (endMatch) {
+      afterContent = afterContent.slice(0, -endMatch[0].length);
+    }
+    result.content = afterContent
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .replace(/\\"/g, '"')
+      .replace(/\\\\/g, '\\');
+  }
+
+  if (Object.keys(result).length > 0) {
+    return result;
+  }
+
+  return { raw: trimmed };
+}
+
 // 3. Harness Engine Runner
 export async function runHarnessAgent(
   sessionId: string,
@@ -379,8 +470,11 @@ ${isHostMode
 \`\`\`
 2. write_file: 写入或生成文档、代码、报告（支持相对路径与绝对路径，会自动创建父目录）。调用格式：
 \`\`\`tool:write_file
-{"filePath": "path/to/document.md", "content": "文档正文..."}
+{"filePath": "C:/Users/.../Desktop/document.md", "content": "文档正文..."}
 \`\`\`
+注意：
+- filePath 路径推荐使用正斜杠 / 或转义反斜杠 \\\\，例如："C:/Users/用户名/Desktop/方案.md"；
+- content 中的换行与双引号请按标准 JSON 规则进行转义（换行使用 \\n，双引号使用 \\"）。
 3. list_directory: 查看目录列表。调用格式：
 \`\`\`tool:list_directory
 {"dirPath": "."}
@@ -445,12 +539,7 @@ ${modeInstruction}
 
       const toolName = toolMatch[1].trim();
       const toolArgRaw = toolMatch[2].trim();
-      let toolArgs: any = {};
-      try {
-        toolArgs = JSON.parse(toolArgRaw);
-      } catch {
-        toolArgs = { raw: toolArgRaw };
-      }
+      const toolArgs = parseToolArgs(toolArgRaw);
 
       currentStepIndex = Math.min(currentStepIndex + 1, initialPlanSteps.length - 1);
       const activeStep = initialPlanSteps[currentStepIndex];
@@ -466,9 +555,24 @@ ${modeInstruction}
         if (config.executionMode === 'plan_only' && (toolName === 'write_file' || toolName === 'run_terminal_command')) {
           observation = `[安全拦截] 当前处于“只读规划模式 (Plan Only)”，已拦截文件写入与命令执行操作。`;
         } else if (toolName === 'view_file') {
-          observation = tools.viewFile(toolArgs.filePath || toolArgs.path || '');
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          observation = tools.viewFile(targetPath || '');
         } else if (toolName === 'write_file') {
-          observation = tools.writeFile(toolArgs.filePath || toolArgs.path || '', toolArgs.content || '');
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          let content = toolArgs.content ?? '';
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+            content = secondary.content ?? content;
+          }
+          if (!targetPath || targetPath.trim() === '') {
+            throw new Error('未识别到有效的文件路径 (filePath 不能为空，请提供目标文件名)');
+          }
+          observation = tools.writeFile(targetPath, content);
         } else if (toolName === 'list_directory') {
           observation = tools.listDirectory(toolArgs.dirPath || toolArgs.path || '.');
         } else if (toolName === 'run_terminal_command') {
