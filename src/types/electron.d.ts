@@ -16,6 +16,10 @@ export interface ElectronAPI {
 
   // Skills
   getAllSkills: (workspacePath: string | null) => Promise<any[]>;
+  installSkillFromFile: () => Promise<any>;
+  installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
+  installSkillFromUrl: (url: string) => Promise<any>;
+  deleteSkill: (skillId: string) => Promise<boolean>;
 
   // Agent Harness
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;

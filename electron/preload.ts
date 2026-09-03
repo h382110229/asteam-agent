@@ -18,6 +18,10 @@ export interface ElectronAPI {
 
   // Skills
   getAllSkills: (workspacePath: string | null) => Promise<any[]>;
+  installSkillFromFile: () => Promise<any>;
+  installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
+  installSkillFromUrl: (url: string) => Promise<any>;
+  deleteSkill: (skillId: string) => Promise<boolean>;
 
   // Agent Harness
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
@@ -44,6 +48,10 @@ const api: ElectronAPI = {
   discardFileChange: (repoPath: string, relPath: string) => ipcRenderer.invoke('git:discardChange', { repoPath, relPath }),
 
   getAllSkills: (workspacePath: string | null) => ipcRenderer.invoke('skills:getAll', workspacePath),
+  installSkillFromFile: () => ipcRenderer.invoke('skills:installFromFile'),
+  installSkillFromContent: (data) => ipcRenderer.invoke('skills:installFromContent', data),
+  installSkillFromUrl: (url) => ipcRenderer.invoke('skills:installFromUrl', url),
+  deleteSkill: (skillId) => ipcRenderer.invoke('skills:delete', skillId),
 
   startAgent: (sessionId, config, history) => ipcRenderer.invoke('agent:start', { sessionId, config, history }),
   stopAgent: (sessionId) => ipcRenderer.invoke('agent:stop', sessionId),

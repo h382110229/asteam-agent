@@ -80,6 +80,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   minimizeToTray: true,
   theme: 'dark',
   enabledMcpTools: ['web_fetch', 'git_operations', 'system_inspector'],
-  enabledSkills: ['code_review', 'unit_test', 'git_commit_helper'],
+  enabledSkills: ['doc_generator', 'ppt_outline_maker', 'data_analysis_excel', 'code_review', 'unit_test', 'git_commit_helper'],
   customMcpConfig: '{\n  "mcpServers": {}\n}'
 };

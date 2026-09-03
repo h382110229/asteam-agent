@@ -486,6 +486,7 @@ export const App: React.FC = () => {
         onClose={() => setIsSettingsOpen(false)}
         settings={settings}
         onSave={handleSaveSettings}
+        workspacePath={currentWorkspacePath}
       />
 
       {/* 4. Git Diff Drawer */}

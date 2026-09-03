@@ -252,10 +252,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.1.1)
+                ASTeam Agent (v1.1.2)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。现已全面支持宿主免项目系统操作与本地文档生成、卡片交互问答 (Grill-me)、文本划选复制与文件附件拖拽。
+                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已内置 Office 方案文档撰写、PPT 大纲生成与数据分析等热门技能，并支持 Skill 本地导入、URL 安装与可视化创建。
               </p>
             </div>
 

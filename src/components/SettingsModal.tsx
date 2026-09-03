@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Server,
@@ -19,7 +19,17 @@ import {
   TestTube2,
   Brush,
   FileCheck2,
-  Code2
+  Code2,
+  FileText,
+  Presentation,
+  Table2,
+  Layers,
+  Plus,
+  Trash2,
+  Download,
+  Upload,
+  Link2,
+  FolderOpen
 } from 'lucide-react';
 import {
   PROVIDER_PRESETS,
@@ -31,24 +41,61 @@ interface SettingsModalProps {
   onClose: () => void;
   settings: AppSettings;
   onSave: (newSettings: AppSettings) => void;
+  workspacePath?: string | null;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
   settings,
-  onSave
+  onSave,
+  workspacePath = null
 }) => {
   const [activeTab, setActiveTab] = useState<'provider' | 'mcp_skills' | 'desktop'>('provider');
   const [form, setForm] = useState<AppSettings>({
     ...settings,
     enabledMcpTools: settings.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector'],
-    enabledSkills: settings.enabledSkills || ['code_review', 'unit_test', 'git_commit_helper'],
+    enabledSkills: settings.enabledSkills || [
+      'doc_generator',
+      'ppt_outline_maker',
+      'data_analysis_excel',
+      'code_review',
+      'unit_test',
+      'git_commit_helper'
+    ],
     customMcpConfig: settings.customMcpConfig || '{\n  "mcpServers": {}\n}'
   });
   const [showApiKey, setShowApiKey] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   const [testMessage, setTestMessage] = useState('');
+
+  // Skills state
+  const [allSkills, setAllSkills] = useState<any[]>([]);
+  const [showInstallSkillModal, setShowInstallSkillModal] = useState(false);
+  const [installMode, setInstallMode] = useState<'file' | 'url' | 'custom'>('file');
+  const [skillUrl, setSkillUrl] = useState('');
+  const [newSkillForm, setNewSkillForm] = useState({
+    id: '',
+    name: '',
+    description: '',
+    prompt: ''
+  });
+  const [skillInstallMsg, setSkillInstallMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const refreshSkills = async () => {
+    if (window.electronAPI) {
+      try {
+        const skills = await window.electronAPI.getAllSkills(workspacePath);
+        setAllSkills(skills);
+      } catch {}
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen) {
+      refreshSkills();
+    }
+  }, [isOpen, workspacePath]);
 
   if (!isOpen) return null;
 
@@ -129,6 +176,88 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
   };
 
+  // Skill Installation Handlers
+  const handleInstallFromFile = async () => {
+    if (!window.electronAPI) return;
+    try {
+      const installed = await window.electronAPI.installSkillFromFile();
+      if (installed) {
+        await refreshSkills();
+        setForm(prev => ({
+          ...prev,
+          enabledSkills: [...(prev.enabledSkills || []), installed.id]
+        }));
+        setSkillInstallMsg({ type: 'success', text: `成功安装技能: ${installed.name}` });
+        setTimeout(() => {
+          setShowInstallSkillModal(false);
+          setSkillInstallMsg(null);
+        }, 1200);
+      }
+    } catch (err: any) {
+      setSkillInstallMsg({ type: 'error', text: `安装失败: ${err.message}` });
+    }
+  };
+
+  const handleInstallFromUrl = async () => {
+    if (!skillUrl.trim() || !window.electronAPI) return;
+    try {
+      const installed = await window.electronAPI.installSkillFromUrl(skillUrl.trim());
+      if (installed) {
+        await refreshSkills();
+        setForm(prev => ({
+          ...prev,
+          enabledSkills: [...(prev.enabledSkills || []), installed.id]
+        }));
+        setSkillInstallMsg({ type: 'success', text: `成功从 URL 安装: ${installed.name}` });
+        setSkillUrl('');
+        setTimeout(() => {
+          setShowInstallSkillModal(false);
+          setSkillInstallMsg(null);
+        }, 1200);
+      }
+    } catch (err: any) {
+      setSkillInstallMsg({ type: 'error', text: `下载安装失败: ${err.message}` });
+    }
+  };
+
+  const handleCreateCustomSkill = async () => {
+    if (!newSkillForm.id.trim() || !newSkillForm.name.trim() || !newSkillForm.prompt.trim() || !window.electronAPI) {
+      setSkillInstallMsg({ type: 'error', text: '请完整填写技能标识、名称与提示词内容' });
+      return;
+    }
+    try {
+      const installed = await window.electronAPI.installSkillFromContent(newSkillForm);
+      if (installed) {
+        await refreshSkills();
+        setForm(prev => ({
+          ...prev,
+          enabledSkills: [...(prev.enabledSkills || []), installed.id]
+        }));
+        setSkillInstallMsg({ type: 'success', text: `成功创建自定义技能: ${installed.name}` });
+        setNewSkillForm({ id: '', name: '', description: '', prompt: '' });
+        setTimeout(() => {
+          setShowInstallSkillModal(false);
+          setSkillInstallMsg(null);
+        }, 1200);
+      }
+    } catch (err: any) {
+      setSkillInstallMsg({ type: 'error', text: `保存失败: ${err.message}` });
+    }
+  };
+
+  const handleDeleteSkill = async (e: React.MouseEvent, skillId: string) => {
+    e.stopPropagation();
+    if (!window.confirm('确定要删除此自定义技能吗？') || !window.electronAPI) return;
+    try {
+      await window.electronAPI.deleteSkill(skillId);
+      await refreshSkills();
+      setForm(prev => ({
+        ...prev,
+        enabledSkills: (prev.enabledSkills || []).filter(id => id !== skillId)
+      }));
+    } catch {}
+  };
+
   const handleToggleAutoLaunch = async (checked: boolean) => {
     setForm(prev => ({ ...prev, openAtLogin: checked }));
     if (window.electronAPI) {
@@ -139,6 +268,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSave = () => {
     onSave(form);
     onClose();
+  };
+
+  // Group skills
+  const officeSkills = allSkills.filter(s => s.category === 'office');
+  const devSkills = allSkills.filter(s => s.category === 'dev');
+  const customSkills = allSkills.filter(s => !s.isBuiltin);
+
+  const getSkillIcon = (id: string) => {
+    if (id.includes('doc_generator')) return <FileText className="h-4 w-4 text-blue-500" />;
+    if (id.includes('ppt_outline')) return <Presentation className="h-4 w-4 text-orange-500" />;
+    if (id.includes('data_analysis')) return <Table2 className="h-4 w-4 text-emerald-500" />;
+    if (id.includes('api_architect')) return <Layers className="h-4 w-4 text-purple-500" />;
+    if (id.includes('code_review')) return <ShieldCheck className="h-4 w-4 text-[var(--primary)]" />;
+    if (id.includes('unit_test')) return <TestTube2 className="h-4 w-4 text-amber-500" />;
+    if (id.includes('refactor_clean')) return <Brush className="h-4 w-4 text-teal-500" />;
+    if (id.includes('git_commit')) return <FileCheck2 className="h-4 w-4 text-indigo-500" />;
+    return <Sparkles className="h-4 w-4 text-[var(--primary)]" />;
   };
 
   return (
@@ -206,7 +352,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Tab Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {activeTab === 'provider' && (
             <div className="space-y-4 text-xs">
               {/* Preset Selector */}
@@ -337,9 +483,152 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {activeTab === 'mcp_skills' && (
-            <div className="space-y-5 text-xs">
-              {/* Built-in MCP Tools Section */}
-              <div className="space-y-2">
+            <div className="space-y-6 text-xs">
+              {/* 1. Skills Section with Visual Install Button */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-1.5 font-semibold text-[var(--foreground)]">
+                    <Sparkles className="h-4 w-4 text-[var(--primary)]" />
+                    <span>Skill 技能扩展体系（Office 方案、数据分析与代码专家）</span>
+                  </div>
+
+                  {/* Visual Install Skill Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowInstallSkillModal(true)}
+                    className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>安装 / 导入新技能</span>
+                  </button>
+                </div>
+
+                {/* Subgroup: Office & 文档类技能 */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-[var(--muted-foreground)] block">
+                    📑 Office 办公、方案撰写与数据分析技能
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {officeSkills.map(skill => {
+                      const isEnabled = form.enabledSkills.includes(skill.id);
+                      return (
+                        <div
+                          key={skill.id}
+                          onClick={() => handleToggleSkill(skill.id)}
+                          className={`flex items-start justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                            isEnabled
+                              ? 'border-[var(--primary)] bg-[var(--primary)]/5'
+                              : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--muted-foreground)]'
+                          }`}
+                        >
+                          <div className="flex items-start space-x-2">
+                            <div className="mt-0.5">{getSkillIcon(skill.id)}</div>
+                            <div className="space-y-0.5">
+                              <span className="font-semibold text-[var(--foreground)]">{skill.name}</span>
+                              <p className="text-[10px] text-[var(--muted-foreground)] line-clamp-2">{skill.description}</p>
+                            </div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={() => {}}
+                            className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)] mt-0.5 shrink-0"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Subgroup: 研发与代码质量技能 */}
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[11px] font-semibold text-[var(--muted-foreground)] block">
+                    💻 软件研发与代码质量技能
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {devSkills.map(skill => {
+                      const isEnabled = form.enabledSkills.includes(skill.id);
+                      return (
+                        <div
+                          key={skill.id}
+                          onClick={() => handleToggleSkill(skill.id)}
+                          className={`flex items-start justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                            isEnabled
+                              ? 'border-[var(--primary)] bg-[var(--primary)]/5'
+                              : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--muted-foreground)]'
+                          }`}
+                        >
+                          <div className="flex items-start space-x-2">
+                            <div className="mt-0.5">{getSkillIcon(skill.id)}</div>
+                            <div className="space-y-0.5">
+                              <span className="font-semibold text-[var(--foreground)]">{skill.name}</span>
+                              <p className="text-[10px] text-[var(--muted-foreground)] line-clamp-2">{skill.description}</p>
+                            </div>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={isEnabled}
+                            onChange={() => {}}
+                            className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)] mt-0.5 shrink-0"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Subgroup: 用户已安装的自定义技能 (Custom Skills) */}
+                {customSkills.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[11px] font-semibold text-[var(--muted-foreground)] block">
+                      🧩 已安装的自定义技能库
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {customSkills.map(skill => {
+                        const isEnabled = form.enabledSkills.includes(skill.id);
+                        return (
+                          <div
+                            key={skill.id}
+                            onClick={() => handleToggleSkill(skill.id)}
+                            className={`group flex items-start justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                              isEnabled
+                                ? 'border-[var(--primary)] bg-[var(--primary)]/5'
+                                : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--muted-foreground)]'
+                            }`}
+                          >
+                            <div className="flex items-start space-x-2 truncate pr-1">
+                              <div className="mt-0.5"><Sparkles className="h-4 w-4 text-[var(--primary)]" /></div>
+                              <div className="space-y-0.5 truncate">
+                                <span className="font-semibold text-[var(--foreground)] block truncate">{skill.name}</span>
+                                <p className="text-[10px] text-[var(--muted-foreground)] truncate">{skill.description}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-1 shrink-0 mt-0.5">
+                              <button
+                                type="button"
+                                onClick={(e) => handleDeleteSkill(e, skill.id)}
+                                title="删除自定义技能"
+                                className="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--muted-foreground)] hover:text-[var(--error)]"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                              <input
+                                type="checkbox"
+                                checked={isEnabled}
+                                onChange={() => {}}
+                                className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Built-in MCP Tools Section */}
+              <div className="space-y-2 pt-2 border-t border-[var(--border)]">
                 <div className="flex items-center space-x-1.5 font-semibold text-[var(--foreground)]">
                   <Wrench className="h-3.5 w-3.5 text-[var(--primary)]" />
                   <span>内置常用 MCP 工具（开箱即用，按需开启）</span>
@@ -396,76 +685,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* Built-in Skills Section */}
-              <div className="space-y-2">
-                <div className="flex items-center space-x-1.5 font-semibold text-[var(--foreground)]">
-                  <Sparkles className="h-3.5 w-3.5 text-[var(--primary)]" />
-                  <span>内置专家 Skill 技能库</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {[
-                    {
-                      id: 'code_review',
-                      name: 'Code Review 专家',
-                      desc: '遵循 OWASP Top 10 安全与防御性编程进行深度审查',
-                      icon: <ShieldCheck className="h-4 w-4 text-[var(--primary)]" />
-                    },
-                    {
-                      id: 'unit_test',
-                      name: '单元测试生成',
-                      desc: '自动寻找匹配测试框架，生成高覆盖率单测用例',
-                      icon: <TestTube2 className="h-4 w-4 text-amber-500" />
-                    },
-                    {
-                      id: 'refactor_clean',
-                      name: 'Clean Code 重构',
-                      desc: '遵循 SOLID 原则消除代码坏味道与架构坏疽',
-                      icon: <Brush className="h-4 w-4 text-emerald-500" />
-                    },
-                    {
-                      id: 'git_commit_helper',
-                      name: '规范 Commit 助手',
-                      desc: '根据代码 Diff 自动生成 Conventional Commits 提交语',
-                      icon: <FileCheck2 className="h-4 w-4 text-indigo-500" />
-                    }
-                  ].map(skill => {
-                    const isEnabled = form.enabledSkills.includes(skill.id);
-                    return (
-                      <div
-                        key={skill.id}
-                        onClick={() => handleToggleSkill(skill.id)}
-                        className={`flex items-start justify-between p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                          isEnabled
-                            ? 'border-[var(--primary)] bg-[var(--primary)]/5'
-                            : 'border-[var(--border)] bg-[var(--card)] hover:border-[var(--muted-foreground)]'
-                        }`}
-                      >
-                        <div className="flex items-start space-x-2">
-                          <div className="mt-0.5">{skill.icon}</div>
-                          <div className="space-y-0.5">
-                            <span className="font-semibold text-[var(--foreground)]">{skill.name}</span>
-                            <p className="text-[10px] text-[var(--muted-foreground)] line-clamp-2">{skill.desc}</p>
-                          </div>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={isEnabled}
-                          onChange={() => {}}
-                          className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)] mt-0.5 shrink-0"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <p className="text-[11px] text-[var(--muted-foreground)] mt-1 italic">
-                  💡 提示：在当前项目工作区根目录下创建 <code>.asteam/skills/*.md</code> 亦可自动加载团队自定义专属技能！
-                </p>
-              </div>
-
-              {/* Custom MCP Servers JSON Config */}
-              <div className="space-y-1.5">
+              {/* 3. Custom MCP Servers JSON Config */}
+              <div className="space-y-1.5 pt-2 border-t border-[var(--border)]">
                 <div className="flex items-center justify-between">
                   <label className="font-semibold text-[var(--foreground)] flex items-center space-x-1.5">
                     <Code2 className="h-3.5 w-3.5 text-[var(--primary)]" />
@@ -474,10 +695,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span className="text-[10px] text-[var(--muted-foreground)]">兼容 Claude Desktop 规范</span>
                 </div>
                 <textarea
-                  rows={4}
+                  rows={3}
                   value={form.customMcpConfig}
                   onChange={e => setForm(prev => ({ ...prev, customMcpConfig: e.target.value }))}
-                  placeholder={`{\n  "mcpServers": {\n    "github": {\n      "command": "npx",\n      "args": ["-y", "@modelcontextprotocol/server-github"]\n    }\n  }\n}`}
+                  placeholder={`{\n  "mcpServers": {}\n}`}
                   className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] p-2.5 text-[11px] font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
                 />
               </div>
@@ -563,6 +784,187 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Visual Install / Create Custom Skill Modal */}
+      {showInstallSkillModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-[var(--border)] pb-3">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="h-4 w-4 text-[var(--primary)]" />
+                <h3 className="font-semibold text-sm text-[var(--foreground)]">安装 / 创建自定义技能</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowInstallSkillModal(false);
+                  setSkillInstallMsg(null);
+                }}
+                className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Install Method Tabs */}
+            <div className="flex rounded-lg border border-[var(--border)] bg-[var(--muted)] p-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setInstallMode('file')}
+                className={`flex-1 rounded py-1.5 font-medium transition-colors ${
+                  installMode === 'file' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-xs' : 'text-[var(--muted-foreground)]'
+                }`}
+              >
+                从本地文件导入
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallMode('url')}
+                className={`flex-1 rounded py-1.5 font-medium transition-colors ${
+                  installMode === 'url' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-xs' : 'text-[var(--muted-foreground)]'
+                }`}
+              >
+                在线 URL / GitHub 安装
+              </button>
+              <button
+                type="button"
+                onClick={() => setInstallMode('custom')}
+                className={`flex-1 rounded py-1.5 font-medium transition-colors ${
+                  installMode === 'custom' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-xs' : 'text-[var(--muted-foreground)]'
+                }`}
+              >
+                可视化在线编写
+              </button>
+            </div>
+
+            {/* Install Mode Contents */}
+            <div className="space-y-3 text-xs">
+              {installMode === 'file' && (
+                <div className="space-y-3 py-2 text-center">
+                  <div className="rounded-xl border border-dashed border-[var(--border)] p-6 bg-[var(--background)]/50 space-y-2">
+                    <FolderOpen className="h-8 w-8 text-[var(--primary)] mx-auto" />
+                    <p className="font-medium text-[var(--foreground)]">
+                      选择本地现有的 Skill Markdown 文件 (.md)
+                    </p>
+                    <p className="text-[11px] text-[var(--muted-foreground)]">
+                      系统将自动解析标题并将其安全安装至全局 <code>~/.asteam/skills/</code>
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleInstallFromFile}
+                      className="inline-flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors shadow-xs"
+                    >
+                      <Upload className="h-3.5 w-3.5" />
+                      <span>选择并导入 .md 文件</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {installMode === 'url' && (
+                <div className="space-y-3 py-1">
+                  <label className="block font-medium text-[var(--foreground)]">
+                    Skill Markdown 文件的在线公开 URL (支持 GitHub Raw 链接)
+                  </label>
+                  <div className="flex space-x-2">
+                    <input
+                      type="url"
+                      value={skillUrl}
+                      onChange={e => setSkillUrl(e.target.value)}
+                      placeholder="https://raw.githubusercontent.com/.../skill.md"
+                      className="flex-1 rounded-lg border border-[var(--input)] bg-[var(--background)] px-3 py-2 font-mono text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleInstallFromUrl}
+                      disabled={!skillUrl.trim()}
+                      className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)] px-3 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors disabled:opacity-40"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>下载安装</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {installMode === 'custom' && (
+                <div className="space-y-2 py-1">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block font-medium text-[var(--foreground)] mb-1">技能标识 (ID)</label>
+                      <input
+                        type="text"
+                        value={newSkillForm.id}
+                        onChange={e => setNewSkillForm(prev => ({ ...prev, id: e.target.value }))}
+                        placeholder="例如: api_tester"
+                        className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] px-2.5 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-medium text-[var(--foreground)] mb-1">技能名称</label>
+                      <input
+                        type="text"
+                        value={newSkillForm.name}
+                        onChange={e => setNewSkillForm(prev => ({ ...prev, name: e.target.value }))}
+                        placeholder="例如: API 测试专家"
+                        className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] px-2.5 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block font-medium text-[var(--foreground)] mb-1">技能简介</label>
+                    <input
+                      type="text"
+                      value={newSkillForm.description}
+                      onChange={e => setNewSkillForm(prev => ({ ...prev, description: e.target.value }))}
+                      placeholder="简短描述该技能的生效时机与核心职责"
+                      className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] px-2.5 py-1.5 text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-medium text-[var(--foreground)] mb-1">核心规则与系统指令 (Prompt)</label>
+                    <textarea
+                      rows={4}
+                      value={newSkillForm.prompt}
+                      onChange={e => setNewSkillForm(prev => ({ ...prev, prompt: e.target.value }))}
+                      placeholder="请详细描述 Agent 激活此技能后应遵循的具体行动准则、输出格式规范与约束..."
+                      className="w-full rounded-lg border border-[var(--input)] bg-[var(--background)] p-2.5 font-mono text-xs text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                    />
+                  </div>
+                  <div className="flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleCreateCustomSkill}
+                      className="inline-flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] px-4 py-1.5 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors shadow-xs"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>保存并激活技能</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Status Message */}
+              {skillInstallMsg && (
+                <div
+                  className={`flex items-center space-x-1.5 p-2 rounded-lg text-xs font-medium ${
+                    skillInstallMsg.type === 'success'
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-[var(--error)]/10 text-[var(--error)]'
+                  }`}
+                >
+                  {skillInstallMsg.type === 'success' ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <AlertCircle className="h-3.5 w-3.5" />
+                  )}
+                  <span>{skillInstallMsg.text}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

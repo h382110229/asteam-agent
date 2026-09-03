@@ -231,6 +231,39 @@ function setupIPC() {
     return skillManager.getAllAvailableSkills(workspacePath);
   });
 
+  ipcMain.handle('skills:installFromFile', async () => {
+    if (!mainWindow) return null;
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 Skill Markdown 文件 (.md)',
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown Skill', extensions: ['md'] }]
+    });
+    if (canceled || filePaths.length === 0) return null;
+    return skillManager.installSkillFromFile(filePaths[0]);
+  });
+
+  ipcMain.handle('skills:installFromContent', async (_event, { id, name, description, prompt }) => {
+    return skillManager.installSkillFromContent(id, name, description, prompt);
+  });
+
+  ipcMain.handle('skills:installFromUrl', async (_event, url: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      const text = await res.text();
+      const urlFileName = url.split('/').pop()?.replace(/\.md$/, '') || 'remote_skill';
+      const titleMatch = text.match(/^#\s+(.+)$/m);
+      const name = titleMatch ? titleMatch[1].trim() : urlFileName;
+      return skillManager.installSkillFromContent(urlFileName, name, `从 URL 安装: ${url}`, text);
+    } catch (err: any) {
+      throw new Error(`下载 Skill 失败: ${err.message}`);
+    }
+  });
+
+  ipcMain.handle('skills:delete', async (_event, skillId: string) => {
+    return skillManager.deleteCustomSkill(skillId);
+  });
+
   // Agent Harness IPC
   ipcMain.handle('agent:start', async (_event, { sessionId, config, history }) => {
     if (!mainWindow) return;
