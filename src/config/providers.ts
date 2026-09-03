@@ -66,6 +66,9 @@ export interface AppSettings {
   openAtLogin: boolean;
   minimizeToTray: boolean;
   theme: 'light' | 'dark';
+  enabledMcpTools: string[];
+  enabledSkills: string[];
+  customMcpConfig: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -75,5 +78,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   model: 'Auto',
   openAtLogin: false,
   minimizeToTray: true,
-  theme: 'dark'
+  theme: 'dark',
+  enabledMcpTools: ['web_fetch', 'git_operations', 'system_inspector'],
+  enabledSkills: ['code_review', 'unit_test', 'git_commit_helper'],
+  customMcpConfig: '{\n  "mcpServers": {}\n}'
 };

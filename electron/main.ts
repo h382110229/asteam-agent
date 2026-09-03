@@ -2,6 +2,8 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog } from 
 import path from 'node:path';
 import fs from 'node:fs';
 import { runHarnessAgent, abortExecution } from './harness-runner';
+import { getGitStatus, getFileDiff, discardFileChange } from './git-manager';
+import { skillManager } from './skill-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -209,6 +211,24 @@ function setupIPC() {
       path: process.execPath
     });
     return app.getLoginItemSettings().openAtLogin;
+  });
+
+  // Git IPC
+  ipcMain.handle('git:getStatus', async (_event, repoPath: string) => {
+    return await getGitStatus(repoPath);
+  });
+
+  ipcMain.handle('git:getFileDiff', async (_event, { repoPath, relPath }: { repoPath: string; relPath: string }) => {
+    return await getFileDiff(repoPath, relPath);
+  });
+
+  ipcMain.handle('git:discardChange', async (_event, { repoPath, relPath }: { repoPath: string; relPath: string }) => {
+    return await discardFileChange(repoPath, relPath);
+  });
+
+  // Skills IPC
+  ipcMain.handle('skills:getAll', async (_event, workspacePath: string | null) => {
+    return skillManager.getAllAvailableSkills(workspacePath);
   });
 
   // Agent Harness IPC

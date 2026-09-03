@@ -7,9 +7,15 @@ import {
   User,
   FolderGit2,
   Cpu,
-  ArrowDown
+  Shield,
+  FileSearch,
+  CheckCircle2,
+  Clock,
+  Zap,
+  Command
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
+import { ExecutionMode } from '../types/project';
 
 export interface ChatMessageItem {
   id: string;
@@ -18,17 +24,27 @@ export interface ChatMessageItem {
   thought?: string;
   steps?: AgentStep[];
   timestamp: number;
+  durationMs?: number;
+  estimatedTokens?: number;
 }
 
 interface ChatAreaProps {
   messages: ChatMessageItem[];
   isRunning: boolean;
-  onSendMessage: (text: string) => void;
+  onSendMessage: (text: string, mode: ExecutionMode) => void;
   onStopAgent: () => void;
   workspacePath: string | null;
   currentModel: string;
   providerName: string;
+  onOpenGitDiff?: () => void;
 }
+
+const SLASH_COMMANDS = [
+  { cmd: '/plan', title: '深度任务规划 (Plan)', desc: '分析需求并生成分步执行计划，不进行破坏性修改' },
+  { cmd: '/review', title: 'Code Review 走查', desc: '调用 Code Review 专家技能审查当前修改与安全基线' },
+  { cmd: '/test', title: '单测生成与运行', desc: '寻找测试套件，为核心函数生成并执行测试用例' },
+  { cmd: '/diff', title: '查看 Git 变更 Diff', desc: '唤起右侧 Git 代码变更对比抽屉' }
+];
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
   messages,
@@ -37,9 +53,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onStopAgent,
   workspacePath,
   currentModel,
-  providerName
+  providerName,
+  onOpenGitDiff
 }) => {
   const [input, setInput] = useState('');
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -52,6 +71,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   }, [messages, isRunning]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (showSlashMenu && (e.key === 'Escape' || e.key === 'Tab')) {
+      setShowSlashMenu(false);
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -61,17 +85,57 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const handleSend = () => {
     const trimmed = input.trim();
     if (!trimmed || isRunning) return;
-    onSendMessage(trimmed);
+
+    if (trimmed === '/diff') {
+      onOpenGitDiff?.();
+      setInput('');
+      setShowSlashMenu(false);
+      return;
+    }
+
+    let mode = executionMode;
+    let textToSend = trimmed;
+
+    if (trimmed.startsWith('/plan')) {
+      mode = 'plan_only';
+      textToSend = trimmed.replace('/plan', '').trim() || '请为当前工作区或需求制定详细的任务架构与实施规划。';
+    } else if (trimmed.startsWith('/review')) {
+      textToSend = trimmed.replace('/review', '').trim() || '请按照 Code Review 专家标准走查当前工作区的代码安全性与规范。';
+    } else if (trimmed.startsWith('/test')) {
+      textToSend = trimmed.replace('/test', '').trim() || '请为工作区核心模块生成单元测试并尝试在本地运行验证。';
+    }
+
+    onSendMessage(textToSend, mode);
     setInput('');
+    setShowSlashMenu(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
   };
 
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value);
+    const val = e.target.value;
+    setInput(val);
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
+
+    if (val === '/' || (val.startsWith('/') && !val.includes(' '))) {
+      setShowSlashMenu(true);
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
+
+  const handleSelectSlashCommand = (cmd: string) => {
+    if (cmd === '/diff') {
+      onOpenGitDiff?.();
+      setInput('');
+      setShowSlashMenu(false);
+      return;
+    }
+    setInput(`${cmd} `);
+    setShowSlashMenu(false);
+    textareaRef.current?.focus();
   };
 
   const workspaceName = workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : null;
@@ -81,7 +145,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Messages Stream */}
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 space-y-6">
         {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center max-w-lg mx-auto space-y-6 my-auto pt-16">
+          <div className="flex h-full flex-col items-center justify-center text-center max-w-lg mx-auto space-y-6 my-auto pt-16 select-none">
             <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--primary)] text-white shadow-lg">
               <span className="font-bold text-2xl">A</span>
               <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)] ml-0.5" />
@@ -89,29 +153,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent 桌面助手
+                ASTeam Agent (v1.1)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code> 规划与执行引擎。
-                {workspacePath ? (
-                  <span className="text-[var(--primary)] block mt-1 font-medium">
-                    当前已成功挂载工作区：{workspaceName}，已解锁代码检视、文件修改与本地终端执行能力。
-                  </span>
-                ) : (
-                  <span className="block mt-1">
-                    当前未挂载文件夹，运行在通用对话模式。随时在左侧挂载工作区开启自主 Agent。
-                  </span>
-                )}
+                内核封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>，支持多项目管理、MCP 扩展、Git Diff 审查与专业技能调度。
               </p>
             </div>
 
-            {/* Starter Prompt Badges */}
+            {/* Quick Prompt Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
               {[
-                { title: '分析项目架构与关键模块', prompt: '请帮我检视当前工作区的文件结构并总结核心模块架构。' },
-                { title: '排查代码语法与潜在缺陷', prompt: '请检查工作区代码，查找潜在的错误并给出修改建议。' },
-                { title: '运行本地测试或编译命令', prompt: '请在终端执行当前的测试用例或构建脚本，并分析输出。' },
-                { title: '通用编程与技术咨询', prompt: '请为我设计一套高并发、低延迟的微服务系统设计方案。' }
+                { title: '制定分步实施规划', prompt: '/plan 请分析当前项目的代码架构并给出模块重构路线图。' },
+                { title: '执行代码安全与规范走查', prompt: '/review 请使用 Code Review 技能审查关键代码安全漏洞。' },
+                { title: '单测用例编写与验证', prompt: '/test 为当前模块编写覆盖主要边界的单元测试用例。' },
+                { title: '查看当前未提交代码 Diff', prompt: '/diff' }
               ].map((item, idx) => (
                 <button
                   key={idx}
@@ -175,6 +230,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px]">
                   {msg.content}
                 </div>
+
+                {/* Performance & Token Meta for Assistant */}
+                {msg.role === 'assistant' && msg.content && (
+                  <div className="flex items-center space-x-2 pt-1 border-t border-[var(--border)]/40 text-[10px] text-[var(--muted-foreground)] font-mono">
+                    <span className="flex items-center space-x-1">
+                      <Clock className="h-2.5 w-2.5" />
+                      <span>{msg.durationMs ? `${(msg.durationMs / 1000).toFixed(1)}s` : '已完成'}</span>
+                    </span>
+                    <span>•</span>
+                    <span className="flex items-center space-x-1">
+                      <Zap className="h-2.5 w-2.5 text-[var(--primary)]" />
+                      <span>Tokens: ~{Math.round(msg.content.length * 0.75)}</span>
+                    </span>
+                  </div>
+                )}
               </div>
 
               {msg.role === 'user' && (
@@ -188,36 +258,90 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Slash Commands Autocomplete Popup */}
+      {showSlashMenu && (
+        <div className="absolute bottom-24 left-4 right-4 max-w-lg mx-auto z-40 rounded-xl border border-[var(--border)] bg-[var(--card)] p-1.5 shadow-2xl animate-in slide-in-from-bottom-2">
+          <div className="px-2 py-1 text-[10px] font-semibold text-[var(--muted-foreground)] uppercase">
+            快捷 Slash 指令
+          </div>
+          <div className="space-y-0.5">
+            {SLASH_COMMANDS.map(cmd => (
+              <div
+                key={cmd.cmd}
+                onClick={() => handleSelectSlashCommand(cmd.cmd)}
+                className="flex items-center justify-between rounded-lg p-2 hover:bg-[var(--primary)]/10 cursor-pointer text-xs transition-colors"
+              >
+                <div className="flex items-center space-x-2">
+                  <span className="font-mono font-bold text-[var(--primary)]">{cmd.cmd}</span>
+                  <span className="font-medium text-[var(--foreground)]">{cmd.title}</span>
+                </div>
+                <span className="text-[10px] text-[var(--muted-foreground)]">{cmd.desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Input Area Bar */}
       <div className="border-t border-[var(--border)] bg-[var(--card)]/90 p-4 backdrop-blur-xs">
         <div className="mx-auto max-w-4xl space-y-2">
           {/* Status Meta Bar */}
           <div className="flex items-center justify-between px-1 text-[11px] text-[var(--muted-foreground)]">
             <div className="flex items-center space-x-2">
+              {/* Execution Mode Selector */}
+              <div className="flex items-center rounded-md border border-[var(--border)] bg-[var(--background)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setExecutionMode('auto_edit')}
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    executionMode === 'auto_edit'
+                      ? 'bg-[var(--primary)] text-white shadow-2xs'
+                      : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                  title="自动修改文件并执行测试命令"
+                >
+                  自主执行 (Auto)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExecutionMode('plan_only')}
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    executionMode === 'plan_only'
+                      ? 'bg-[var(--primary)] text-white shadow-2xs'
+                      : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                  title="只读规划模式：仅输出步骤设计方案，不修改本地文件"
+                >
+                  只读规划 (Plan)
+                </button>
+              </div>
+
+              <span className="text-[var(--border)]">•</span>
+
               <span className="flex items-center space-x-1">
                 <Cpu className="h-3 w-3 text-[var(--primary)]" />
                 <span>{providerName} · <strong className="text-[var(--foreground)]">{currentModel}</strong></span>
               </span>
 
-              <span className="text-[var(--border)]">•</span>
-
-              {workspacePath ? (
-                <span className="flex items-center space-x-1 text-[var(--primary)] font-medium">
-                  <FolderGit2 className="h-3 w-3" />
-                  <span className="truncate max-w-[200px]" title={workspacePath}>
-                    工作区: {workspaceName} (harness 激活)
-                  </span>
-                </span>
-              ) : (
-                <span className="flex items-center space-x-1">
-                  <Sparkles className="h-3 w-3" />
-                  <span>通用对话模式 (未挂载工作区)</span>
-                </span>
+              {workspacePath && (
+                <>
+                  <span className="text-[var(--border)]">•</span>
+                  <button
+                    type="button"
+                    onClick={onOpenGitDiff}
+                    className="flex items-center space-x-1 text-[var(--primary)] font-medium hover:underline"
+                  >
+                    <FolderGit2 className="h-3 w-3" />
+                    <span className="truncate max-w-[160px]" title={workspacePath}>
+                      {workspaceName} (Git Diff)
+                    </span>
+                  </button>
+                </>
               )}
             </div>
 
             <span className="hidden sm:inline-block text-[10px]">
-              按 Enter 发送，Shift + Enter 换行
+              输入 <code>/</code> 唤出指令 · Enter 发送
             </span>
           </div>
 
@@ -231,7 +355,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               onKeyDown={handleKeyDown}
               placeholder={
                 workspacePath
-                  ? `向 ASTeam Agent 指派工作区任务（例：“检视当前目录代码并运行构建”）...`
+                  ? `向 ASTeam Agent 指派任务（支持输入 /plan, /review, /diff）...`
                   : `输入任何问题，与 ASTeam Agent 智能对话...`
               }
               className="max-h-44 min-h-[28px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none"

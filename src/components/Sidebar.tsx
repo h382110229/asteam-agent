@@ -1,263 +1,320 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  Plus,
-  MessageSquare,
-  Trash2,
-  FolderPlus,
-  FolderCheck,
-  ChevronRight,
-  ChevronDown,
-  FileText,
   Folder,
-  X,
+  FolderPlus,
+  Plus,
+  MoreVertical,
+  Pin,
+  Trash2,
+  Settings,
+  ChevronDown,
+  ChevronRight,
+  Filter,
+  MessageSquare,
   Sparkles,
-  RefreshCw
+  GitBranch,
+  FolderOpen
 } from 'lucide-react';
-
-export interface Session {
-  id: string;
-  title: string;
-  createdAt: number;
-}
-
-interface WorkspaceFileItem {
-  name: string;
-  isDirectory: boolean;
-  path: string;
-}
+import { Project, ProjectSession } from '../types/project';
 
 interface SidebarProps {
-  sessions: Session[];
+  projects: Project[];
+  sessions: ProjectSession[];
+  activeProjectId: string | null;
   activeSessionId: string;
-  onSelectSession: (id: string) => void;
-  onNewSession: () => void;
-  onDeleteSession: (id: string) => void;
-  workspacePath: string | null;
-  onSelectWorkspace: () => void;
-  onClearWorkspace: () => void;
+  onSelectProject: (projectId: string) => void;
+  onToggleProjectExpand: (projectId: string) => void;
+  onAddProject: () => void;
+  onRemoveProject: (projectId: string) => void;
+  onSelectSession: (sessionId: string, projectId: string) => void;
+  onNewSessionForProject: (projectId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
+  onTogglePinSession: (sessionId: string) => void;
+  onOpenSettings: () => void;
+}
+
+function formatRelativeTime(timestamp: number): string {
+  if (!timestamp) return '刚刚';
+  const diff = Date.now() - timestamp;
+  const minutes = Math.floor(diff / (1000 * 60));
+  if (minutes < 5) return '刚刚';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d`;
+  const months = Math.floor(days / 30);
+  return `${months}mo`;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
+  projects,
   sessions,
+  activeProjectId,
   activeSessionId,
+  onSelectProject,
+  onToggleProjectExpand,
+  onAddProject,
+  onRemoveProject,
   onSelectSession,
-  onNewSession,
+  onNewSessionForProject,
   onDeleteSession,
-  workspacePath,
-  onSelectWorkspace,
-  onClearWorkspace
+  onTogglePinSession,
+  onOpenSettings
 }) => {
-  const [fileList, setFileList] = useState<WorkspaceFileItem[]>([]);
-  const [showFiles, setShowFiles] = useState(false);
-  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [filterQuery, setFilterQuery] = useState('');
+  const [showFilterInput, setShowFilterInput] = useState(false);
+  const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
 
-  const loadWorkspaceFiles = async (dir: string) => {
-    if (!window.electronAPI) return;
-    setLoadingFiles(true);
-    try {
-      const files = await window.electronAPI.listWorkspaceFiles(dir);
-      setFileList(files);
-    } catch {
-      setFileList([]);
-    } finally {
-      setLoadingFiles(false);
-    }
+  const generalSessions = sessions.filter(s => s.projectId === 'general');
+
+  const filterSessions = (list: ProjectSession[]) => {
+    if (!filterQuery.trim()) return list;
+    return list.filter(s => s.title.toLowerCase().includes(filterQuery.toLowerCase()));
   };
-
-  useEffect(() => {
-    if (workspacePath) {
-      loadWorkspaceFiles(workspacePath);
-    } else {
-      setFileList([]);
-      setShowFiles(false);
-    }
-  }, [workspacePath]);
-
-  const workspaceName = workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : null;
 
   return (
     <aside className="flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--sidebar)] select-none text-xs">
-      {/* New Session Button */}
-      <div className="p-3 border-b border-[var(--border)]">
-        <button
-          type="button"
-          onClick={onNewSession}
-          className="flex w-full items-center justify-center space-x-2 rounded-lg bg-[var(--primary)] py-2 px-3 font-semibold text-[var(--primary-foreground)] shadow-xs hover:bg-[var(--primary-hover)] transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          <span>新建对话</span>
-        </button>
+      {/* Top Header: Projects + Action Icons */}
+      <div className="flex h-11 items-center justify-between border-b border-[var(--border)] px-3 bg-[var(--card)]/40">
+        <span className="font-semibold text-xs tracking-tight text-[var(--foreground)]">
+          Projects
+        </span>
+
+        <div className="flex items-center space-x-1 text-[var(--muted-foreground)]">
+          <button
+            type="button"
+            onClick={() => setShowFilterInput(!showFilterInput)}
+            title="搜索/过滤会话"
+            className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+          >
+            <Filter className="h-3.5 w-3.5" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onAddProject}
+            title="添加本地项目文件夹"
+            className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+          >
+            <FolderPlus className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Workspace Management Section */}
-      <div className="p-3 border-b border-[var(--border)] bg-[var(--card)]/40">
-        <div className="flex items-center justify-between mb-2">
-          <span className="font-semibold text-[11px] uppercase tracking-wider text-[var(--muted-foreground)]">
-            本地工作区 (Workspace)
-          </span>
-          {workspacePath && (
+      {/* Filter Input Bar if opened */}
+      {showFilterInput && (
+        <div className="border-b border-[var(--border)] p-2 bg-[var(--background)]">
+          <input
+            type="text"
+            value={filterQuery}
+            onChange={e => setFilterQuery(e.target.value)}
+            placeholder="搜索会话..."
+            className="w-full rounded border border-[var(--input)] bg-[var(--card)] px-2 py-1 text-[11px] text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-none"
+            autoFocus
+          />
+        </div>
+      )}
+
+      {/* Tree Content: General Chat + Projects List */}
+      <div className="flex-1 overflow-y-auto p-2 space-y-3">
+        {/* 1. General Unattached Chat Group */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between px-1.5 py-1 text-[11px] font-medium text-[var(--muted-foreground)] group">
+            <div className="flex items-center space-x-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-[var(--primary)]" />
+              <span>通用智能对话</span>
+            </div>
             <button
               type="button"
-              onClick={() => loadWorkspaceFiles(workspacePath)}
-              title="刷新工作区文件"
-              className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+              onClick={() => onNewSessionForProject('general')}
+              title="新建通用对话"
+              className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--card)] text-[var(--foreground)] transition-opacity"
             >
-              <RefreshCw className={`h-3 w-3 ${loadingFiles ? 'animate-spin' : ''}`} />
+              <Plus className="h-3 w-3" />
             </button>
-          )}
-        </div>
+          </div>
 
-        {workspacePath ? (
-          <div className="space-y-2">
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2.5 shadow-2xs">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center space-x-2 min-w-0">
-                  <FolderCheck className="h-4 w-4 text-[var(--primary)] shrink-0" />
-                  <div className="truncate">
-                    <span className="font-semibold text-[var(--foreground)] truncate block" title={workspacePath}>
-                      {workspaceName}
+          <div className="space-y-0.5 pl-2">
+            {filterSessions(generalSessions).map(session => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <div
+                  key={session.id}
+                  onClick={() => onSelectSession(session.id, 'general')}
+                  className={`group relative flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer text-xs transition-colors ${
+                    isActive
+                      ? 'bg-[var(--primary)] text-white font-medium shadow-2xs'
+                      : 'text-[var(--foreground)] hover:bg-[var(--card)]'
+                  }`}
+                >
+                  <span className="truncate pr-2" title={session.title}>
+                    {session.title || '新对话'}
+                  </span>
+
+                  <div className="flex items-center space-x-1 shrink-0 text-[10px]">
+                    <span className={isActive ? 'text-white/80' : 'text-[var(--muted-foreground)]'}>
+                      {formatRelativeTime(session.updatedAt || session.createdAt)}
                     </span>
-                    <span className="text-[10px] text-[var(--muted-foreground)] truncate block font-mono">
-                      {workspacePath}
-                    </span>
+                    {isActive && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-white ml-0.5" />
+                    )}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={onClearWorkspace}
-                  title="卸载工作区 (降级至通用对话)"
-                  className="text-[var(--muted-foreground)] hover:text-[var(--error)] p-0.5 rounded transition-colors"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
+              );
+            })}
+          </div>
+        </div>
 
-              {/* Mode Badge */}
-              <div className="mt-2 flex items-center justify-between">
-                <span className="inline-flex items-center rounded-sm bg-[var(--primary)]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[var(--primary)]">
-                  deepseek-harness 模式
-                </span>
-                <button
-                  type="button"
-                  onClick={onSelectWorkspace}
-                  className="text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] underline"
-                >
-                  切换目录
-                </button>
-              </div>
-            </div>
+        {/* 2. Projects List and Nested Sessions (Matching Reference Screenshot) */}
+        {projects.map(project => {
+          const projectSessions = sessions.filter(s => s.projectId === project.id);
+          const isProjectActive = activeProjectId === project.id;
 
-            {/* Expandable Workspace File Tree Preview */}
-            <div className="rounded-lg border border-[var(--border)]/70 bg-[var(--card)]/60 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setShowFiles(!showFiles)}
-                className="flex w-full items-center justify-between p-2 text-[11px] font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          return (
+            <div key={project.id} className="space-y-0.5">
+              {/* Project Header Item */}
+              <div
+                onClick={() => {
+                  onSelectProject(project.id);
+                  onToggleProjectExpand(project.id);
+                }}
+                className={`group flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer transition-colors ${
+                  isProjectActive
+                    ? 'bg-[var(--primary)]/10 text-[var(--primary)] font-semibold'
+                    : 'text-[var(--foreground)] hover:bg-[var(--card)]'
+                }`}
               >
-                <div className="flex items-center space-x-1.5">
-                  {showFiles ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  <span>工作区文件列表</span>
+                <div className="flex items-center space-x-1.5 truncate">
+                  <span className="text-[var(--muted-foreground)]">
+                    {project.isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  </span>
+                  <Folder className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
+                  <span className="truncate text-xs" title={project.path}>
+                    {project.name}
+                  </span>
                 </div>
-                <span className="text-[10px] text-[var(--muted-foreground)] font-mono">
-                  {fileList.length} 项
-                </span>
-              </button>
 
-              {showFiles && (
-                <div className="max-h-40 overflow-y-auto px-2 pb-2 space-y-0.5 font-mono text-[11px]">
-                  {fileList.length === 0 ? (
-                    <div className="text-[10px] text-[var(--muted-foreground)] py-1 italic">
-                      (工作区为空或无第一层文件)
+                {/* Project Actions on Hover */}
+                <div className="flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNewSessionForProject(project.id);
+                    }}
+                    title={`在 "${project.name}" 下新建任务会话`}
+                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--muted)] text-[var(--foreground)]"
+                  >
+                    <Plus className="h-3 w-3" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm(`从列表中移除项目 "${project.name}"？（不会删除本地文件）`)) {
+                        onRemoveProject(project.id);
+                      }
+                    }}
+                    title="移除项目"
+                    className="flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-[var(--error)]"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Nested Project Sessions */}
+              {project.isExpanded && (
+                <div className="pl-4 space-y-0.5 border-l border-[var(--border)] ml-3 my-0.5">
+                  {filterSessions(projectSessions).length === 0 ? (
+                    <div className="py-1 px-2 text-[10px] text-[var(--muted-foreground)] italic">
+                      暂无会话，点击上方 + 新建
                     </div>
                   ) : (
-                    fileList.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center space-x-1.5 py-0.5 text-[var(--foreground)] truncate"
-                        title={item.path}
-                      >
-                        {item.isDirectory ? (
-                          <Folder className="h-3 w-3 text-amber-500 shrink-0" />
-                        ) : (
-                          <FileText className="h-3 w-3 text-blue-500 shrink-0" />
-                        )}
-                        <span className="truncate">{item.name}</span>
-                      </div>
-                    ))
+                    filterSessions(projectSessions).map(session => {
+                      const isActive = session.id === activeSessionId;
+                      return (
+                        <div
+                          key={session.id}
+                          onClick={() => onSelectSession(session.id, project.id)}
+                          className={`group relative flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer text-xs transition-colors ${
+                            isActive
+                              ? 'bg-[var(--primary)] text-white font-medium shadow-2xs'
+                              : 'text-[var(--foreground)] hover:bg-[var(--card)]'
+                          }`}
+                        >
+                          <span className="truncate pr-2" title={session.title}>
+                            {session.title || '新任务'}
+                          </span>
+
+                          <div className="flex items-center space-x-1 shrink-0 text-[10px]">
+                            {session.isPinned && (
+                              <Pin className={`h-2.5 w-2.5 rotate-45 ${isActive ? 'text-white' : 'text-[var(--primary)]'}`} />
+                            )}
+                            <span className={isActive ? 'text-white/80' : 'text-[var(--muted-foreground)]'}>
+                              {formatRelativeTime(session.updatedAt || session.createdAt)}
+                            </span>
+                            {/* Blue dot indicator matching user's screenshot */}
+                            {isActive ? (
+                              <span className="h-1.5 w-1.5 rounded-full bg-white ml-0.5" />
+                            ) : session.isUnread ? (
+                              <span className="h-1.5 w-1.5 rounded-full bg-blue-500 ml-0.5" />
+                            ) : null}
+
+                            {/* Delete on hover */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteSession(session.id);
+                              }}
+                              className={`opacity-0 group-hover:opacity-100 p-0.5 rounded transition-opacity ${
+                                isActive ? 'hover:bg-white/20 text-white' : 'hover:bg-[var(--muted)] text-[var(--muted-foreground)]'
+                              }`}
+                            >
+                              <Trash2 className="h-2.5 w-2.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               )}
             </div>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-dashed border-[var(--border)] p-3 text-center space-y-2 bg-[var(--card)]/30">
-            <div className="flex justify-center text-[var(--muted-foreground)]">
-              <FolderPlus className="h-6 w-6 text-[var(--primary)]/70" />
-            </div>
-            <div className="space-y-0.5">
-              <p className="font-semibold text-[var(--foreground)] text-[11px]">未挂载本地工作区</p>
-              <p className="text-[10px] text-[var(--muted-foreground)] leading-relaxed">
-                当前运行在通用对话模式。挂载文件夹后即可启用 deepseek-harness 的规划、代码修改及终端执行能力。
-              </p>
-            </div>
+          );
+        })}
+
+        {projects.length === 0 && (
+          <div className="rounded-lg border border-dashed border-[var(--border)] p-3 text-center space-y-2 bg-[var(--card)]/30 my-4">
+            <FolderOpen className="h-6 w-6 text-[var(--muted-foreground)] mx-auto" />
+            <p className="text-[11px] text-[var(--muted-foreground)]">
+              还没有添加项目，点击上方添加本地工程目录
+            </p>
             <button
               type="button"
-              onClick={onSelectWorkspace}
-              className="inline-flex items-center space-x-1 rounded-md border border-[var(--primary)] bg-[var(--primary)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+              onClick={onAddProject}
+              className="inline-flex items-center space-x-1 rounded bg-[var(--primary)]/10 px-2 py-1 text-[11px] font-medium text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
             >
               <FolderPlus className="h-3 w-3" />
-              <span>选择文件夹挂载</span>
+              <span>添加 Project</span>
             </button>
           </div>
         )}
       </div>
 
-      {/* Sessions List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--muted-foreground)]">
-          历史会话 ({sessions.length})
-        </div>
-
-        {sessions.map(s => {
-          const isActive = s.id === activeSessionId;
-          return (
-            <div
-              key={s.id}
-              onClick={() => onSelectSession(s.id)}
-              className={`group flex items-center justify-between rounded-lg px-2.5 py-2 cursor-pointer transition-colors ${
-                isActive
-                  ? 'bg-[var(--primary)] text-white font-medium shadow-2xs'
-                  : 'text-[var(--foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)]'
-              }`}
-            >
-              <div className="flex items-center space-x-2 truncate">
-                <MessageSquare className={`h-3.5 w-3.5 shrink-0 ${isActive ? 'text-white' : 'text-[var(--muted-foreground)]'}`} />
-                <span className="truncate text-xs">{s.title || '新对话'}</span>
-              </div>
-
-              {sessions.length > 1 && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteSession(s.id);
-                  }}
-                  title="删除会话"
-                  className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-opacity ${
-                    isActive ? 'hover:bg-white/20 text-white' : 'hover:bg-[var(--muted)] text-[var(--muted-foreground)]'
-                  }`}
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Footer Branding Info */}
-      <div className="border-t border-[var(--border)] p-2.5 text-center text-[10px] text-[var(--muted-foreground)]">
-        <span>ASTeam Agent · v1.0.0</span>
+      {/* Bottom Settings Button (Exact layout as User's Reference Screenshot) */}
+      <div className="border-t border-[var(--border)] p-2">
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          className="flex w-full items-center space-x-2 rounded-lg px-2.5 py-2 text-xs font-medium text-[var(--muted-foreground)] hover:bg-[var(--card)] hover:text-[var(--foreground)] transition-colors"
+        >
+          <Settings className="h-4 w-4 text-[var(--primary)]" />
+          <span>Settings</span>
+        </button>
       </div>
     </aside>
   );

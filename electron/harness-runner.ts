@@ -2,11 +2,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, ChildProcess } from 'node:child_process';
 
+import { mcpManager } from './mcp-manager';
+import { skillManager } from './skill-manager';
+
 export interface AgentConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
   workspacePath?: string | null;
+  enabledMcpTools?: string[];
+  enabledSkills?: string[];
+  executionMode?: 'auto_edit' | 'plan_only' | 'safe_approval';
 }
 
 export interface ChatMessage {
@@ -337,10 +343,20 @@ export async function runHarnessAgent(
     ];
     callbacks.onPlan(initialPlanSteps);
 
+    const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector']);
+    const skillPrompts = skillManager.getAggregatedSkillPrompt(config.enabledSkills || ['code_review', 'unit_test', 'git_commit_helper'], config.workspacePath || null);
+
+    let modeInstruction = '';
+    if (config.executionMode === 'plan_only') {
+      modeInstruction = '\n\n【重要：当前处于“只读规划模式 (Plan Only)”】\n你只能使用 view_file、list_directory 或只读 MCP 工具检视项目。严禁调用 write_file 或执行修改性质的终端命令。请输出详尽的架构规划与代码分析。';
+    } else if (config.executionMode === 'safe_approval') {
+      modeInstruction = '\n\n【安全审批模式 (Safe Approval)】\n执行高危或删除类命令前，必须在思考过程中明确提示用户潜在影响。';
+    }
+
     const systemPrompt = `你是由 ASteam 打造的桌面智能工程师 Agent，内核原生深度封装 deepseek-harness 规划与工具执行范式。
 当前已挂载本地工作区：${config.workspacePath}。
 
-你拥有以下本地工具：
+你拥有以下本地工作区基础工具：
 1. view_file: 读取工作区中的文件。调用格式：
 \`\`\`tool:view_file
 {"filePath": "relative/path/to/file"}
@@ -358,9 +374,13 @@ export async function runHarnessAgent(
 {"command": "your terminal command here"}
 \`\`\`
 
+${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
+${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''}
+${modeInstruction}
+
 【执行规范】
 - 面对用户任务，请先给出清晰的规划思考（Plan），拆解具体执行步骤。
-- 需要查看或编辑文件时，直接输出上述标准 tool 代码块。系统会自动拦截并执行，返回结果后你继续下一步。
+- 需要调用工具时，输出对应的标准 tool 代码块。系统会自动拦截并执行，返回结果后你继续下一步。
 - 完成任务后，请给出详细总结并说明所做变更。`;
 
     let messages: ChatMessage[] = [
@@ -423,7 +443,9 @@ export async function runHarnessAgent(
 
       let observation = '';
       try {
-        if (toolName === 'view_file') {
+        if (config.executionMode === 'plan_only' && (toolName === 'write_file' || toolName === 'run_terminal_command')) {
+          observation = `[安全拦截] 当前处于“只读规划模式 (Plan Only)”，已拦截文件写入与命令执行操作。`;
+        } else if (toolName === 'view_file') {
           observation = tools.viewFile(toolArgs.filePath || toolArgs.path || '');
         } else if (toolName === 'write_file') {
           observation = tools.writeFile(toolArgs.filePath || toolArgs.path || '', toolArgs.content || '');
@@ -432,7 +454,13 @@ export async function runHarnessAgent(
         } else if (toolName === 'run_terminal_command') {
           observation = await tools.runTerminalCommand(toolArgs.command || '', sessionId, 120000);
         } else {
-          observation = `Unknown tool: ${toolName}`;
+          // Check MCP tools
+          const mcpResult = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: config.workspacePath || null });
+          if (mcpResult !== null) {
+            observation = mcpResult;
+          } else {
+            observation = `Unknown tool: ${toolName}`;
+          }
         }
         activeStep.status = 'completed';
         activeStep.result = observation.slice(0, 300);

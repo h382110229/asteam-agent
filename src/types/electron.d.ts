@@ -1,16 +1,28 @@
 export interface ElectronAPI {
+  // Window controls
   minimize: () => void;
   maximize: () => void;
   close: () => void;
   isMaximized: () => Promise<boolean>;
 
+  // Workspace & Projects
   selectWorkspaceDirectory: () => Promise<string | null>;
   listWorkspaceFiles: (dirPath: string) => Promise<Array<{ name: string; isDirectory: boolean; path: string }>>;
 
+  // Git operations
+  getGitStatus: (repoPath: string) => Promise<any>;
+  getFileDiff: (repoPath: string, relPath: string) => Promise<string>;
+  discardFileChange: (repoPath: string, relPath: string) => Promise<boolean>;
+
+  // Skills
+  getAllSkills: (workspacePath: string | null) => Promise<any[]>;
+
+  // Agent Harness
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
   stopAgent: (sessionId: string) => Promise<boolean>;
   onAgentEvent: (callback: (data: { type: string; payload: any }) => void) => () => void;
 
+  // App & System settings
   getOpenAtLogin: () => Promise<boolean>;
   setOpenAtLogin: (openAtLogin: boolean) => Promise<boolean>;
 }

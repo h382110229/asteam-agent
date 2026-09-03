@@ -1,18 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { Minus, Square, Copy, X, Settings, Sun, Moon, FolderGit2, Sparkles } from 'lucide-react';
+import {
+  Minus,
+  Square,
+  Copy,
+  X,
+  Settings,
+  Sun,
+  Moon,
+  FolderGit2,
+  Sparkles,
+  GitBranch,
+  FileDiff
+} from 'lucide-react';
+import { GitStatusSummary } from '../types/project';
 
 interface TitleBarProps {
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenSettings: () => void;
   workspacePath: string | null;
+  gitStatus?: GitStatusSummary | null;
+  onOpenGitDiff?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
   theme,
   onToggleTheme,
   onOpenSettings,
-  workspacePath
+  workspacePath,
+  gitStatus,
+  onOpenGitDiff
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -74,6 +91,26 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             <Sparkles className="h-2.5 w-2.5" />
             <span>通用对话模式</span>
           </div>
+        )}
+
+        {/* Git Branch & Diff Drawer Trigger Pill (No-Drag) */}
+        {gitStatus && gitStatus.isGitRepo && (
+          <button
+            type="button"
+            onClick={onOpenGitDiff}
+            title="查看工作区 Git Diff 变更"
+            className="no-drag flex items-center space-x-1.5 rounded-full border border-[var(--border)] bg-[var(--card)] px-2 py-0.5 text-[10px] text-[var(--foreground)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-colors shadow-2xs"
+          >
+            <GitBranch className="h-3 w-3 text-[var(--primary)]" />
+            <span className="font-mono">{gitStatus.branch || 'HEAD'}</span>
+            {gitStatus.files.length > 0 ? (
+              <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                · {gitStatus.files.length} 改动 (+{gitStatus.totalAdditions} -{gitStatus.totalDeletions})
+              </span>
+            ) : (
+              <span className="text-[var(--muted-foreground)]">· 干净</span>
+            )}
+          </button>
         )}
       </div>
 
