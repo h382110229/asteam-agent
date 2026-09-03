@@ -136,33 +136,59 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <div className="space-y-0.5 pl-2">
-            {filterSessions(generalSessions).map(session => {
-              const isActive = session.id === activeSessionId;
-              return (
-                <div
-                  key={session.id}
-                  onClick={() => onSelectSession(session.id, 'general')}
-                  className={`group relative flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer text-xs transition-colors ${
-                    isActive
-                      ? 'bg-[var(--primary)] text-white font-medium shadow-2xs'
-                      : 'text-[var(--foreground)] hover:bg-[var(--card)]'
-                  }`}
-                >
-                  <span className="truncate pr-2" title={session.title}>
-                    {session.title || '新对话'}
-                  </span>
-
-                  <div className="flex items-center space-x-1 shrink-0 text-[10px]">
-                    <span className={isActive ? 'text-white/80' : 'text-[var(--muted-foreground)]'}>
-                      {formatRelativeTime(session.updatedAt || session.createdAt)}
+            {filterSessions(generalSessions).length === 0 ? (
+              <div className="py-1 px-2 text-[10px] text-[var(--muted-foreground)] italic">
+                暂无通用会话，点击上方 + 新建
+              </div>
+            ) : (
+              filterSessions(generalSessions).map(session => {
+                const isActive = session.id === activeSessionId;
+                return (
+                  <div
+                    key={session.id}
+                    onClick={() => onSelectSession(session.id, 'general')}
+                    className={`group relative flex items-center justify-between rounded-lg px-2 py-1.5 cursor-pointer text-xs transition-colors ${
+                      isActive
+                        ? 'bg-[var(--primary)] text-white font-medium shadow-2xs'
+                        : 'text-[var(--foreground)] hover:bg-[var(--card)]'
+                    }`}
+                  >
+                    <span className="truncate pr-2" title={session.title}>
+                      {session.title || '新通用任务'}
                     </span>
-                    {isActive && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-white ml-0.5" />
-                    )}
+
+                    <div className="flex items-center space-x-1 shrink-0 text-[10px]">
+                      {session.isPinned && (
+                        <Pin className={`h-2.5 w-2.5 rotate-45 ${isActive ? 'text-white' : 'text-[var(--primary)]'}`} />
+                      )}
+                      <span className={isActive ? 'text-white/80' : 'text-[var(--muted-foreground)]'}>
+                        {formatRelativeTime(session.updatedAt || session.createdAt)}
+                      </span>
+                      {isActive ? (
+                        <span className="h-1.5 w-1.5 rounded-full bg-white ml-0.5" />
+                      ) : session.isUnread ? (
+                        <span className="h-1.5 w-1.5 rounded-full bg-blue-500 ml-0.5" />
+                      ) : null}
+
+                      {/* Delete on hover */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteSession(session.id);
+                        }}
+                        title="删除该通用会话"
+                        className={`opacity-0 group-hover:opacity-100 p-0.5 rounded transition-opacity ${
+                          isActive ? 'hover:bg-white/20 text-white' : 'hover:bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-[var(--error)]'
+                        }`}
+                      >
+                        <Trash2 className="h-2.5 w-2.5" />
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 

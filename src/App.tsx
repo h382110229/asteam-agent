@@ -278,16 +278,33 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteSession = (sessionId: string) => {
+    const sessionToDelete = sessions.find(s => s.id === sessionId);
+    const targetProjectId = sessionToDelete ? sessionToDelete.projectId : activeProjectId;
+
     const filtered = sessions.filter(s => s.id !== sessionId);
-    if (filtered.length === 0) {
-      handleNewSessionForProject(activeProjectId);
-      return;
+    const remainingForProj = filtered.filter(s => s.projectId === targetProjectId);
+
+    if (remainingForProj.length === 0) {
+      const newId = `session-${Date.now()}`;
+      const newSession: ProjectSession = {
+        id: newId,
+        projectId: targetProjectId,
+        title: targetProjectId === 'general' ? '新通用任务' : '新任务',
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      setSessions([newSession, ...filtered]);
+      if (activeSessionId === sessionId) {
+        setActiveProjectId(targetProjectId);
+        setActiveSessionId(newId);
+      }
+    } else {
+      setSessions(filtered);
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(remainingForProj[0].id);
+      }
     }
-    setSessions(filtered);
-    if (activeSessionId === sessionId) {
-      const remainingForProj = filtered.filter(s => s.projectId === activeProjectId);
-      setActiveSessionId(remainingForProj[0]?.id || filtered[0].id);
-    }
+
     setMessagesMap(prev => {
       const copy = { ...prev };
       delete copy[sessionId];
