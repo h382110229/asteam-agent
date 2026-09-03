@@ -151,6 +151,7 @@ export const App: React.FC = () => {
 
   // 5. Execution State & Agent IPC Listener
   const [isRunning, setIsRunning] = useState(false);
+  const [isWaitingForUser, setIsWaitingForUser] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [runStartTime, setRunStartTime] = useState<number>(0);
 
@@ -187,14 +188,25 @@ export const App: React.FC = () => {
             currentSteps.push(updatedStep);
           }
           lastMsg.steps = currentSteps;
+        } else if (type === 'question') {
+          lastMsg.question = {
+            questionId: payload.questionId,
+            question: payload.question,
+            options: payload.options,
+            multiSelect: payload.multiSelect,
+            answered: false
+          };
+          setIsWaitingForUser(true);
         } else if (type === 'error') {
           lastMsg.content += `\n\n⚠️ **执行遇到错误**: ${payload.error}`;
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
+          setIsWaitingForUser(false);
           refreshGitStatus();
         } else if (type === 'done') {
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
+          setIsWaitingForUser(false);
           refreshGitStatus();
         }
 
@@ -289,14 +301,55 @@ export const App: React.FC = () => {
     );
   };
 
+  const handleReplyQuestion = async (questionId: string, answer: string) => {
+    setIsWaitingForUser(false);
+
+    setMessagesMap(prev => {
+      const list = [...(prev[activeSessionId] || [])];
+      if (list.length === 0) return prev;
+      const last = { ...list[list.length - 1] };
+      if (last.question) {
+        last.question = { ...last.question, answered: true, selectedAnswer: answer };
+      }
+      list[list.length - 1] = last;
+      return { ...prev, [activeSessionId]: list };
+    });
+
+    if (window.electronAPI) {
+      await window.electronAPI.replyQuestion(activeSessionId, answer);
+    }
+  };
+
   // 7. Send message & start Agent
-  const handleSendMessage = async (text: string, mode: ExecutionMode) => {
-    if (!text.trim() || isRunning) return;
+  const handleSendMessage = async (text: string, mode: ExecutionMode, attachments?: any[]) => {
+    if (isWaitingForUser) {
+      const currentList = messagesMap[activeSessionId] || [];
+      const lastMsg = currentList[currentList.length - 1];
+      if (lastMsg?.question) {
+        await handleReplyQuestion(lastMsg.question.questionId, text);
+        return;
+      }
+    }
+
+    if (!text.trim() && (!attachments || attachments.length === 0)) return;
+    if (isRunning && !isWaitingForUser) return;
+
+    let fullContent = text.trim();
+    if (attachments && attachments.length > 0) {
+      const attachSnippets = attachments.map(att => {
+        if (att.content) {
+          const ext = att.name.split('.').pop() || '';
+          return `\n\n【附件代码/文件: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n\`\`\`${ext}\n${att.content}\n\`\`\``;
+        }
+        return `\n\n【附件文件: ${att.name} (${Math.round(att.size / 1024)} KB)】`;
+      }).join('');
+      fullContent = fullContent ? `${fullContent}\n${attachSnippets}` : attachSnippets.trim();
+    }
 
     const userMessage: ChatMessageItem = {
       id: `msg-user-${Date.now()}`,
       role: 'user',
-      content: text,
+      content: fullContent,
       timestamp: Date.now()
     };
 
@@ -374,6 +427,7 @@ export const App: React.FC = () => {
       await window.electronAPI.stopAgent(activeSessionId);
     }
     setIsRunning(false);
+    setIsWaitingForUser(false);
   };
 
   const activeMessages = messagesMap[activeSessionId] || [];
@@ -415,8 +469,10 @@ export const App: React.FC = () => {
         <ChatArea
           messages={activeMessages}
           isRunning={isRunning}
+          isWaitingForUser={isWaitingForUser}
           onSendMessage={handleSendMessage}
           onStopAgent={handleStopAgent}
+          onReplyQuestion={handleReplyQuestion}
           workspacePath={currentWorkspacePath}
           currentModel={settings.model}
           providerName={providerDisplayName}

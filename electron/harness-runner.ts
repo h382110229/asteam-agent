@@ -32,12 +32,20 @@ export interface AgentStep {
   error?: string;
 }
 
+export interface InteractiveQuestionData {
+  questionId: string;
+  question: string;
+  options?: string[];
+  multiSelect?: boolean;
+}
+
 export interface AgentEventCallbacks {
   onToken: (token: string, type?: 'content' | 'thought') => void;
   onPlan: (steps: AgentStep[]) => void;
   onStepUpdate: (step: AgentStep) => void;
   onError: (error: string) => void;
   onDone: (summary: string) => void;
+  onQuestion?: (data: InteractiveQuestionData) => void;
 }
 
 interface ActiveExecution {
@@ -46,6 +54,17 @@ interface ActiveExecution {
 }
 
 const activeExecutions = new Map<string, ActiveExecution>();
+const pendingUserResponses = new Map<string, (response: string) => void>();
+
+export function submitUserResponse(sessionId: string, response: string): boolean {
+  const resolver = pendingUserResponses.get(sessionId);
+  if (resolver) {
+    resolver(response);
+    pendingUserResponses.delete(sessionId);
+    return true;
+  }
+  return false;
+}
 
 export function abortExecution(sessionId: string): boolean {
   const active = activeExecutions.get(sessionId);
@@ -61,6 +80,11 @@ export function abortExecution(sessionId: string): boolean {
           active.currentProcess.kill('SIGKILL');
         }
       } catch {}
+    }
+    const resolver = pendingUserResponses.get(sessionId);
+    if (resolver) {
+      resolver('已由用户取消。');
+      pendingUserResponses.delete(sessionId);
     }
     activeExecutions.delete(sessionId);
     return true;
@@ -373,6 +397,10 @@ export async function runHarnessAgent(
 \`\`\`tool:run_terminal_command
 {"command": "your terminal command here"}
 \`\`\`
+5. ask_user_question: 涉及方案选择、关键确认或采访模式（Grill-me 互动）时向用户弹出选择与输入卡片。调用格式：
+\`\`\`tool:ask_user_question
+{"question": "问题描述", "options": ["选项1", "选项2"]}
+\`\`\`
 
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
 ${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''}
@@ -453,6 +481,25 @@ ${modeInstruction}
           observation = tools.listDirectory(toolArgs.dirPath || toolArgs.path || '.');
         } else if (toolName === 'run_terminal_command') {
           observation = await tools.runTerminalCommand(toolArgs.command || '', sessionId, 120000);
+        } else if (toolName === 'ask_user_question') {
+          const qId = `q-${Date.now()}`;
+          const qData: InteractiveQuestionData = {
+            questionId: qId,
+            question: toolArgs.question || '请针对上述方案进行选择或确认：',
+            options: toolArgs.options || [],
+            multiSelect: !!toolArgs.multiSelect
+          };
+          callbacks.onQuestion?.(qData);
+          callbacks.onToken(`\n\n💬 **[互动提问]** ${qData.question}\n`, 'thought');
+
+          activeStep.status = 'running';
+          activeStep.result = '等待用户在界面卡片中答复...';
+          callbacks.onStepUpdate({ ...activeStep });
+
+          // Await user response via submitUserResponse
+          observation = await new Promise<string>((resolve) => {
+            pendingUserResponses.set(sessionId, resolve);
+          });
         } else {
           // Check MCP tools
           const mcpResult = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: config.workspacePath || null });

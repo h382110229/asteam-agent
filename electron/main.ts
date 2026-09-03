@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { runHarnessAgent, abortExecution } from './harness-runner';
+import { runHarnessAgent, abortExecution, submitUserResponse } from './harness-runner';
 import { getGitStatus, getFileDiff, discardFileChange } from './git-manager';
 import { skillManager } from './skill-manager';
 
@@ -265,12 +265,22 @@ function setupIPC() {
           type: 'done',
           payload: { sessionId, summary }
         });
+      },
+      onQuestion: (data) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'question',
+          payload: { sessionId, ...data }
+        });
       }
     });
   });
 
   ipcMain.handle('agent:stop', (_event, sessionId: string) => {
     return abortExecution(sessionId);
+  });
+
+  ipcMain.handle('agent:replyQuestion', (_event, { sessionId, response }: { sessionId: string; response: string }) => {
+    return submitUserResponse(sessionId, response);
   });
 }
 
