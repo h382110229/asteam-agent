@@ -1,0 +1,134 @@
+import React, { useState, useEffect } from 'react';
+import { Minus, Square, Copy, X, Settings, Sun, Moon, FolderGit2, Sparkles } from 'lucide-react';
+
+interface TitleBarProps {
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
+  onOpenSettings: () => void;
+  workspacePath: string | null;
+}
+
+export const TitleBar: React.FC<TitleBarProps> = ({
+  theme,
+  onToggleTheme,
+  onOpenSettings,
+  workspacePath
+}) => {
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.isMaximized().then(setIsMaximized).catch(() => {});
+    }
+  }, []);
+
+  const handleMinimize = () => {
+    window.electronAPI?.minimize();
+  };
+
+  const handleMaximize = async () => {
+    window.electronAPI?.maximize();
+    if (window.electronAPI) {
+      const max = await window.electronAPI.isMaximized();
+      setIsMaximized(max);
+    }
+  };
+
+  const handleClose = () => {
+    window.electronAPI?.close();
+  };
+
+  const workspaceName = workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : null;
+
+  return (
+    <header className="drag-region flex h-10 w-full items-center justify-between border-b border-[var(--border)] bg-[var(--background)] px-3 select-none z-50">
+      {/* Left: App Logo & Workspace Tag */}
+      <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2">
+          {/* ASteam Stylized Logo Icon */}
+          <div className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--primary)] text-white shadow-xs">
+            <span className="font-bold text-xs tracking-tight">A</span>
+            <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)] ml-0.5" />
+          </div>
+          <span className="text-xs font-semibold tracking-wide text-[var(--foreground)]">
+            ASTeam Agent
+          </span>
+        </div>
+
+        {/* Active Workspace Pill */}
+        {workspacePath ? (
+          <div
+            title={workspacePath}
+            className="flex items-center space-x-1.5 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-0.5 text-[11px] text-[var(--muted-foreground)]"
+          >
+            <FolderGit2 className="h-3 w-3 text-[var(--primary)]" />
+            <span className="max-w-[140px] truncate font-mono text-[var(--foreground)]">
+              {workspaceName}
+            </span>
+            <span className="rounded bg-[var(--primary)]/15 px-1 py-0.2 text-[9px] font-medium text-[var(--primary)]">
+              harness
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-1 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-0.5 text-[10px] text-[var(--muted-foreground)]">
+            <Sparkles className="h-2.5 w-2.5" />
+            <span>通用对话模式</span>
+          </div>
+        )}
+      </div>
+
+      {/* Right: Actions & Window Controls (All No-Drag) */}
+      <div className="no-drag flex items-center space-x-1">
+        {/* Theme Toggle Button */}
+        <button
+          type="button"
+          onClick={onToggleTheme}
+          title={theme === 'dark' ? '切换至浅色模式' : '切换至深色模式'}
+          className="flex h-7 w-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+        </button>
+
+        {/* Settings Button */}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          title="系统与模型配置"
+          className="flex h-7 w-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          <Settings className="h-3.5 w-3.5" />
+        </button>
+
+        <div className="h-4 w-[1px] bg-[var(--border)] mx-1" />
+
+        {/* Window Controls */}
+        <button
+          type="button"
+          onClick={handleMinimize}
+          title="最小化"
+          className="flex h-7 w-8 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleMaximize}
+          title={isMaximized ? '向下还原' : '最大化'}
+          className="flex h-7 w-8 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
+        >
+          {isMaximized ? <Copy className="h-3 w-3" /> : <Square className="h-3 w-3" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleClose}
+          title="关闭 (最小化至系统托盘)"
+          className="flex h-7 w-8 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--error)] hover:text-white transition-colors"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </header>
+  );
+};
