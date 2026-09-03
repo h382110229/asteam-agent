@@ -252,20 +252,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.1.0)
+                ASTeam Agent (v1.1.1)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已支持卡片交互问答 (Grill-me)、文本全选复制、文件拖拽上传与 Git Diff 抽屉。
+                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。现已全面支持宿主免项目系统操作与本地文档生成、卡片交互问答 (Grill-me)、文本划选复制与文件附件拖拽。
               </p>
             </div>
 
             {/* Quick Prompt Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
               {[
-                { title: '制定分步实施规划', prompt: '/plan 请分析当前项目的代码架构并给出模块重构路线图。' },
-                { title: '开启 Grill-me 决策问答', prompt: '/grill-me 针对当前架构方案向我抛出关键选择题进行卡片互动。' },
-                { title: '执行代码安全与规范走查', prompt: '/review 请使用 Code Review 技能审查关键代码安全漏洞。' },
-                { title: '单测用例编写与验证', prompt: '/test 为当前模块编写覆盖主要边界的单元测试用例。' }
+                { title: '本地生成架构设计文档', prompt: '请帮我在本地生成一份详细的系统架构方案设计 Markdown 文档并保存。' },
+                { title: '本机环境与网络诊断', prompt: '请帮我查询本机网络配置 (ipconfig) 与 Node/Git 运行环境状态。' },
+                { title: '开启 Grill-me 决策问答', prompt: '/grill-me 针对当前方案向我抛出关键选择题进行卡片互动。' },
+                { title: '执行代码安全走查与审查', prompt: '/review 请使用 Code Review 技能审查关键代码安全漏洞。' }
               ].map((item, idx) => (
                 <button
                   key={idx}
@@ -482,7 +482,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <span>{providerName} · <strong className="text-[var(--foreground)]">{currentModel}</strong></span>
               </span>
 
-              {workspacePath && (
+              {workspacePath ? (
                 <>
                   <span className="text-[var(--border)]">•</span>
                   <button
@@ -495,6 +495,14 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       {workspaceName} (Git Diff)
                     </span>
                   </button>
+                </>
+              ) : (
+                <>
+                  <span className="text-[var(--border)]">•</span>
+                  <span className="flex items-center space-x-1 text-[var(--primary)] font-medium">
+                    <Sparkles className="h-3 w-3" />
+                    <span>宿主免项目模式 (支持本地文档生成与命令执行)</span>
+                  </span>
                 </>
               )}
             </div>
@@ -534,7 +542,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath
                   ? `向 ASTeam Agent 指派任务（支持输入 /plan, /review, /diff，支持拖入附件）...`
-                  : `输入任何问题，与 ASTeam Agent 智能对话...`
+                  : `指派本机宿主任务（例：“在桌面上生成系统设计文档”或“查询网络状态”，支持输入 /plan）...`
               }
               className="max-h-44 min-h-[28px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none select-text"
             />

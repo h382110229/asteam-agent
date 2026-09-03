@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, ChildProcess } from 'node:child_process';
+import os from 'node:os';
 
 import { mcpManager } from './mcp-manager';
 import { skillManager } from './skill-manager';
@@ -94,12 +95,23 @@ export function abortExecution(sessionId: string): boolean {
 
 // 1. Workspace Native Tools
 class WorkspaceTools {
-  constructor(private workspacePath: string) {}
+  constructor(private workspacePath: string, private isHostMode: boolean = false) {}
 
-  private resolveSafe(relPath: string): string {
-    const abs = path.resolve(this.workspacePath, relPath || '.');
-    if (!abs.startsWith(path.resolve(this.workspacePath))) {
-      throw new Error(`Security Violation: Path "${relPath}" escapes workspace directory.`);
+  private resolveSafe(relOrAbsPath: string): string {
+    if (!relOrAbsPath) return this.workspacePath;
+    if (path.isAbsolute(relOrAbsPath)) {
+      if (this.isHostMode) {
+        return path.normalize(relOrAbsPath);
+      }
+      const abs = path.resolve(relOrAbsPath);
+      if (!abs.startsWith(path.resolve(this.workspacePath))) {
+        throw new Error(`Security Violation: Path "${relOrAbsPath}" escapes workspace directory.`);
+      }
+      return abs;
+    }
+    const abs = path.resolve(this.workspacePath, relOrAbsPath);
+    if (!this.isHostMode && !abs.startsWith(path.resolve(this.workspacePath))) {
+      throw new Error(`Security Violation: Path "${relOrAbsPath}" escapes workspace directory.`);
     }
     return abs;
   }
@@ -130,7 +142,7 @@ class WorkspaceTools {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(target, content, 'utf-8');
-    return `Successfully wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${relPath}`;
+    return `Successfully wrote ${Buffer.byteLength(content, 'utf-8')} bytes to "${target}"`;
   }
 
   listDirectory(relPath: string = '.'): string {
@@ -318,51 +330,23 @@ export async function runHarnessAgent(
 
   try {
     const hasWorkspace = !!(config.workspacePath && fs.existsSync(config.workspacePath));
+    const isHostMode = !hasWorkspace;
+    const effectiveWorkspace = hasWorkspace
+      ? config.workspacePath!
+      : path.join(os.homedir(), 'ASTeam-Workspace');
 
-    // Degradation Mode: General Conversation when no workspace mounted
-    if (!hasWorkspace) {
-      callbacks.onPlan([
-        {
-          id: 'step-chat',
-          title: '通用大模型对话模式（未挂载工作区）',
-          status: 'running'
-        }
-      ]);
-
-      const systemMessage: ChatMessage = {
-        role: 'system',
-        content: '你是 ASteam Agent 智能桌面助手。当前用户未挂载本地工作区，已自动切换为通用智能对话模式。你可以回答各类编程、架构与通用问题。'
-      };
-
-      const messages: ChatMessage[] = [systemMessage, ...history];
-      let fullContent = '';
-
-      await callLLMStream(
-        config,
-        messages,
-        abortController.signal,
-        (token) => {
-          fullContent += token;
-          callbacks.onToken(token, 'content');
-        }
-      );
-
-      callbacks.onStepUpdate({
-        id: 'step-chat',
-        title: '通用对话已完成',
-        status: 'completed'
-      });
-      callbacks.onDone(fullContent);
-      return;
+    if (!fs.existsSync(effectiveWorkspace)) {
+      try {
+        fs.mkdirSync(effectiveWorkspace, { recursive: true });
+      } catch {}
     }
 
-    // Harness Workspace Agent Mode
-    const tools = new WorkspaceTools(config.workspacePath!);
+    const tools = new WorkspaceTools(effectiveWorkspace, isHostMode);
 
     const initialPlanSteps: AgentStep[] = [
-      { id: 'step-1', title: '分析工作区与任务意图', status: 'running' },
-      { id: 'step-2', title: '检索并检视关键文件', status: 'pending' },
-      { id: 'step-3', title: '制定并执行修改/命令', status: 'pending' },
+      { id: 'step-1', title: isHostMode ? '分析宿主任务与操作意图' : '分析工作区与任务意图', status: 'running' },
+      { id: 'step-2', title: isHostMode ? '准备执行环境或检视目标' : '检索并检视关键文件', status: 'pending' },
+      { id: 'step-3', title: isHostMode ? '生成文档或执行本机命令' : '制定并执行修改/命令', status: 'pending' },
       { id: 'step-4', title: '验证并生成交付总结', status: 'pending' }
     ];
     callbacks.onPlan(initialPlanSteps);
@@ -372,30 +356,38 @@ export async function runHarnessAgent(
 
     let modeInstruction = '';
     if (config.executionMode === 'plan_only') {
-      modeInstruction = '\n\n【重要：当前处于“只读规划模式 (Plan Only)”】\n你只能使用 view_file、list_directory 或只读 MCP 工具检视项目。严禁调用 write_file 或执行修改性质的终端命令。请输出详尽的架构规划与代码分析。';
+      modeInstruction = '\n\n【重要：当前处于“只读规划模式 (Plan Only)”】\n你只能使用 view_file、list_directory 或只读 MCP 工具检视项目或系统。严禁调用 write_file 或执行修改性质的终端命令。请输出详尽的架构方案与规划。';
     } else if (config.executionMode === 'safe_approval') {
       modeInstruction = '\n\n【安全审批模式 (Safe Approval)】\n执行高危或删除类命令前，必须在思考过程中明确提示用户潜在影响。';
     }
 
     const systemPrompt = `你是由 ASteam 打造的桌面智能工程师 Agent，内核原生深度封装 deepseek-harness 规划与工具执行范式。
-当前已挂载本地工作区：${config.workspacePath}。
+${isHostMode
+  ? `【当前运行环境：Windows 宿主系统免项目模式】
+- 默认工作目录：${effectiveWorkspace}
+- 用户主目录：${os.homedir()}
+- 用户桌面目录：${path.join(os.homedir(), 'Desktop')}
+你拥有对本机的自主执行能力，可以帮用户生成/编辑文档报告、运行系统命令诊断环境、批量处理文件以及调用 MCP 工具。`
+  : `【当前运行环境：本地工作区项目】
+- 项目目录：${config.workspacePath}`
+}
 
-你拥有以下本地工作区基础工具：
-1. view_file: 读取工作区中的文件。调用格式：
+你拥有以下基础工具能力：
+1. view_file: 读取文件（支持相对路径与绝对路径）。调用格式：
 \`\`\`tool:view_file
-{"filePath": "relative/path/to/file"}
+{"filePath": "relative/path/or/absolute/path"}
 \`\`\`
-2. write_file: 写入或覆盖文件内容。调用格式：
+2. write_file: 写入或生成文档、代码、报告（支持相对路径与绝对路径，会自动创建父目录）。调用格式：
 \`\`\`tool:write_file
-{"filePath": "relative/path/to/file", "content": "file contents..."}
+{"filePath": "path/to/document.md", "content": "文档正文..."}
 \`\`\`
 3. list_directory: 查看目录列表。调用格式：
 \`\`\`tool:list_directory
 {"dirPath": "."}
 \`\`\`
-4. run_terminal_command: 在工作区根目录执行控制台命令。调用格式：
+4. run_terminal_command: 执行控制台终端命令（在工作目录执行）。调用格式：
 \`\`\`tool:run_terminal_command
-{"command": "your terminal command here"}
+{"command": "ipconfig 或 node -v 或 dir"}
 \`\`\`
 5. ask_user_question: 涉及方案选择、关键确认或采访模式（Grill-me 互动）时向用户弹出选择与输入卡片。调用格式：
 \`\`\`tool:ask_user_question
@@ -407,9 +399,9 @@ ${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''
 ${modeInstruction}
 
 【执行规范】
-- 面对用户任务，请先给出清晰的规划思考（Plan），拆解具体执行步骤。
-- 需要调用工具时，输出对应的标准 tool 代码块。系统会自动拦截并执行，返回结果后你继续下一步。
-- 完成任务后，请给出详细总结并说明所做变更。`;
+- 如果用户只是普通的咨询或交谈，直接给出详尽解答即可，无需强行调用工具。
+- 如果用户需要生成文档、创建脚本、查询本机环境或执行系统操作，先给出分步规划思考（Plan），然后调用对应工具执行。
+- 完成任务后，请给出详细总结并说明生成的文件路径或命令输出。`;
 
     let messages: ChatMessage[] = [
       { role: 'system', content: systemPrompt },

@@ -87,9 +87,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             </span>
           </div>
         ) : (
-          <div className="flex items-center space-x-1 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-0.5 text-[10px] text-[var(--muted-foreground)]">
-            <Sparkles className="h-2.5 w-2.5" />
-            <span>通用对话模式</span>
+          <div className="flex items-center space-x-1.5 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2.5 py-0.5 text-[10px] text-[var(--muted-foreground)]">
+            <Sparkles className="h-2.5 w-2.5 text-[var(--primary)]" />
+            <span className="font-medium text-[var(--foreground)]">通用宿主模式</span>
+            <span className="rounded bg-[var(--primary)]/15 px-1 py-0.2 text-[9px] font-medium text-[var(--primary)]">
+              可执行本机操作/生成文档
+            </span>
           </div>
         )}
 

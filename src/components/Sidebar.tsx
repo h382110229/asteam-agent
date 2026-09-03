@@ -123,12 +123,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center justify-between px-1.5 py-1 text-[11px] font-medium text-[var(--muted-foreground)] group">
             <div className="flex items-center space-x-1.5">
               <Sparkles className="h-3.5 w-3.5 text-[var(--primary)]" />
-              <span>通用智能对话</span>
+              <span>通用宿主任务 (免项目模式)</span>
             </div>
             <button
               type="button"
               onClick={() => onNewSessionForProject('general')}
-              title="新建通用对话"
+              title="新建通用宿主任务"
               className="opacity-0 group-hover:opacity-100 flex h-5 w-5 items-center justify-center rounded hover:bg-[var(--card)] text-[var(--foreground)] transition-opacity"
             >
               <Plus className="h-3 w-3" />
