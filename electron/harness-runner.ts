@@ -511,13 +511,25 @@ ${isHostMode
 \`\`\`tool:list_directory
 {"dirPath": "."}
 \`\`\`
-4. run_terminal_command: 执行控制台终端命令（在工作目录执行）。调用格式：
+6. run_terminal_command: 执行控制台终端命令（在工作目录执行）。调用格式：
 \`\`\`tool:run_terminal_command
 {"command": "ipconfig 或 node -v 或 dir"}
 \`\`\`
-5. ask_user_question: 涉及方案选择、关键确认或采访模式（Grill-me 互动）时向用户弹出选择与输入卡片。调用格式：
+7. ask_user_question: 涉及方案选择、关键确认或采访模式（Grill-me 互动）时向用户弹出选择与输入卡片。调用格式：
 \`\`\`tool:ask_user_question
 {"question": "问题描述", "options": ["选项1", "选项2"]}
+\`\`\`
+8. install_skill: 自主安装或动态扩展新的 Agent 专属技能（支持从公开 URL 链接下载，或根据用户需求自主编写专业行动规约持久化到技能库中）。调用格式：
+\`\`\`tool:install_skill
+{"id": "skill_id", "name": "技能名称", "description": "适用说明", "prompt": "【激活技能：...】\\n- 详细行动指南与规约..."}
+\`\`\`
+或从 URL 安装：
+\`\`\`tool:install_skill
+{"url": "https://raw.githubusercontent.com/.../skill.md"}
+\`\`\`
+9. list_skills: 查看当前系统已安装的所有技能清单。调用格式：
+\`\`\`tool:list_skills
+{}
 \`\`\`
 
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
@@ -655,6 +667,32 @@ ${modeInstruction}
           observation = await new Promise<string>((resolve) => {
             pendingUserResponses.set(sessionId, resolve);
           });
+        } else if (toolName === 'install_skill') {
+          if (toolArgs.url) {
+            const res = await fetch(toolArgs.url);
+            if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+            const text = await res.text();
+            const urlFileName = toolArgs.url.split('/').pop()?.replace(/\.md$/, '') || 'remote_skill';
+            const titleMatch = text.match(/^#\s+(.+)$/m);
+            const name = titleMatch ? titleMatch[1].trim() : urlFileName;
+            const installed = skillManager.installSkillFromContent(urlFileName, name, `从 URL 安装: ${toolArgs.url}`, text);
+            observation = `[Skill 自主安装成功] 已成功从远程下载并安装技能 "${installed.name}" (ID: ${installed.id})，已存入全局技能库 (~/.asteam/skills/) 并即时激活生效！`;
+          } else if (toolArgs.name && toolArgs.prompt) {
+            const cleanId = (toolArgs.id || toolArgs.name).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+            const installed = skillManager.installSkillFromContent(
+              cleanId,
+              toolArgs.name,
+              toolArgs.description || '由 Agent 自主生成并安装的技能',
+              toolArgs.prompt
+            );
+            observation = `[Skill 自主安装成功] 已成功创建并安装专属技能 "${installed.name}" (ID: ${installed.id})，已安全持久化至 ~/.asteam/skills/ 并即时激活生效！`;
+          } else {
+            throw new Error('install_skill 参数错误: 需要提供 url 字段或者 { id, name, description, prompt } 字段');
+          }
+        } else if (toolName === 'list_skills') {
+          const all = skillManager.getAllAvailableSkills(config.workspacePath || null);
+          const listStr = all.map(s => `- [${s.isBuiltin ? '内置' : '自定义'}] ${s.name} (${s.id}): ${s.description}`).join('\n');
+          observation = `当前系统已挂载技能列表 (${all.length} 项):\n${listStr}`;
         } else {
           // Check MCP tools
           const mcpResult = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: config.workspacePath || null });
