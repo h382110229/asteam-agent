@@ -18,14 +18,14 @@ export const PROVIDER_PRESETS: ProviderPreset[] = [
     id: 'asteam-llmapi',
     name: 'ASteam LLMAPI',
     baseUrl: 'https://llmapi.ashawk.online/v1',
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'Auto',
     models: [
-      { id: 'deepseek-chat', name: 'deepseek-chat (DeepSeek V3 推荐)', description: '旗舰级代码生成与方案设计，高稳定性' },
+      { id: 'Auto', name: 'Auto (网关智能动态路由 · 推荐)', description: '网关根据任务复杂度与可用性自动调度最优模型' },
+      { id: 'deepseek-chat', name: 'deepseek-chat (DeepSeek V3)', description: '旗舰级代码生成与方案设计，高稳定性' },
       { id: 'deepseek-reasoner', name: 'deepseek-reasoner (DeepSeek R1)', description: '深度思考与慢逻辑推理链' },
       { id: 'qwen-2.5-72b', name: 'qwen-2.5-72b', description: '通义千问开源旗舰代码模型' },
       { id: 'mimo-v2.5-pro', name: 'mimo-v2.5-pro', description: '高并发多模态与代码推理' },
-      { id: 'gemini-1.5-pro', name: 'gemini-1.5-pro', description: '超长上下文工程分析' },
-      { id: 'Auto', name: 'Auto (智能路由)', description: '根据任务复杂度动态路由' }
+      { id: 'gemini-1.5-pro', name: 'gemini-1.5-pro', description: '超长上下文工程分析' }
     ]
   },
   {
@@ -77,7 +77,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   providerId: 'asteam-llmapi',
   baseUrl: 'https://llmapi.ashawk.online/v1',
   apiKey: '',
-  model: 'deepseek-chat',
+  model: 'Auto',
   openAtLogin: false,
   minimizeToTray: true,
   theme: 'dark',

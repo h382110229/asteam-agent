@@ -311,12 +311,13 @@ async function callLLMStream(
 
   if (!response.ok) {
     const errText = await response.text();
-    // 智能容灾降级：若上游接口返回 410 (Gone / 模型下线)，自动无缝降级切换至稳定旗舰引擎 deepseek-chat 重新尝试
+    // 高可用动态故障转移 (Failover Retry)：
+    // 若网关在动态路由调度特定子模型时遇到了临时的 410 (如分发池中某个特定节点退役)，客户端自动无缝向高可用引擎节点重试一次，确保用户的长链任务不被打断
     if (response.status === 410 || errText.includes('end of life') || errText.includes('no longer available')) {
       if (config.model !== 'deepseek-chat') {
         return await callLLMStream({ ...config, model: 'deepseek-chat' }, messages, abortSignal, onDelta);
       }
-      throw new Error(`当前模型服务已下线或无法访问 (HTTP 410)。建议在 [设置 -> AI 模型与供应商] 中切换其他可用模型。详细信息: ${errText}`);
+      throw new Error(`当前模型服务节点暂时不可用 (HTTP 410)。建议在 [设置 -> AI 模型与供应商] 中切换其他可用模型。详细信息: ${errText}`);
     }
     throw new Error(`API Request Failed (${response.status}): ${errText}`);
   }
