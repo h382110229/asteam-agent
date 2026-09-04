@@ -255,15 +255,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 ASTeam Agent (v1.1.2)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已全面预装 <strong>Anthropic & MiniMax 官方深度融合 Office 办公四件套</strong>（公文方案、路演 PPT、Excel 建模、会议纪要），并支持 Skill 本地导入、URL 安装与自定义创建。
+                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已全面支持原生 <strong>Word (.docx) 技术方案</strong>与 <strong>PowerPoint (.pptx) 路演幻灯片</strong>直接落盘生成，并预装 Anthropic & MiniMax 官方融合办公四件套。
               </p>
             </div>
 
             {/* Quick Prompt Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
               {[
-                { title: '公文方案与深度报告撰写', prompt: '请使用【公文方案与深度报告专家】技能，为当前系统撰写一份具备高可读性与架构图的专业技术方案白皮书。' },
-                { title: '路演提案 PPT 大纲与逐字稿', prompt: '请使用【商业提案与演说 PPT 架构师】技能，为我们的产品规划生成一份 10 页高冲击力路演 Slide 大纲与讲者演说逐字稿。' },
+                { title: '一键生成 Word (.docx) 方案白皮书', prompt: '请使用【公文方案与深度报告专家】技能，为我们团队撰写一份严谨规范的技术方案，并直接生成为 Word 文档保存在我的桌面上（文件名：企业级Agent架构白皮书.docx）。' },
+                { title: '一键生成 PPT (.pptx) 演说幻灯片', prompt: '请使用【商业提案与演说 PPT 架构师】技能，为我们生成一份 16:9 比例的商业路演幻灯片，包含核心金句与讲者逐字稿，并直接保存至桌面（文件名：AI智能底座路演汇报.pptx）。' },
                 { title: 'Excel 数据建模与动态公式', prompt: '请使用【表格与数据建模大师】技能，设计一套多维业务数据分析模型，并给出 XLOOKUP 与动态透视公式。' },
                 { title: '智能会议纪要与 RACI 清单', prompt: '请使用【智能会议纪要与行动清单】技能，将近期的沟通重点提炼为核心决议与标准 RACI 任务推进矩阵。' }
               ].map((item, idx) => (

@@ -5,6 +5,7 @@ import os from 'node:os';
 
 import { mcpManager } from './mcp-manager';
 import { skillManager } from './skill-manager';
+import { createWordDocx, createPowerPointPptx } from './office-generator';
 
 export interface AgentConfig {
   baseUrl: string;
@@ -138,7 +139,7 @@ class WorkspaceTools {
     return fs.readFileSync(target, 'utf-8');
   }
 
-  writeFile(relPath: string, content: string): string {
+  async writeFile(relPath: string, content: string): Promise<string> {
     if (!relPath || relPath.trim() === '' || relPath === '.' || relPath === './') {
       throw new Error('writeFile 失败: 必须指定具体的目标文件路径 (filePath 不能为空)');
     }
@@ -146,12 +147,32 @@ class WorkspaceTools {
     if (fs.existsSync(target) && fs.statSync(target).isDirectory()) {
       throw new Error(`writeFile 失败: 目标路径 "${target}" 是一个现有目录，不能直接作为文件覆盖写入。请指定具体文件名（例如 ${path.join(target, 'document.md')}）。`);
     }
+
+    // 智能识别：若目标为 Word 文档扩展名 (.docx)，自动转为标准二进制 docx 文档排版输出
+    if (target.toLowerCase().endsWith('.docx')) {
+      return await createWordDocx({
+        filePath: target,
+        title: path.basename(target, '.docx'),
+        markdownContent: content
+      });
+    }
+
     const dir = path.dirname(target);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(target, content, 'utf-8');
     return `Successfully wrote ${Buffer.byteLength(content, 'utf-8')} bytes to "${target}"`;
+  }
+
+  async generateWordDocx(options: any): Promise<string> {
+    const target = this.resolveSafe(options.filePath || 'document.docx');
+    return await createWordDocx({ ...options, filePath: target });
+  }
+
+  async generatePowerPointPptx(options: any): Promise<string> {
+    const target = this.resolveSafe(options.filePath || 'presentation.pptx');
+    return await createPowerPointPptx({ ...options, filePath: target });
   }
 
   listDirectory(relPath: string = '.'): string {
@@ -474,8 +495,19 @@ ${isHostMode
 \`\`\`
 注意：
 - filePath 路径推荐使用正斜杠 / 或转义反斜杠 \\\\，例如："C:/Users/用户名/Desktop/方案.md"；
-- content 中的换行与双引号请按标准 JSON 规则进行转义（换行使用 \\n，双引号使用 \\"）。
-3. list_directory: 查看目录列表。调用格式：
+- 若 filePath 扩展名为 .docx，系统会自动排版生成标准 Microsoft Word 二进制文档。
+
+3. generate_docx: 生成排版专业精美的标准 Microsoft Word (.docx) 文档。调用格式：
+\`\`\`tool:generate_docx
+{"filePath": "C:/Users/用户名/Desktop/方案白皮书.docx", "title": "方案白皮书标题", "subtitle": "副标题/描述", "markdownContent": "# 一、执行摘要\\n正文...\\n## 二、架构设计\\n..."}
+\`\`\`
+
+4. generate_pptx: 生成现代化 16:9 比例的商业演说 Microsoft PowerPoint (.pptx) 演示文稿（含封面、核心金句、观点列表与讲者演讲逐字稿）。调用格式：
+\`\`\`tool:generate_pptx
+{"filePath": "C:/Users/用户名/Desktop/方案汇报.pptx", "title": "方案演说汇报", "subtitle": "副标题", "slides": [{"title": "现状痛点与突破", "keyTakeaway": "单页核心观点金句", "bullets": ["要点1", "要点2", "要点3"], "speakerNotes": "讲者现场演讲逐字稿..."}]}
+\`\`\`
+
+5. list_directory: 查看目录列表。调用格式：
 \`\`\`tool:list_directory
 {"dirPath": "."}
 \`\`\`
@@ -572,7 +604,34 @@ ${modeInstruction}
           if (!targetPath || targetPath.trim() === '') {
             throw new Error('未识别到有效的文件路径 (filePath 不能为空，请提供目标文件名)');
           }
-          observation = tools.writeFile(targetPath, content);
+          observation = await tools.writeFile(targetPath, content);
+        } else if (toolName === 'generate_docx') {
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          if (!targetPath) {
+            targetPath = path.join(os.homedir(), 'Desktop', `${toolArgs.title || '方案白皮书'}.docx`);
+          }
+          observation = await tools.generateWordDocx({
+            ...toolArgs,
+            filePath: targetPath,
+            markdownContent: toolArgs.markdownContent || toolArgs.content || ''
+          });
+        } else if (toolName === 'generate_pptx') {
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          if (!targetPath) {
+            targetPath = path.join(os.homedir(), 'Desktop', `${toolArgs.title || '演说汇报'}.pptx`);
+          }
+          observation = await tools.generatePowerPointPptx({
+            ...toolArgs,
+            filePath: targetPath
+          });
         } else if (toolName === 'list_directory') {
           observation = tools.listDirectory(toolArgs.dirPath || toolArgs.path || '.');
         } else if (toolName === 'run_terminal_command') {
