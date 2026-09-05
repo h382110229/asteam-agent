@@ -94,6 +94,37 @@ export function abortExecution(sessionId: string): boolean {
   return false;
 }
 
+/**
+ * 获取当前宿主系统真实的桌面目录（自动识别 OneDrive 桌面重定向，并确保目录存在）
+ */
+export function getSystemDesktopDir(): string {
+  const home = os.homedir();
+  const candidates: string[] = [];
+
+  if (process.env.OneDrive) {
+    candidates.push(path.join(process.env.OneDrive, 'Desktop'));
+    candidates.push(path.join(process.env.OneDrive, '桌面'));
+  }
+  candidates.push(path.join(home, 'OneDrive', 'Desktop'));
+  candidates.push(path.join(home, 'OneDrive', '桌面'));
+
+  for (const cand of candidates) {
+    try {
+      if (fs.existsSync(cand)) {
+        return path.normalize(cand);
+      }
+    } catch {}
+  }
+
+  const defaultDesktop = path.join(home, 'Desktop');
+  if (!fs.existsSync(defaultDesktop)) {
+    try {
+      fs.mkdirSync(defaultDesktop, { recursive: true });
+    } catch {}
+  }
+  return path.normalize(defaultDesktop);
+}
+
 // 1. Workspace Native Tools
 class WorkspaceTools {
   constructor(private workspacePath: string, private isHostMode: boolean = false) {}
@@ -103,17 +134,51 @@ class WorkspaceTools {
 
     let target = relOrAbsPath.trim();
 
-    // 智能纠正模型拟造的“桌面”路径与波浪号：
-    // 如 "C:/Users/桌面/...", "C:\Users\桌面\...", "~/Desktop/...", "桌面/..."
-    const desktopDir = path.normalize(path.join(os.homedir(), 'Desktop'));
-    const userHome = path.normalize(os.homedir());
+    // 1. 展开 Windows/Unix 常见环境变量，如 %USERPROFILE%、%APPDATA%、$HOME
+    target = target.replace(/%USERPROFILE%/gi, os.homedir());
+    target = target.replace(/%APPDATA%/gi, process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'));
+    target = target.replace(/\$HOME/g, os.homedir());
 
-    if (/^(?:[a-zA-Z]:[\\/])?(?:Users[\\/])?桌面[\\/]/i.test(target)) {
-      target = target.replace(/^(?:[a-zA-Z]:[\\/])?(?:Users[\\/])?桌面[\\/]/i, desktopDir + path.sep);
-    } else if (/^~[\\/]Desktop[\\/]/i.test(target)) {
-      target = target.replace(/^~[\\/]Desktop[\\/]/i, desktopDir + path.sep);
-    } else if (/^(?:桌面|Desktop)[\\/]/i.test(target)) {
-      target = target.replace(/^(?:桌面|Desktop)[\\/]/i, desktopDir + path.sep);
+    const desktopDir = getSystemDesktopDir();
+    const userHome = path.normalize(os.homedir());
+    let currentUsername = 'user';
+    try {
+      currentUsername = os.userInfo().username;
+    } catch {}
+
+    // 2. 核心智能纠偏：纠正模型可能臆测的虚假用户名（如 C:\Users\Admin\Desktop\..., C:/Users/Administrator/..., C:/Users/User/...）
+    // 若模型臆想了其他用户名（非当前真实登录用户名），自动纠偏为真实的用户桌面或用户主目录
+    const fakeUserDesktopRegex = /^(?:[a-zA-Z]:[\\/])Users[\\/](?!Desktop|桌面|Public|Default\b)([^\\/]+)[\\/](Desktop|桌面)([\\/].*)?$/i;
+    const fakeDesktopMatch = target.match(fakeUserDesktopRegex);
+    if (fakeDesktopMatch) {
+      const guessedUser = fakeDesktopMatch[1];
+      if (guessedUser.toLowerCase() !== currentUsername.toLowerCase()) {
+        const subPath = fakeDesktopMatch[3] ? fakeDesktopMatch[3].replace(/^[\\/]+/, '') : '';
+        target = path.join(desktopDir, subPath);
+      }
+    }
+
+    const fakeUserHomeRegex = /^(?:[a-zA-Z]:[\\/])Users[\\/](?!Desktop|桌面|Public|Default\b)([^\\/]+)([\\/].*)?$/i;
+    const fakeHomeMatch = target.match(fakeUserHomeRegex);
+    if (fakeHomeMatch) {
+      const guessedUser = fakeHomeMatch[1];
+      if (
+        guessedUser.toLowerCase() !== currentUsername.toLowerCase() &&
+        ['admin', 'administrator', 'user', 'test', 'defaultuser0'].includes(guessedUser.toLowerCase())
+      ) {
+        const subPath = fakeHomeMatch[2] ? fakeHomeMatch[2].replace(/^[\\/]+/, '') : '';
+        target = path.join(userHome, subPath);
+      }
+    }
+
+    // 3. 智能纠正波浪号与通用别名路径：
+    // 如 "C:/Users/桌面/...", "桌面/...", "Desktop/...", "~/Desktop/...", "~/"
+    if (/^(?:[a-zA-Z]:[\\/])?(?:Users[\\/])?桌面(?:[\\/]|$)/i.test(target)) {
+      target = target.replace(/^(?:[a-zA-Z]:[\\/])?(?:Users[\\/])?桌面[\\/]?/i, desktopDir + path.sep);
+    } else if (/^~[\\/]Desktop(?:[\\/]|$)/i.test(target)) {
+      target = target.replace(/^~[\\/]Desktop[\\/]?/i, desktopDir + path.sep);
+    } else if (/^(?:桌面|Desktop)(?:[\\/]|$)/i.test(target)) {
+      target = target.replace(/^(?:桌面|Desktop)[\\/]?/i, desktopDir + path.sep);
     } else if (/^~[\\/]/.test(target)) {
       target = target.replace(/^~[\\/]/, userHome + path.sep);
     }
@@ -181,7 +246,8 @@ class WorkspaceTools {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(target, content, 'utf-8');
-    return `Successfully wrote ${Buffer.byteLength(content, 'utf-8')} bytes to "${target}"`;
+    const stats = fs.statSync(target);
+    return `成功写入并持久化文件: "${target}" (${stats.size} 字节，已校验路径真实存在)`;
   }
 
   async generateWordDocx(options: any): Promise<string> {
@@ -500,15 +566,36 @@ export async function runHarnessAgent(
       modeInstruction = '\n\n【安全审批模式 (Safe Approval)】\n执行高危或删除类命令前，必须在思考过程中明确提示用户潜在影响。';
     }
 
+    const currentUsername = (() => {
+      try {
+        return os.userInfo().username;
+      } catch {
+        return 'user';
+      }
+    })();
+    const userHome = path.normalize(os.homedir());
+    const desktopDir = getSystemDesktopDir();
+    const desktopPosix = desktopDir.replace(/\\/g, '/');
+
     const systemPrompt = `你是由 ASteam 打造的桌面智能工程师 Agent，内核原生深度封装 deepseek-harness 规划与工具执行范式。
+
+【宿主系统与本地真实环境（真实有效，严禁臆测假用户名）】
+- 操作系统平台：${process.platform === 'win32' ? 'Windows' : process.platform} (${os.release()})
+- 当前系统登录用户名：${currentUsername}
+- 用户真实主目录：${userHome}
+- 用户真实桌面目录：${desktopDir}
+- 路径调用规范与建议：
+  * 保存文件到桌面时，可直接使用绝对路径 "${desktopPosix}/文件名.docx"；
+  * 也支持直接使用快捷别名 "~/Desktop/文件名.docx" 或 "Desktop/文件名.docx"，系统底层会自动精确映射到真实桌面；
+  * 严禁凭空猜测臆想非当前用户名的路径（如 "Admin"、"Administrator"、"User" 等）！
+
 ${isHostMode
-  ? `【当前运行环境：Windows 宿主系统免项目模式】
+  ? `【当前运行模式：Windows 宿主系统免项目模式】
 - 默认工作目录：${effectiveWorkspace}
-- 用户主目录：${os.homedir()}
-- 用户桌面目录：${path.join(os.homedir(), 'Desktop')}
 你拥有对本机的自主执行能力，可以帮用户生成/编辑文档报告、运行系统命令诊断环境、批量处理文件以及调用 MCP 工具。`
-  : `【当前运行环境：本地工作区项目】
-- 项目目录：${config.workspacePath}`
+  : `【当前运行模式：本地工作区项目】
+- 项目目录：${config.workspacePath}
+若用户需求是生成方案、报告到桌面，请直接使用上述提供的桌面绝对路径或 "~/Desktop/..."；若需求是修改项目代码，使用相对项目路径。`
 }
 
 你拥有以下基础工具能力：
@@ -518,20 +605,20 @@ ${isHostMode
 \`\`\`
 2. write_file: 写入或生成文档、代码、报告（支持相对路径与绝对路径，会自动创建父目录）。调用格式：
 \`\`\`tool:write_file
-{"filePath": "C:/Users/.../Desktop/document.md", "content": "文档正文..."}
+{"filePath": "~/Desktop/document.md", "content": "文档正文..."}
 \`\`\`
 注意：
-- filePath 路径推荐使用正斜杠 / 或转义反斜杠 \\\\，例如："C:/Users/用户名/Desktop/方案.md"；
+- filePath 路径推荐使用正斜杠 / 或转义反斜杠 \\\\；
 - 若 filePath 扩展名为 .docx，系统会自动排版生成标准 Microsoft Word 二进制文档。
 
 3. generate_docx: 生成排版专业精美的标准 Microsoft Word (.docx) 文档。调用格式：
 \`\`\`tool:generate_docx
-{"filePath": "C:/Users/用户名/Desktop/方案白皮书.docx", "title": "方案白皮书标题", "subtitle": "副标题/描述", "markdownContent": "# 一、执行摘要\\n正文...\\n## 二、架构设计\\n..."}
+{"filePath": "~/Desktop/方案白皮书.docx", "title": "方案白皮书标题", "subtitle": "副标题/描述", "markdownContent": "# 一、执行摘要\\n正文...\\n## 二、架构设计\\n..."}
 \`\`\`
 
 4. generate_pptx: 生成现代化 16:9 比例的商业演说 Microsoft PowerPoint (.pptx) 演示文稿（含封面、核心金句、观点列表与讲者演讲逐字稿）。调用格式：
 \`\`\`tool:generate_pptx
-{"filePath": "C:/Users/用户名/Desktop/方案汇报.pptx", "title": "方案演说汇报", "subtitle": "副标题", "slides": [{"title": "现状痛点与突破", "keyTakeaway": "单页核心观点金句", "bullets": ["要点1", "要点2", "要点3"], "speakerNotes": "讲者现场演讲逐字稿..."}]}
+{"filePath": "~/Desktop/方案汇报.pptx", "title": "方案演说汇报", "subtitle": "副标题", "slides": [{"title": "现状痛点与突破", "keyTakeaway": "单页核心观点金句", "bullets": ["要点1", "要点2", "要点3"], "speakerNotes": "讲者现场演讲逐字稿..."}]}
 \`\`\`
 
 5. list_directory: 查看目录列表。调用格式：
@@ -651,7 +738,7 @@ ${modeInstruction}
             targetPath = secondary.filePath || secondary.path || secondary.file;
           }
           if (!targetPath) {
-            targetPath = path.join(os.homedir(), 'Desktop', `${toolArgs.title || '方案白皮书'}.docx`);
+            targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '方案白皮书'}.docx`);
           }
           observation = await tools.generateWordDocx({
             ...toolArgs,
@@ -665,7 +752,7 @@ ${modeInstruction}
             targetPath = secondary.filePath || secondary.path || secondary.file;
           }
           if (!targetPath) {
-            targetPath = path.join(os.homedir(), 'Desktop', `${toolArgs.title || '演说汇报'}.pptx`);
+            targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '演说汇报'}.pptx`);
           }
           observation = await tools.generatePowerPointPptx({
             ...toolArgs,
