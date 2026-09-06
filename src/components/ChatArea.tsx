@@ -159,6 +159,23 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     return null;
   })();
 
+  // 实时捕获当前正在执行的步骤，用于顶部常驻任务进程看板
+  const activeRunningStep = (() => {
+    if (!isRunning) return null;
+    if (lastMsg?.role === 'assistant' && lastMsg.steps) {
+      const running = lastMsg.steps.find(s => s.status === 'running');
+      if (running) return running;
+      const pending = lastMsg.steps.find(s => s.status === 'pending');
+      if (pending) return pending;
+    }
+    return null;
+  })();
+
+  const totalStepsCount = (lastMsg?.role === 'assistant' && lastMsg.steps) ? lastMsg.steps.length : 0;
+  const completedStepsCount = (lastMsg?.role === 'assistant' && lastMsg.steps)
+    ? lastMsg.steps.filter(s => s.status === 'completed').length
+    : 0;
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -342,6 +359,42 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         className="hidden"
       />
 
+      {/* 实时置顶任务进程动态看板：当 Agent 正在规划或执行时常驻顶部，保证信息流向下滚屏时进程始终一目了然 */}
+      {isRunning && (
+        <div className="z-30 flex items-center justify-between border-b border-[var(--primary)]/20 bg-[var(--card)]/95 px-4 py-2 text-xs shadow-xs backdrop-blur-md select-none animate-in slide-in-from-top-2 duration-150 shrink-0">
+          <div className="flex items-center space-x-2.5 min-w-0">
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--primary)]"></span>
+            </span>
+            <span className="font-semibold text-xs text-[var(--foreground)] truncate">
+              {activeRunningStep ? activeRunningStep.title : 'Agent 正在分析需求并自主调度中...'}
+            </span>
+            {activeRunningStep?.tool && (
+              <span className="rounded bg-[var(--muted)] border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--muted-foreground)] shrink-0">
+                {activeRunningStep.tool}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-3 shrink-0">
+            {totalStepsCount > 0 && (
+              <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                {completedStepsCount} / {totalStepsCount} 步骤完成
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onStopAgent}
+              className="flex items-center space-x-1 rounded px-2 py-0.5 text-[11px] text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors cursor-pointer"
+            >
+              <Square className="h-3 w-3 fill-current" />
+              <span>停止</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Messages Stream */}
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 space-y-6 select-text">
         {messages.length === 0 ? (
@@ -459,30 +512,6 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   />
                 )}
 
-                {/* Multimodal Artifact Preview Banner if assistant generated HTML / Mermaid / SVG */}
-                {msg.role === 'assistant' && (() => {
-                  const artifact = extractPreviewableArtifact(msg.content);
-                  if (!artifact || !onOpenPreview) return null;
-                  return (
-                    <div className="flex items-center justify-between rounded-xl border border-[var(--primary)]/30 bg-[var(--primary)]/10 px-3 py-2 my-1 shadow-2xs">
-                      <div className="flex items-center space-x-2">
-                        <Eye className="h-4 w-4 text-[var(--primary)] shrink-0" />
-                        <span className="text-xs font-semibold text-[var(--foreground)]">
-                          已生成【{artifact.title}】
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => onOpenPreview(artifact)}
-                        className="flex items-center space-x-1 rounded-lg bg-[var(--primary)] text-white px-2.5 py-1 text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>实时预览</span>
-                      </button>
-                    </div>
-                  );
-                })()}
-
                 {/* Main Message Content with Intelligent Error Card handling */}
                 {(() => {
                   const errorMarker = '⚠️ **执行遇到错误**:';
@@ -556,6 +585,37 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           </div>
                         </div>
                       </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Multimodal Artifact Preview Card (置于结论最下方，突出交付物) */}
+                {msg.role === 'assistant' && (() => {
+                  const artifact = extractPreviewableArtifact(msg.content);
+                  if (!artifact || !onOpenPreview) return null;
+                  return (
+                    <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/5 p-3 shadow-xs hover:border-[var(--primary)] transition-all">
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--primary)]/15 text-[var(--primary)]">
+                          <Eye className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold text-[var(--foreground)] truncate">
+                            交付物就绪：{artifact.title}
+                          </div>
+                          <div className="text-[11px] text-[var(--muted-foreground)]">
+                            类型: {artifact.type.toUpperCase()} · 点击即可在独立分栏中查看渲染效果与图表
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenPreview(artifact)}
+                        className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-xs shrink-0 ml-2"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>打开实时预览</span>
+                      </button>
                     </div>
                   );
                 })()}
