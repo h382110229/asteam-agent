@@ -31,6 +31,9 @@ export interface ElectronAPI {
   // App & System settings
   getOpenAtLogin: () => Promise<boolean>;
   setOpenAtLogin: (openAtLogin: boolean) => Promise<boolean>;
+
+  // Multimodal Preview Pop-out
+  popoutPreview: (data: { type: string; title?: string; content: string }) => Promise<boolean>;
 }
 
 declare global {

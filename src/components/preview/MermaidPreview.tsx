@@ -10,7 +10,8 @@ import {
   Loader2,
   Code,
   Wand2,
-  Play
+  Play,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface MermaidPreviewProps {
@@ -150,6 +151,69 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
     } catch {}
   };
 
+  const [copiedImage, setCopiedImage] = useState(false);
+
+  const getSvgAsCanvas = async (scale = 2): Promise<HTMLCanvasElement | null> => {
+    if (!svgCode) return null;
+    return new Promise((resolve) => {
+      const img = new Image();
+      const svgBlob = new Blob([svgCode], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = (img.width || 900) * scale;
+        canvas.height = (img.height || 600) * scale;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#0f172a';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          resolve(canvas);
+        } else {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    });
+  };
+
+  const handleDownloadPng = async () => {
+    const canvas = await getSvgAsCanvas(2);
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title || 'architecture'}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
+
+  const handleCopyImage = async () => {
+    try {
+      const canvas = await getSvgAsCanvas(2);
+      if (!canvas) return;
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+        setCopiedImage(true);
+        setTimeout(() => setCopiedImage(false), 2000);
+      }, 'image/png');
+    } catch (e) {
+      console.error('Failed to copy image to clipboard:', e);
+    }
+  };
+
   const handleDownloadSvg = () => {
     if (!svgCode) return;
     const blob = new Blob([svgCode], { type: 'image/svg+xml' });
@@ -230,6 +294,28 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
             className="rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-[var(--primary)]" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCopyImage}
+            disabled={!svgCode}
+            title="一键复制高清 PNG 图片到剪贴板 (可直接粘贴至 PPT/Word/微信)"
+            className="flex items-center space-x-1 rounded bg-[var(--muted)] hover:bg-[var(--border)] text-[var(--foreground)] px-2 py-1 text-[11px] font-medium disabled:opacity-40 transition-colors cursor-pointer"
+          >
+            {copiedImage ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <ImageIcon className="h-3.5 w-3.5" />}
+            <span>{copiedImage ? '已复制图片' : '复制图片'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadPng}
+            disabled={!svgCode}
+            title="导出为 2x 高清 PNG 图片"
+            className="flex items-center space-x-1 rounded bg-[var(--muted)] hover:bg-[var(--border)] text-[var(--foreground)] px-2 py-1 text-[11px] font-medium disabled:opacity-40 transition-colors cursor-pointer"
+          >
+            <Download className="h-3 w-3" />
+            <span>导出 PNG</span>
           </button>
 
           <button

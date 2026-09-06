@@ -264,6 +264,37 @@ function setupIPC() {
     return skillManager.deleteCustomSkill(skillId);
   });
 
+  // Multimodal Preview Pop-out Window IPC
+  ipcMain.handle('preview:popout', async (_event, { type, title, content }: { type: string; title?: string; content: string }) => {
+    const popoutWin = new BrowserWindow({
+      width: 1060,
+      height: 740,
+      minWidth: 480,
+      minHeight: 360,
+      title: `${title || 'ASTeam 产物实时预览'} - ASTeam Agent`,
+      autoHideMenuBar: true,
+      backgroundColor: '#0f172a',
+      webPreferences: {
+        sandbox: false
+      }
+    });
+
+    if (type === 'html') {
+      const wrapped = content.includes('<html')
+        ? content
+        : `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title || 'HTML 预览'}</title><script src="https://cdn.tailwindcss.com"></script></head><body>${content}</body></html>`;
+      popoutWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(wrapped)}`);
+    } else if (type === 'svg') {
+      const htmlWrapper = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title || 'SVG 预览'}</title><style>body{margin:0;padding:32px;background:#0f172a;display:flex;justify-content:center;align-items:center;min-height:100vh;}svg{max-width:100%;height:auto;filter:drop-shadow(0 10px 25px rgba(0,0,0,0.5));}</style></head><body>${content}</body></html>`;
+      popoutWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlWrapper)}`);
+    } else if (type === 'mermaid') {
+      const htmlWrapper = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title || 'Mermaid 架构拓扑'}</title><script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script><style>body{margin:0;padding:32px;background:#0f172a;color:#e2e8f0;display:flex;justify-content:center;}pre.mermaid{background:transparent;}</style></head><body><pre class="mermaid">${content}</pre><script>mermaid.initialize({theme:'dark',startOnLoad:true});</script></body></html>`;
+      popoutWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlWrapper)}`);
+    }
+
+    return true;
+  });
+
   // Agent Harness IPC
   ipcMain.handle('agent:start', async (_event, { sessionId, config, history }) => {
     if (!mainWindow) return;

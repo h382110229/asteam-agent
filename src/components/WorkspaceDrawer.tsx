@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   GitBranch,
@@ -14,7 +14,8 @@ import {
   Terminal,
   Maximize2,
   Minimize2,
-  Sparkles
+  Sparkles,
+  ExternalLink
 } from 'lucide-react';
 import { GitStatusSummary, GitFileStatus } from '../types/project';
 import { HtmlPreview } from './preview/HtmlPreview';
@@ -57,6 +58,64 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 }) => {
   const [currentTab, setCurrentTab] = useState<WorkspaceDrawerTab>(activeTab);
   const [isFullScreen, setIsFullScreen] = useState(false);
+
+  // Draggable Drawer Width states
+  const [drawerWidth, setDrawerWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('asteam_workbench_width');
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!isNaN(parsed) && parsed >= 460 && parsed <= window.innerWidth - 200) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return Math.max(680, Math.min(1000, Math.round(window.innerWidth * 0.55)));
+  });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(0);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+    dragStartXRef.current = e.clientX;
+    dragStartWidthRef.current = drawerWidth;
+  };
+
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const delta = dragStartXRef.current - e.clientX;
+      const minW = 460;
+      const maxW = Math.max(minW, window.innerWidth - 240);
+      const newWidth = Math.min(maxW, Math.max(minW, dragStartWidthRef.current + delta));
+      setDrawerWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      try {
+        localStorage.setItem('asteam_workbench_width', drawerWidth.toString());
+      } catch {}
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, drawerWidth]);
+
+  const handleResetWidth = () => {
+    const defaultW = Math.max(680, Math.min(1000, Math.round(window.innerWidth * 0.55)));
+    setDrawerWidth(defaultW);
+    try {
+      localStorage.setItem('asteam_workbench_width', defaultW.toString());
+    } catch {}
+  };
 
   // Git Diff states
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -131,9 +190,31 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-2xs animate-in fade-in duration-150 select-none">
-      <div className={`flex h-full flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-2xl animate-in slide-in-from-right duration-200 transition-all ${
-        isFullScreen ? 'w-full' : 'w-full max-w-4xl'
-      }`}>
+      <div
+        style={{ width: isFullScreen ? '100%' : `${drawerWidth}px` }}
+        className={`relative flex h-full flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-2xl animate-in slide-in-from-right duration-150 transition-[width] ${
+          isDragging ? 'transition-none select-none' : ''
+        }`}
+      >
+        {/* Left Resizer Drag Handle (双击复位，按住自由拉伸) */}
+        {!isFullScreen && (
+          <div
+            onMouseDown={handleMouseDown}
+            onDoubleClick={handleResetWidth}
+            title="按住鼠标拖拽调整工作台宽度，双击快速恢复默认"
+            className="absolute -left-1.5 top-0 bottom-0 w-3 cursor-col-resize z-40 group flex items-center justify-center select-none"
+          >
+            <div className={`w-1 h-12 rounded-full transition-all ${
+              isDragging ? 'bg-[var(--primary)] h-20 shadow-md' : 'bg-[var(--border)] group-hover:bg-[var(--primary)] group-hover:h-16'
+            }`} />
+          </div>
+        )}
+
+        {/* Dragging Overlay (防止拖拽时光标进入 iframe 导致断触) */}
+        {isDragging && (
+          <div className="absolute inset-0 z-50 cursor-col-resize" />
+        )}
+
         {/* Top Header with Tab Switcher */}
         <div className="flex h-12 items-center justify-between border-b border-[var(--border)] px-4 bg-[var(--background)]/80">
           <div className="flex items-center space-x-1">
@@ -188,6 +269,24 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
           {/* Right Action Icons */}
           <div className="flex items-center space-x-1">
+            {/* Pop-out button if previewData exists */}
+            {currentTab === 'preview' && previewData && window.electronAPI?.popoutPreview && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.electronAPI.popoutPreview({
+                    type: previewData.type,
+                    title: previewData.title,
+                    content: previewData.content
+                  });
+                }}
+                title="弹出为独立系统子窗口 (支持多屏协同)"
+                className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setIsFullScreen(!isFullScreen)}

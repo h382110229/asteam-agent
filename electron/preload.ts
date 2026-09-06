@@ -33,6 +33,9 @@ export interface ElectronAPI {
   // App & System settings
   getOpenAtLogin: () => Promise<boolean>;
   setOpenAtLogin: (openAtLogin: boolean) => Promise<boolean>;
+
+  // Multimodal Preview Pop-out
+  popoutPreview: (data: { type: string; title?: string; content: string }) => Promise<boolean>;
 }
 
 const api: ElectronAPI = {
@@ -67,7 +70,8 @@ const api: ElectronAPI = {
   },
 
   getOpenAtLogin: () => ipcRenderer.invoke('app:getOpenAtLogin'),
-  setOpenAtLogin: (openAtLogin) => ipcRenderer.invoke('app:setOpenAtLogin', openAtLogin)
+  setOpenAtLogin: (openAtLogin) => ipcRenderer.invoke('app:setOpenAtLogin', openAtLogin),
+  popoutPreview: (data) => ipcRenderer.invoke('preview:popout', data)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

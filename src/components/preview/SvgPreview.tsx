@@ -7,7 +7,8 @@ import {
   Copy,
   Check,
   Grid,
-  Code
+  Code,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface SvgPreviewProps {
@@ -20,6 +21,7 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
   const [showGrid, setShowGrid] = useState(true);
   const [showCode, setShowCode] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [copiedImage, setCopiedImage] = useState(false);
 
   const handleCopy = async () => {
     try {
@@ -27,6 +29,70 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
+  };
+
+  const getSvgAsCanvas = async (scale = 2): Promise<HTMLCanvasElement | null> => {
+    if (!content) return null;
+    return new Promise((resolve) => {
+      const img = new Image();
+      const svgBlob = new Blob([content], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+      img.onload = () => {
+        const width = img.naturalWidth || img.width || 800;
+        const height = img.naturalHeight || img.height || 600;
+        const canvas = document.createElement('canvas');
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const isDark = document.documentElement.classList.contains('dark');
+          ctx.fillStyle = isDark ? '#0f172a' : '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          resolve(canvas);
+        } else {
+          URL.revokeObjectURL(url);
+          resolve(null);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(null);
+      };
+      img.src = url;
+    });
+  };
+
+  const handleDownloadPng = async () => {
+    const canvas = await getSvgAsCanvas(2);
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title || 'graphic'}.png`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
+
+  const handleCopyImage = async () => {
+    try {
+      const canvas = await getSvgAsCanvas(2);
+      if (!canvas) return;
+      canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+        setCopiedImage(true);
+        setTimeout(() => setCopiedImage(false), 2000);
+      }, 'image/png');
+    } catch (e) {
+      console.error('Failed to copy image to clipboard:', e);
+    }
   };
 
   const handleDownload = () => {
@@ -47,7 +113,7 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
           <span className="font-semibold text-xs text-[var(--foreground)]">
             {title || 'SVG 矢量图像预览'}
           </span>
-          <span className="rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold">
+          <span className="rounded bg-amber-500/20 text-amber-500 border border-amber-500/30 px-1.5 py-0.5 text-[9px] font-bold">
             SVG
           </span>
         </div>
@@ -115,12 +181,36 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
 
           <button
             type="button"
+            onClick={handleCopyImage}
+            title="复制为 PNG 图片 (直接粘贴至 PPT/Word/微信)"
+            className={`rounded p-1.5 transition-colors flex items-center space-x-1 ${
+              copiedImage ? 'text-emerald-500 bg-emerald-500/10' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            {copiedImage ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <ImageIcon className="h-3.5 w-3.5" />}
+            <span className="text-[11px]">{copiedImage ? '已复制图片' : '复制图片'}</span>
+          </button>
+
+          <div className="h-4 w-px bg-[var(--border)] mx-1" />
+
+          <button
+            type="button"
             onClick={handleDownload}
-            title="下载 SVG 文件"
+            title="下载 SVG 矢量文件"
+            className="flex items-center space-x-1 rounded border border-[var(--border)] px-2 py-1 text-[11px] font-medium text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+          >
+            <Download className="h-3 w-3" />
+            <span>SVG</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadPng}
+            title="导出 2x 高清 PNG 图片"
             className="flex items-center space-x-1 rounded bg-[var(--primary)] text-white px-2 py-1 text-[11px] font-medium hover:opacity-90 transition-opacity"
           >
             <Download className="h-3 w-3" />
-            <span>下载</span>
+            <span>导出 PNG</span>
           </button>
         </div>
       </div>
@@ -128,11 +218,11 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
       {/* Main Canvas */}
       <div className={`flex-1 overflow-auto p-6 flex items-center justify-center relative ${
         showGrid
-          ? 'bg-[radial-gradient(#334155_1px,transparent_1px)] bg-[size:16px_16px] bg-[#090d16]'
-          : 'bg-[#0a0e17]'
+          ? 'bg-[radial-gradient(var(--border)_1px,transparent_1px)] bg-[size:16px_16px] bg-[var(--background)]'
+          : 'bg-[var(--background)]'
       }`}>
         {showCode ? (
-          <div className="w-full h-full rounded-lg bg-[#0c1017] border border-[var(--border)] p-4 overflow-auto font-mono text-xs text-slate-200">
+          <div className="w-full h-full rounded-lg bg-[var(--card)] border border-[var(--border)] p-4 overflow-auto font-mono text-xs text-[var(--foreground)]">
             <pre className="whitespace-pre-wrap">{content}</pre>
           </div>
         ) : (

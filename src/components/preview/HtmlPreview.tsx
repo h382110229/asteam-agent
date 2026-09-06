@@ -9,7 +9,8 @@ import {
   ExternalLink,
   Copy,
   Check,
-  Code
+  Code,
+  Download
 } from 'lucide-react';
 
 interface HtmlPreviewProps {
@@ -32,6 +33,20 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title }) => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {}
+  };
+
+  const handleDownloadHtml = () => {
+    try {
+      const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = title?.endsWith('.html') ? title : `${title || 'page'}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Failed to download HTML:', e);
+    }
   };
 
   const handleOpenExternal = () => {
@@ -159,6 +174,15 @@ ${content}
             className="rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleDownloadHtml}
+            title="另存为本地 HTML 文件"
+            className="rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+          >
+            <Download className="h-3.5 w-3.5" />
           </button>
 
           <button
