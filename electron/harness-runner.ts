@@ -41,6 +41,13 @@ export interface InteractiveQuestionData {
   multiSelect?: boolean;
 }
 
+export interface TerminalDataEvent {
+  sessionId: string;
+  stepId?: string;
+  chunk: string;
+  stream: 'stdout' | 'stderr' | 'stdin';
+}
+
 export interface AgentEventCallbacks {
   onToken: (token: string, type?: 'content' | 'thought') => void;
   onPlan: (steps: AgentStep[]) => void;
@@ -48,11 +55,14 @@ export interface AgentEventCallbacks {
   onError: (error: string) => void;
   onDone: (summary: string) => void;
   onQuestion?: (data: InteractiveQuestionData) => void;
+  onTerminalData?: (data: TerminalDataEvent) => void;
 }
 
 interface ActiveExecution {
   abortController: AbortController;
   currentProcess?: ChildProcess;
+  currentStepId?: string;
+  callbacks?: AgentEventCallbacks;
 }
 
 const activeExecutions = new Map<string, ActiveExecution>();
@@ -64,6 +74,28 @@ export function submitUserResponse(sessionId: string, response: string): boolean
     resolver(response);
     pendingUserResponses.delete(sessionId);
     return true;
+  }
+  return false;
+}
+
+export function submitTerminalInput(sessionId: string, input: string): boolean {
+  const active = activeExecutions.get(sessionId);
+  if (active && active.currentProcess && !active.currentProcess.killed && active.currentProcess.stdin) {
+    try {
+      const toSend = input.endsWith('\n') ? input : input + '\n';
+      active.currentProcess.stdin.write(toSend);
+      // Echo input to frontend terminal for immediate feedback
+      active.callbacks?.onTerminalData?.({
+        sessionId,
+        stepId: active.currentStepId,
+        chunk: `\x1b[36m> ${input}\x1b[0m\n`,
+        stream: 'stdin'
+      });
+      return true;
+    } catch (e) {
+      console.error('Failed to write to terminal stdin:', e);
+      return false;
+    }
   }
   return false;
 }
@@ -279,7 +311,9 @@ class WorkspaceTools {
   runTerminalCommand(
     command: string,
     sessionId: string,
-    timeoutMs: number = 120000
+    timeoutMs: number = 120000,
+    callbacks?: AgentEventCallbacks,
+    stepId?: string
   ): Promise<string> {
     return new Promise((resolve) => {
       let output = '';
@@ -287,18 +321,31 @@ class WorkspaceTools {
       let isSettled = false;
 
       const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-      const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', command] : ['-c', command];
+      // 在 Windows 下强制设置控制台输出编码为 UTF-8，以防止中文字符乱码
+      const wrappedCommand = process.platform === 'win32'
+        ? `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+        : command;
+      const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', wrappedCommand] : ['-c', wrappedCommand];
 
       const child = spawn(shell, shellArgs, {
         cwd: this.workspacePath,
-        env: { ...process.env, CI: 'true' },
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
         windowsHide: true
       });
 
       const active = activeExecutions.get(sessionId);
       if (active) {
         active.currentProcess = child;
+        active.currentStepId = stepId;
       }
+
+      // 实时向前端终端广播命令起始行
+      callbacks?.onTerminalData?.({
+        sessionId,
+        stepId,
+        chunk: `\x1b[33m$ ${command}\x1b[0m\n`,
+        stream: 'stdout'
+      });
 
       const timer = setTimeout(() => {
         if (!isSettled) {
@@ -310,27 +357,52 @@ class WorkspaceTools {
               child.kill('SIGKILL');
             }
           } catch {}
+          const timeoutNotice = `\n\x1b[31m[Error: Command timed out after ${timeoutMs / 1000} seconds]\x1b[0m\n`;
+          callbacks?.onTerminalData?.({
+            sessionId,
+            stepId,
+            chunk: timeoutNotice,
+            stream: 'stderr'
+          });
           resolve(`[Error: Command timed out after ${timeoutMs / 1000} seconds]\n` + output);
         }
       }, timeoutMs);
 
       child.stdout.on('data', (data) => {
-        const str = data.toString();
+        const str = data.toString('utf-8');
         output += str;
         if (output.length > 50000) {
           output = output.slice(-50000);
         }
+        callbacks?.onTerminalData?.({
+          sessionId,
+          stepId,
+          chunk: str,
+          stream: 'stdout'
+        });
       });
 
       child.stderr.on('data', (data) => {
-        const str = data.toString();
+        const str = data.toString('utf-8');
         errorOutput += str;
+        callbacks?.onTerminalData?.({
+          sessionId,
+          stepId,
+          chunk: str,
+          stream: 'stderr'
+        });
       });
 
       child.on('error', (err) => {
         if (!isSettled) {
           isSettled = true;
           clearTimeout(timer);
+          callbacks?.onTerminalData?.({
+            sessionId,
+            stepId,
+            chunk: `\n\x1b[31m[Process Error: ${err.message}]\x1b[0m\n`,
+            stream: 'stderr'
+          });
           resolve(`[Process Error: ${err.message}]\n` + output);
         }
       });
@@ -339,6 +411,16 @@ class WorkspaceTools {
         if (!isSettled) {
           isSettled = true;
           clearTimeout(timer);
+          if (active && active.currentProcess === child) {
+            active.currentProcess = undefined;
+          }
+          const exitNotice = `\n\x1b[90m(Process exited with code ${code})\x1b[0m\n`;
+          callbacks?.onTerminalData?.({
+            sessionId,
+            stepId,
+            chunk: exitNotice,
+            stream: code === 0 ? 'stdout' : 'stderr'
+          });
           const totalOut = output + (errorOutput ? `\n[STDERR]:\n${errorOutput}` : '');
           resolve(`(exit code ${code})\n${totalOut || '(no output)'}`);
         }
@@ -531,7 +613,7 @@ export async function runHarnessAgent(
   callbacks: AgentEventCallbacks
 ) {
   const abortController = new AbortController();
-  activeExecutions.set(sessionId, { abortController });
+  activeExecutions.set(sessionId, { abortController, callbacks });
 
   try {
     const hasWorkspace = !!(config.workspacePath && fs.existsSync(config.workspacePath));
@@ -761,7 +843,7 @@ ${modeInstruction}
         } else if (toolName === 'list_directory') {
           observation = tools.listDirectory(toolArgs.dirPath || toolArgs.path || '.');
         } else if (toolName === 'run_terminal_command') {
-          observation = await tools.runTerminalCommand(toolArgs.command || '', sessionId, 120000);
+          observation = await tools.runTerminalCommand(toolArgs.command || '', sessionId, 120000, callbacks, activeStep?.id);
         } else if (toolName === 'ask_user_question') {
           const qId = `q-${Date.now()}`;
           const qData: InteractiveQuestionData = {

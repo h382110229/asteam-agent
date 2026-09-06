@@ -15,11 +15,14 @@ import {
   X,
   FileText,
   FileCode,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Eye,
+  Terminal
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
 import { ExecutionMode } from '../types/project';
+import { PreviewData } from './WorkspaceDrawer';
 
 export interface FileAttachment {
   name: string;
@@ -51,15 +54,65 @@ interface ChatAreaProps {
   currentModel: string;
   providerName: string;
   onOpenGitDiff?: () => void;
+  onOpenPreview?: (data: PreviewData) => void;
+  onOpenTerminal?: () => void;
+  activeSessionId?: string;
+  terminalOutputs?: Record<string, string>;
 }
 
 const SLASH_COMMANDS = [
   { cmd: '/plan', title: '深度任务规划 (Plan)', desc: '分析需求并生成分步执行计划，不进行破坏性修改' },
+  { cmd: '/preview', title: '多模态产物实时预览', desc: '在右侧工作台开启网页/架构图/SVG实时预览' },
+  { cmd: '/diff', title: '查看 Git 变更 Diff', desc: '唤起右侧 Git 代码变更对比抽屉' },
+  { cmd: '/terminal', title: '交互式控制台大屏', desc: '在右侧工作台展开大屏级实时终端' },
   { cmd: '/review', title: 'Code Review 走查', desc: '调用 Code Review 专家技能审查当前修改与安全基线' },
   { cmd: '/test', title: '单测生成与运行', desc: '寻找测试套件，为核心函数生成并执行测试用例' },
-  { cmd: '/grill-me', title: 'Grill-me 互动问答', desc: '进入采访决策模式：Agent 逐一向您抛出架构选型卡片' },
-  { cmd: '/diff', title: '查看 Git 变更 Diff', desc: '唤起右侧 Git 代码变更对比抽屉' }
+  { cmd: '/grill-me', title: 'Grill-me 互动问答', desc: '进入采访决策模式：Agent 逐一向您抛出架构选型卡片' }
 ];
+
+function extractPreviewableArtifact(content: string): PreviewData | null {
+  if (!content) return null;
+
+  // 1. Mermaid
+  const mermaidMatch = content.match(/```mermaid\s*([\s\S]*?)```/i);
+  if (mermaidMatch && mermaidMatch[1].trim()) {
+    return {
+      type: 'mermaid',
+      title: 'Mermaid 架构流程拓扑图',
+      content: mermaidMatch[1].trim()
+    };
+  }
+
+  // 2. SVG
+  const svgBlockMatch = content.match(/```(?:svg|xml)\s*(<svg[\s\S]*?<\/svg>)\s*```/i);
+  if (svgBlockMatch && svgBlockMatch[1].trim()) {
+    return {
+      type: 'svg',
+      title: 'SVG 矢量设计图',
+      content: svgBlockMatch[1].trim()
+    };
+  }
+  const rawSvgMatch = content.match(/(<svg\b[^>]*>[\s\S]*?<\/svg>)/i);
+  if (rawSvgMatch && rawSvgMatch[1].trim()) {
+    return {
+      type: 'svg',
+      title: 'SVG 矢量设计图',
+      content: rawSvgMatch[1].trim()
+    };
+  }
+
+  // 3. HTML
+  const htmlMatch = content.match(/```html\s*([\s\S]*?)```/i);
+  if (htmlMatch && htmlMatch[1].trim()) {
+    return {
+      type: 'html',
+      title: 'HTML 页面预览',
+      content: htmlMatch[1].trim()
+    };
+  }
+
+  return null;
+}
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
   messages,
@@ -71,7 +124,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   workspacePath,
   currentModel,
   providerName,
-  onOpenGitDiff
+  onOpenGitDiff,
+  onOpenPreview,
+  onOpenTerminal,
+  activeSessionId,
+  terminalOutputs
 }) => {
   const [input, setInput] = useState('');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
@@ -118,6 +175,18 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
     if (trimmed === '/diff') {
       onOpenGitDiff?.();
+      setInput('');
+      setShowSlashMenu(false);
+      return;
+    }
+    if (trimmed === '/preview') {
+      onOpenPreview?.({ type: 'html', title: '多模态产物预览', content: '<h3>请选择消息中的 HTML / Mermaid / SVG 进行预览</h3>' });
+      setInput('');
+      setShowSlashMenu(false);
+      return;
+    }
+    if (trimmed === '/terminal') {
+      onOpenTerminal?.();
       setInput('');
       setShowSlashMenu(false);
       return;
@@ -252,20 +321,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.1.2)
+                ASTeam Agent (v1.2.0)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。已全面支持原生 <strong>Word (.docx) 技术方案</strong>与 <strong>PowerPoint (.pptx) 路演幻灯片</strong>直接落盘生成，并预装 Anthropic & MiniMax 官方融合办公四件套。
+                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 实时交互控制台 (Live Terminal)</strong> 与 <strong>🖥️ 原生多模态产物实时预览 (HTML/Mermaid/SVG)</strong>，并融合 Word/PPT 双引擎排版生成。
               </p>
             </div>
 
             {/* Quick Prompt Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
               {[
-                { title: '一键生成 Word (.docx) 方案白皮书', prompt: '请使用【公文方案与深度报告专家】技能，为我们团队撰写一份严谨规范的技术方案，并直接生成为 Word 文档保存在我的桌面上（文件名：企业级Agent架构白皮书.docx）。' },
-                { title: '一键生成 PPT (.pptx) 演说幻灯片', prompt: '请使用【商业提案与演说 PPT 架构师】技能，为我们生成一份 16:9 比例的商业路演幻灯片，包含核心金句与讲者逐字稿，并直接保存至桌面（文件名：AI智能底座路演汇报.pptx）。' },
-                { title: 'Excel 数据建模与动态公式', prompt: '请使用【表格与数据建模大师】技能，设计一套多维业务数据分析模型，并给出 XLOOKUP 与动态透视公式。' },
-                { title: '智能会议纪要与 RACI 清单', prompt: '请使用【智能会议纪要与行动清单】技能，将近期的沟通重点提炼为核心决议与标准 RACI 任务推进矩阵。' }
+                { title: '🎨 现代网页与架构拓扑图生成', prompt: '请为我们编写一个高颜值的数据监控大屏 HTML 页面（内置 Tailwind CSS），并在其后使用 Mermaid 绘制完整的系统高可用流式架构拓扑图。' },
+                { title: '⚡ 实时运行系统巡检与交互命令', prompt: '请在终端执行网络连通性与本地开发环境巡检命令，并在控制台实时输出执行过程。' },
+                { title: '📄 一键生成 Word (.docx) 方案白皮书', prompt: '请使用【公文方案与深度报告专家】技能，为我们团队撰写一份严谨规范的技术方案，并直接生成为 Word 文档保存在我的桌面上（文件名：企业级Agent架构白皮书.docx）。' },
+                { title: '📊 一键生成 PPT (.pptx) 演说幻灯片', prompt: '请使用【商业提案与演说 PPT 架构师】技能，为我们生成一份 16:9 比例的商业路演幻灯片，包含核心金句与讲者逐字稿，并直接保存至桌面（文件名：AI智能底座路演汇报.pptx）。' }
               ].map((item, idx) => (
                 <button
                   key={idx}
@@ -342,7 +411,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                 {/* deepseek-harness Planning & Execution Trajectory Tree */}
                 {msg.steps && msg.steps.length > 0 && (
-                  <AgentTrajectory steps={msg.steps} />
+                  <AgentTrajectory
+                    steps={msg.steps}
+                    sessionId={activeSessionId}
+                    terminalOutputs={terminalOutputs}
+                    onStopSession={onStopAgent}
+                  />
                 )}
 
                 {/* Interactive Question Card if Agent prompted a question */}
@@ -352,6 +426,30 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     onSubmitAnswer={(qId, ans) => onReplyQuestion(qId, ans)}
                   />
                 )}
+
+                {/* Multimodal Artifact Preview Banner if assistant generated HTML / Mermaid / SVG */}
+                {msg.role === 'assistant' && (() => {
+                  const artifact = extractPreviewableArtifact(msg.content);
+                  if (!artifact || !onOpenPreview) return null;
+                  return (
+                    <div className="flex items-center justify-between rounded-xl border border-[var(--primary)]/30 bg-[var(--primary)]/10 px-3 py-2 my-1 shadow-2xs">
+                      <div className="flex items-center space-x-2">
+                        <Eye className="h-4 w-4 text-[var(--primary)] shrink-0" />
+                        <span className="text-xs font-semibold text-[var(--foreground)]">
+                          已生成【{artifact.title}】
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onOpenPreview(artifact)}
+                        className="flex items-center space-x-1 rounded-lg bg-[var(--primary)] text-white px-2.5 py-1 text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        <span>实时预览</span>
+                      </button>
+                    </div>
+                  );
+                })()}
 
                 {/* Main Message Content */}
                 <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">

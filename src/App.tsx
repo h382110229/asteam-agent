@@ -3,7 +3,7 @@ import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea, ChatMessageItem } from './components/ChatArea';
 import { SettingsModal } from './components/SettingsModal';
-import { GitDiffDrawer } from './components/GitDiffDrawer';
+import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/WorkspaceDrawer';
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
 import { Project, ProjectSession, GitStatusSummary, ExecutionMode } from './types/project';
@@ -128,9 +128,27 @@ export const App: React.FC = () => {
     localStorage.setItem('asteam_messages', JSON.stringify(messagesMap));
   }, [messagesMap]);
 
-  // 4. Git Status & Diff Drawer State
-  const [gitStatus, setGitStatus] = useState<GitStatusSummary | null>(null);
-  const [isGitDiffOpen, setIsGitDiffOpen] = useState(false);
+  // 4. Workspace Workbench Drawer State (Preview + Git Diff + Live Terminal)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<WorkspaceDrawerTab>('diff');
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [terminalOutputs, setTerminalOutputs] = useState<Record<string, string>>({});
+
+  const handleOpenGitDiff = useCallback(() => {
+    setDrawerTab('diff');
+    setIsDrawerOpen(true);
+  }, []);
+
+  const handleOpenPreview = useCallback((data: PreviewData) => {
+    setPreviewData(data);
+    setDrawerTab('preview');
+    setIsDrawerOpen(true);
+  }, []);
+
+  const handleOpenTerminal = useCallback(() => {
+    setDrawerTab('terminal');
+    setIsDrawerOpen(true);
+  }, []);
 
   const refreshGitStatus = useCallback(async () => {
     if (!currentWorkspacePath || !window.electronAPI) {
@@ -203,6 +221,18 @@ export const App: React.FC = () => {
           setIsRunning(false);
           setIsWaitingForUser(false);
           refreshGitStatus();
+        } else if (type === 'terminalData') {
+          const { chunk, stepId, sessionId: sid } = payload;
+          setTerminalOutputs(prev => {
+            const next = { ...prev };
+            if (stepId) {
+              next[stepId] = (next[stepId] || '') + chunk;
+            }
+            if (sid) {
+              next[sid] = (next[sid] || '') + chunk;
+            }
+            return next;
+          });
         } else if (type === 'done') {
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
@@ -453,14 +483,15 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
-      {/* 1. Custom Frameless TitleBar with Git Status Pill */}
+      {/* 1. Custom Frameless TitleBar with Git Status Pill & Workbench Trigger */}
       <TitleBar
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => setIsSettingsOpen(true)}
         workspacePath={currentWorkspacePath}
         gitStatus={gitStatus}
-        onOpenGitDiff={() => setIsGitDiffOpen(true)}
+        onOpenGitDiff={handleOpenGitDiff}
+        onOpenDrawer={() => setIsDrawerOpen(true)}
       />
 
       {/* 2. Main Workspace Layout */}
@@ -493,7 +524,11 @@ export const App: React.FC = () => {
           workspacePath={currentWorkspacePath}
           currentModel={settings.model}
           providerName={providerDisplayName}
-          onOpenGitDiff={() => setIsGitDiffOpen(true)}
+          onOpenGitDiff={handleOpenGitDiff}
+          onOpenPreview={handleOpenPreview}
+          onOpenTerminal={handleOpenTerminal}
+          activeSessionId={activeSessionId}
+          terminalOutputs={terminalOutputs}
         />
       </div>
 
@@ -506,13 +541,18 @@ export const App: React.FC = () => {
         workspacePath={currentWorkspacePath}
       />
 
-      {/* 4. Git Diff Drawer */}
-      <GitDiffDrawer
-        isOpen={isGitDiffOpen}
-        onClose={() => setIsGitDiffOpen(false)}
+      {/* 4. Workspace Workbench Drawer (Live Preview + Git Diff + Live Terminal) */}
+      <WorkspaceDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        activeTab={drawerTab}
+        onTabChange={setDrawerTab}
+        previewData={previewData}
         workspacePath={currentWorkspacePath}
         gitStatus={gitStatus}
         onRefreshGit={refreshGitStatus}
+        activeSessionId={activeSessionId}
+        terminalOutput={terminalOutputs[activeSessionId] || ''}
       />
     </div>
   );

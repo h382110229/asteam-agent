@@ -25,6 +25,7 @@ export interface ElectronAPI {
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
   stopAgent: (sessionId: string) => Promise<boolean>;
   replyQuestion: (sessionId: string, response: string) => Promise<boolean>;
+  sendTerminalInput: (sessionId: string, input: string) => Promise<boolean>;
   onAgentEvent: (callback: (data: { type: string; payload: any }) => void) => () => void;
 
   // App & System settings

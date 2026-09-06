@@ -10,7 +10,8 @@ import {
   FolderGit2,
   Sparkles,
   GitBranch,
-  FileDiff
+  FileDiff,
+  Eye
 } from 'lucide-react';
 import { GitStatusSummary } from '../types/project';
 
@@ -21,6 +22,7 @@ interface TitleBarProps {
   workspacePath: string | null;
   gitStatus?: GitStatusSummary | null;
   onOpenGitDiff?: () => void;
+  onOpenDrawer?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -29,7 +31,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onOpenSettings,
   workspacePath,
   gitStatus,
-  onOpenGitDiff
+  onOpenGitDiff,
+  onOpenDrawer
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -127,6 +130,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           className="flex h-7 w-7 items-center justify-center rounded text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
         >
           {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+        </button>
+
+        {/* Workspace Workbench Drawer Button */}
+        <button
+          type="button"
+          onClick={onOpenDrawer}
+          title="打开右侧工作台 (多模态预览 / Git Diff / 交互控制台)"
+          className="flex h-7 items-center space-x-1 rounded px-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors cursor-pointer text-xs"
+        >
+          <Eye className="h-3.5 w-3.5 text-[var(--primary)]" />
+          <span className="hidden sm:inline font-medium">工作台</span>
         </button>
 
         {/* Settings Button */}

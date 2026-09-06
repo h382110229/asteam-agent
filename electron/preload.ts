@@ -27,6 +27,7 @@ export interface ElectronAPI {
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
   stopAgent: (sessionId: string) => Promise<boolean>;
   replyQuestion: (sessionId: string, response: string) => Promise<boolean>;
+  sendTerminalInput: (sessionId: string, input: string) => Promise<boolean>;
   onAgentEvent: (callback: (data: { type: string; payload: any }) => void) => () => void;
 
   // App & System settings
@@ -56,6 +57,7 @@ const api: ElectronAPI = {
   startAgent: (sessionId, config, history) => ipcRenderer.invoke('agent:start', { sessionId, config, history }),
   stopAgent: (sessionId) => ipcRenderer.invoke('agent:stop', sessionId),
   replyQuestion: (sessionId, response) => ipcRenderer.invoke('agent:replyQuestion', { sessionId, response }),
+  sendTerminalInput: (sessionId, input) => ipcRenderer.invoke('agent:sendTerminalInput', { sessionId, input }),
   onAgentEvent: (callback) => {
     const subscription = (_event: any, data: any) => callback(data);
     ipcRenderer.on('agent:event', subscription);

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { runHarnessAgent, abortExecution, submitUserResponse } from './harness-runner';
+import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
 import { getGitStatus, getFileDiff, discardFileChange } from './git-manager';
 import { skillManager } from './skill-manager';
 
@@ -304,6 +304,12 @@ function setupIPC() {
           type: 'question',
           payload: { sessionId, ...data }
         });
+      },
+      onTerminalData: (data) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'terminalData',
+          payload: data
+        });
       }
     });
   });
@@ -314,6 +320,10 @@ function setupIPC() {
 
   ipcMain.handle('agent:replyQuestion', (_event, { sessionId, response }: { sessionId: string; response: string }) => {
     return submitUserResponse(sessionId, response);
+  });
+
+  ipcMain.handle('agent:sendTerminalInput', (_event, { sessionId, input }: { sessionId: string; input: string }) => {
+    return submitTerminalInput(sessionId, input);
   });
 }
 
