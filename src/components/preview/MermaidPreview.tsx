@@ -158,7 +158,8 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      const svgBlob = new Blob([svgCode], { type: 'image/svg+xml;charset=utf-8' });
+      const safeSvg = svgCode.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[a-f0-9]+);)/gi, '&amp;');
+      const svgBlob = new Blob([safeSvg], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
       img.onload = () => {
         try {
@@ -257,14 +258,15 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
 
   const handleDownloadSvg = async () => {
     if (!svgCode) return;
+    const safeSvg = svgCode.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[a-f0-9]+);)/gi, '&amp;');
     if (window.electronAPI?.saveFile) {
       await window.electronAPI.saveFile({
         defaultName: `${title || 'architecture'}.svg`,
-        content: svgCode,
+        content: safeSvg,
         isBase64: false
       });
     } else {
-      const blob = new Blob([svgCode], { type: 'image/svg+xml' });
+      const blob = new Blob([safeSvg], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   ZoomIn,
   ZoomOut,
@@ -22,6 +22,7 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
   const [showCode, setShowCode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [copiedImage, setCopiedImage] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleCopy = async () => {
     try {
@@ -33,6 +34,10 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
 
   const prepareSvgString = (rawSvg: string): { svg: string; width: number; height: number } => {
     let svg = rawSvg.trim();
+
+    // 自动转义裸露的 '&' (避免 XML 解析错误破坏 SVG 图像加载)
+    svg = svg.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[a-f0-9]+);)/gi, '&amp;');
+
     if (!svg.includes('xmlns=')) {
       svg = svg.replace(/<svg\b([^>]*)>/i, '<svg xmlns="http://www.w3.org/2000/svg" $1>');
     }
@@ -64,19 +69,56 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
 
   const getSvgAsCanvas = async (scale = 2): Promise<HTMLCanvasElement | null> => {
     if (!content) return null;
-    const { svg, width, height } = prepareSvgString(content);
+
+    let svgToUse = '';
+    let width = 800;
+    let height = 600;
+
+    // 优先从已渲染的 DOM 提取并序列化 SVG（经过浏览器 DOM 容错，可确保实体和节点结构的合法性）
+    const svgEl = containerRef.current?.querySelector('svg');
+    if (svgEl) {
+      try {
+        const clone = svgEl.cloneNode(true) as SVGSVGElement;
+        if (!clone.getAttribute('xmlns')) {
+          clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }
+        const vb = clone.viewBox?.baseVal;
+        const vbW = vb ? vb.width : 0;
+        const vbH = vb ? vb.height : 0;
+        const bbox = svgEl.getBoundingClientRect();
+        width = Math.round(vbW || parseFloat(clone.getAttribute('width') || '') || bbox.width || 800);
+        height = Math.round(vbH || parseFloat(clone.getAttribute('height') || '') || bbox.height || 600);
+        clone.setAttribute('width', String(width));
+        clone.setAttribute('height', String(height));
+        svgToUse = new XMLSerializer().serializeToString(clone);
+      } catch (e) {
+        console.warn('DOM serialize failed, fallback to string:', e);
+      }
+    }
+
+    if (!svgToUse) {
+      const prepared = prepareSvgString(content);
+      svgToUse = prepared.svg;
+      width = prepared.width;
+      height = prepared.height;
+    }
+
+    // 二次确保无残留未转义 &
+    svgToUse = svgToUse.replace(/&(?!(amp|lt|gt|quot|apos|#\d+|#x[a-f0-9]+);)/gi, '&amp;');
 
     return new Promise((resolve) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
-      const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const svgBlob = new Blob([svgToUse], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
 
       img.onload = () => {
         try {
+          const targetWidth = (img.naturalWidth || width) * scale;
+          const targetHeight = (img.naturalHeight || height) * scale;
           const canvas = document.createElement('canvas');
-          canvas.width = (img.naturalWidth || width) * scale;
-          canvas.height = (img.naturalHeight || height) * scale;
+          canvas.width = targetWidth;
+          canvas.height = targetHeight;
           const ctx = canvas.getContext('2d');
           if (ctx) {
             const isDark = document.documentElement.classList.contains('dark');
@@ -312,9 +354,10 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
           </div>
         ) : (
           <div
+            ref={containerRef}
             style={{ transform: `scale(${zoom})`, transformOrigin: 'center center' }}
             className="transition-transform duration-150 ease-out select-none flex items-center justify-center max-w-full max-h-full"
-            dangerouslySetInnerHTML={{ __html: content }}
+            dangerouslySetInnerHTML={{ __html: prepareSvgString(content).svg }}
           />
         )}
       </div>
