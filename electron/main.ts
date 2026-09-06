@@ -37,7 +37,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     frame: false,
     titleBarStyle: 'hidden',
-    backgroundColor: '#0d1412',
+    backgroundColor: '#f8faf9',
     icon: icon || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),

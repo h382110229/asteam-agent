@@ -164,10 +164,10 @@ export const LiveTerminalCard: React.FC<LiveTerminalCardProps> = ({
         <>
           <div
             ref={terminalBodyRef}
-            className="max-h-64 min-h-[90px] overflow-y-auto p-3.5 text-[11.5px] leading-relaxed whitespace-pre-wrap break-all dark:bg-[#0c1411] bg-[#121c19] text-[#d6e2dd] selection:bg-[var(--primary)] selection:text-white"
+            className="max-h-64 min-h-[90px] overflow-y-auto p-3.5 text-[11.5px] leading-relaxed whitespace-pre-wrap break-all dark:bg-[#0c1411] dark:text-[#d6e2dd] bg-[#f2f7f5] text-[#14231f] border-y border-[var(--border)] selection:bg-[var(--primary)] selection:text-white"
           >
             {command && !displayOutput.includes(`$ ${command}`) && (
-              <div className="text-emerald-400 font-semibold mb-1.5 select-text">
+              <div className="text-[var(--primary)] dark:text-emerald-400 font-semibold mb-1.5 select-text font-mono">
                 $ {command}
               </div>
             )}

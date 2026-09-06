@@ -278,7 +278,11 @@ class WorkspaceTools {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(target, content, 'utf-8');
+    const ext = path.extname(target).toLowerCase();
+    const writeContent = (['.ps1', '.bat', '.cmd'].includes(ext) && !content.startsWith('\uFEFF'))
+      ? '\uFEFF' + content
+      : content;
+    fs.writeFileSync(target, writeContent, 'utf-8');
     const stats = fs.statSync(target);
     return `成功写入并持久化文件: "${target}" (${stats.size} 字节，已校验路径真实存在)`;
   }
@@ -467,9 +471,31 @@ async function callLLMStream(
       if (config.model !== 'deepseek-chat') {
         return await callLLMStream({ ...config, model: 'deepseek-chat' }, messages, abortSignal, onDelta);
       }
-      throw new Error(`当前模型服务节点暂时不可用 (HTTP 410)。建议在 [设置 -> AI 模型与供应商] 中切换其他可用模型。详细信息: ${errText}`);
+      throw new Error(`当前模型服务节点暂时不可用 (HTTP 410)。建议在 [设置 -> AI 模型与供应商] 中切换其他可用模型。`);
     }
-    throw new Error(`API Request Failed (${response.status}): ${errText}`);
+
+    // 针对网关超时 (524 / 504) 或服务异常 (502 / 503) 等，剥离冗长的 HTML 垃圾代码，给出精准人话诊断
+    let cleanMessage = '';
+    if (response.status === 524) {
+      cleanMessage = `[网关响应超时 524 Timeout] ASteam API 网关等待上游模型推理超时。当前服务端并发负载较高或模型生成耗时过长，建议点击【重新尝试】再次发起，或在设置中切换模型线路。`;
+    } else if (response.status === 502 || response.status === 503 || response.status === 504) {
+      cleanMessage = `[网关服务异常 ${response.status}] ASteam API 网关或上游服务暂时不可用，服务节点可能正在调度维护，请稍后点击【重新尝试】。`;
+    } else if (response.status === 429) {
+      cleanMessage = `[请求频次超限 429 Rate Limit] 当前 API 调用频率超限或并发已满，请稍候 10~30 秒后重试。`;
+    } else if (response.status === 401 || response.status === 403) {
+      cleanMessage = `[API 鉴权失败 ${response.status} Unauthorized] API Key 校验未通过，请点击设置检查您的 API Key 是否有效。`;
+    } else {
+      // 检查是否为 HTML 错误页面并提取标题
+      if (errText.includes('<!DOCTYPE') || errText.includes('<html')) {
+        const titleMatch = errText.match(/<title>([^<]+)<\/title>/i);
+        const title = titleMatch ? titleMatch[1].trim() : `HTTP ${response.status} 错误`;
+        cleanMessage = `[API 请求异常 ${response.status}] 服务端网关返回: ${title}。`;
+      } else {
+        cleanMessage = `API Request Failed (${response.status}): ${errText.slice(0, 300)}`;
+      }
+    }
+
+    throw new Error(cleanMessage);
   }
 
   const contentType = (response.headers.get('content-type') || '').toLowerCase();

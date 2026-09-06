@@ -18,7 +18,10 @@ import {
   Image as ImageIcon,
   Eye,
   Terminal,
-  CornerDownLeft
+  CornerDownLeft,
+  AlertCircle,
+  RefreshCw,
+  Settings
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
@@ -58,6 +61,7 @@ interface ChatAreaProps {
   onOpenGitDiff?: () => void;
   onOpenPreview?: (data: PreviewData) => void;
   onOpenTerminal?: () => void;
+  onOpenSettings?: () => void;
   activeSessionId?: string;
   terminalOutputs?: Record<string, string>;
 }
@@ -129,6 +133,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenGitDiff,
   onOpenPreview,
   onOpenTerminal,
+  onOpenSettings,
   activeSessionId,
   terminalOutputs
 }) => {
@@ -478,10 +483,82 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   );
                 })()}
 
-                {/* Main Message Content */}
-                <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-                  {msg.content}
-                </div>
+                {/* Main Message Content with Intelligent Error Card handling */}
+                {(() => {
+                  const errorMarker = '⚠️ **执行遇到错误**:';
+                  if (!msg.content.includes(errorMarker)) {
+                    return (
+                      <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
+                        {msg.content}
+                      </div>
+                    );
+                  }
+
+                  const parts = msg.content.split(errorMarker);
+                  const normalText = parts[0]?.trim();
+                  const errorText = parts.slice(1).join(errorMarker).trim();
+
+                  return (
+                    <div className="space-y-3">
+                      {normalText && (
+                        <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
+                          {normalText}
+                        </div>
+                      )}
+
+                      {/* ASTeam Branded Error Diagnostic Card */}
+                      <div className="rounded-xl border border-[var(--error)]/30 bg-[var(--card)] p-4 shadow-sm animate-in fade-in select-text">
+                        <div className="flex items-start space-x-3">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--error)]/10 text-[var(--error)] mt-0.5">
+                            <AlertCircle className="h-4 w-4" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="font-semibold text-xs text-[var(--error)]">
+                                任务执行异常 / 服务网关反馈
+                              </span>
+                              <span className="font-mono text-[10px] text-[var(--muted-foreground)]">
+                                {currentModel}
+                              </span>
+                            </div>
+                            <div className="text-xs text-[var(--foreground)] leading-relaxed mb-3 rounded-lg bg-[var(--muted)]/50 p-2.5 border border-[var(--border)] font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
+                              {errorText}
+                            </div>
+
+                            <div className="flex items-center space-x-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Find the previous user prompt to retry
+                                  const userMsgs = messages.filter(m => m.role === 'user');
+                                  const lastUserMsg = userMsgs[userMsgs.length - 1];
+                                  if (lastUserMsg) {
+                                    onSendMessage(lastUserMsg.content, executionMode);
+                                  }
+                                }}
+                                className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-xs"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                <span>重新尝试 (Retry)</span>
+                              </button>
+
+                              {onOpenSettings && (
+                                <button
+                                  type="button"
+                                  onClick={onOpenSettings}
+                                  className="flex items-center space-x-1.5 rounded-lg bg-[var(--muted)] hover:bg-[var(--border)] text-[var(--foreground)] px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer"
+                                >
+                                  <Settings className="h-3.5 w-3.5" />
+                                  <span>切换模型 / 线路</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Performance & Token Meta for Assistant */}
                 {msg.role === 'assistant' && msg.content && (
@@ -665,7 +742,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             {/* Waiting prompt or normal shortcut hint */}
             {isWaitingForUser ? (
-              <span className="text-amber-600 dark:text-amber-400 font-semibold animate-pulse text-[11px]">
+              <span className="text-[var(--primary)] font-semibold animate-pulse text-[11px]">
                 Agent 正在等待您的回复或确认...
               </span>
             ) : (
@@ -678,7 +755,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           {/* Textarea and Action Buttons */}
           <div className={`flex items-end space-x-2 rounded-xl border p-2 shadow-xs transition-all ${
             activeRunningTerminalStep
-              ? 'border-amber-500/80 ring-1 ring-amber-500/50 bg-[#0d121c]'
+              ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/30 bg-[var(--card)]'
               : 'border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--primary)] focus-within:ring-1 focus-within:ring-[var(--primary)]'
           }`}>
             {/* Attachment Button */}
@@ -699,7 +776,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               onKeyDown={handleKeyDown}
               placeholder={
                 activeRunningTerminalStep
-                  ? `⚡ 终端命令正在等待交互输入... 在此输入 y / n / 参数按 Enter 即刻发送，或直接点击右侧黄色发送按钮`
+                  ? `⚡ 终端命令正在等待标准输入 (stdin)... 在此输入 y / n / 参数后按 Enter 即刻发送`
                   : isWaitingForUser
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath
@@ -710,12 +787,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             />
 
             {activeRunningTerminalStep ? (
-              <div className="flex items-center space-x-1 shrink-0">
+              <div className="flex items-center space-x-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={onStopAgent}
                   title="中断当前命令执行 (Ctrl+C)"
-                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--error)] text-[var(--error-foreground)] hover:opacity-90 transition-opacity shadow-xs select-none cursor-pointer"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/30 hover:bg-[var(--accent)]/20 transition-colors shadow-xs select-none cursor-pointer"
                 >
                   <Square className="h-3.5 w-3.5 fill-current" />
                 </button>
@@ -724,7 +801,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   onClick={handleSend}
                   disabled={!input.trim()}
                   title="向终端发送输入 (Enter)"
-                  className="flex h-8 items-center space-x-1 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-40 select-none"
+                  className="flex h-8 items-center space-x-1 px-3 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white font-medium text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-40 select-none"
                 >
                   <CornerDownLeft className="h-3.5 w-3.5" />
                   <span>发送至终端</span>

@@ -96,7 +96,7 @@ export const AgentTrajectory: React.FC<AgentTrajectoryProps> = ({
       {!isCollapsed && (
         <div className="mt-3 space-y-2 border-t border-[var(--border)] pt-2.5">
           {steps.map((step, idx) => {
-            const isExpanded = expandedSteps[step.id] ?? (step.status === 'running' || step.status === 'failed');
+            const isExpanded = expandedSteps[step.id] ?? (step.tool === 'run_terminal_command' || step.status === 'running' || step.status === 'failed');
 
             return (
               <div

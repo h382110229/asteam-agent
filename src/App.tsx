@@ -20,7 +20,7 @@ export const App: React.FC = () => {
   });
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return settings.theme || 'dark';
+    return settings.theme || 'light';
   });
 
   useEffect(() => {
@@ -535,6 +535,7 @@ export const App: React.FC = () => {
           onOpenGitDiff={handleOpenGitDiff}
           onOpenPreview={handleOpenPreview}
           onOpenTerminal={handleOpenTerminal}
+          onOpenSettings={() => setIsSettingsOpen(true)}
           activeSessionId={activeSessionId}
           terminalOutputs={terminalOutputs}
         />

@@ -80,7 +80,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   model: 'Auto',
   openAtLogin: false,
   minimizeToTray: true,
-  theme: 'dark',
+  theme: 'light',
   enabledMcpTools: ['web_fetch', 'git_operations', 'system_inspector'],
   enabledSkills: ['office_word_report', 'office_excel_master', 'office_ppt_keynote', 'office_meeting_action', 'code_review', 'unit_test', 'git_commit_helper'],
   customMcpConfig: '{\n  "mcpServers": {}\n}'
