@@ -420,12 +420,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const processFiles = (fileList: File[]) => {
     fileList.forEach(file => {
-      const reader = new FileReader();
-      // Check if text based
+      const isImage = file.type.startsWith('image/');
       const isText = file.type.startsWith('text/') ||
-        /\.(ts|tsx|js|jsx|json|md|py|go|rs|c|cpp|h|css|html|xml|yaml|yml|sh|env)$/i.test(file.name);
+        /\.(ts|tsx|js|jsx|json|md|py|go|rs|c|cpp|h|css|html|xml|yaml|yml|sh|env|sql|csv)$/i.test(file.name);
 
-      if (isText && file.size < 100 * 1024) {
+      const reader = new FileReader();
+
+      if (isImage) {
+        reader.onload = (ev) => {
+          const content = ev.target?.result as string;
+          setAttachments(prev => [...prev, {
+            name: file.name || `image_${Date.now()}.png`,
+            size: file.size,
+            type: file.type || 'image/png',
+            content
+          }]);
+        };
+        reader.readAsDataURL(file);
+      } else if (isText && file.size < 512 * 1024) {
         reader.onload = (ev) => {
           const content = ev.target?.result as string;
           setAttachments(prev => [...prev, {
@@ -437,11 +449,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         };
         reader.readAsText(file);
       } else {
-        setAttachments(prev => [...prev, {
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream'
-        }]);
+        reader.onload = (ev) => {
+          const content = ev.target?.result as string;
+          setAttachments(prev => [...prev, {
+            name: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            content
+          }]);
+        };
+        reader.readAsDataURL(file);
       }
     });
   };
@@ -452,6 +469,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDraggingOver(true);
   };
 
@@ -461,9 +479,30 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     setIsDraggingOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processFiles(Array.from(e.dataTransfer.files));
+    }
+  };
+
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardData = e.clipboardData;
+    if (!clipboardData) return;
+
+    const items = Array.from(clipboardData.items || []);
+    const fileItems = items.filter(item => item.kind === 'file');
+
+    if (fileItems.length > 0) {
+      const files: File[] = [];
+      for (const item of fileItems) {
+        const file = item.getAsFile();
+        if (file) files.push(file);
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        processFiles(files);
+      }
     }
   };
 
@@ -961,7 +1000,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   key={idx}
                   className="flex items-center space-x-1.5 rounded-full border border-[var(--border)] bg-[var(--muted)] py-0.5 pl-2.5 pr-1.5 text-[11px] text-[var(--foreground)] shadow-2xs"
                 >
-                  <FileText className="h-3 w-3 text-[var(--primary)]" />
+                  {file.type?.startsWith('image/') && file.content ? (
+                    <img src={file.content} alt={file.name} className="h-4 w-4 rounded object-cover" />
+                  ) : (
+                    <FileText className="h-3 w-3 text-[var(--primary)]" />
+                  )}
                   <span className="max-w-[140px] truncate font-mono">{file.name}</span>
                   <span className="text-[9px] text-[var(--muted-foreground)]">
                     ({Math.round(file.size / 1024)} KB)
@@ -1048,7 +1091,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               </span>
             ) : (
               <span className="hidden sm:inline-block text-[10px]">
-                输入 <code>/</code> 唤出指令 · 支持拖拽添加附件 · Enter 发送
+                输入 <code>/</code> 唤出指令 · 支持拖拽/粘贴添加附件 · Enter 发送
               </span>
             )}
           </div>
@@ -1059,12 +1102,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               ? 'border-[var(--primary)] ring-1 ring-[var(--primary)]/30 bg-[var(--card)]'
               : 'border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--primary)] focus-within:ring-1 focus-within:ring-[var(--primary)]'
           }`}>
-            {/* Attachment Button */}
+            {/* Hidden File Input & Attachment Button */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              title="添加文件或代码附件 (亦可直接拖拽文件至此)"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors select-none"
+              title="添加文件或代码附件 (支持点击选择、直接拖拽或 Ctrl+V 粘贴)"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors select-none cursor-pointer"
             >
               <Paperclip className="h-4 w-4" />
             </button>
@@ -1075,14 +1125,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
               placeholder={
                 activeRunningTerminalStep
                   ? `⚡ 终端命令正在等待标准输入 (stdin)... 在此输入 y / n / 参数后按 Enter 即刻发送`
                   : isWaitingForUser
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath
-                  ? `向 ASTeam Agent 指派任务（支持输入 /plan, /review, /diff，支持拖入附件）...`
-                  : `指派本机宿主任务（例：“在桌面上生成系统设计文档”或“查询网络状态”，支持输入 /plan）...`
+                  ? `向 ASTeam Agent 指派任务（支持输入 /plan, /review, /diff，支持拖入或直接粘贴附件/图片）...`
+                  : `指派本机宿主任务（支持输入 /plan，支持直接拖拽或 Ctrl+V 粘贴附件/图片）...`
               }
               className="max-h-44 min-h-[28px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none select-text"
             />

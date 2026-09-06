@@ -392,6 +392,9 @@ export const App: React.FC = () => {
     let fullContent = text.trim();
     if (attachments && attachments.length > 0) {
       const attachSnippets = attachments.map(att => {
+        if (att.type?.startsWith('image/') && att.content) {
+          return `\n\n【用户附件图片: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n![${att.name}](${att.content})`;
+        }
         if (att.content) {
           const ext = att.name.split('.').pop() || '';
           return `\n\n【附件代码/文件: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n\`\`\`${ext}\n${att.content}\n\`\`\``;
