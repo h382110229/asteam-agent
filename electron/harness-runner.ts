@@ -676,6 +676,74 @@ function parseToolArgs(raw: string): any {
   return { raw: trimmed };
 }
 
+export function extractToolCall(response: string): { toolName: string; toolArgs: any } | null {
+  if (!response) return null;
+
+  // 1. Standard markdown codeblock: ```tool:name ... ``` or ```json:tool:name
+  const mdMatch = response.match(/```(?:json:)?tool:([a-z_]+)\s*([\s\S]*?)```/i);
+  if (mdMatch) {
+    const toolName = mdMatch[1].trim().toLowerCase();
+    const toolArgs = parseToolArgs(mdMatch[2].trim());
+    return { toolName, toolArgs };
+  }
+
+  // 2. <tool_call> ... </tool_call>
+  const toolCallMatch = response.match(/<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/i);
+  if (toolCallMatch) {
+    const inner = toolCallMatch[1].trim();
+
+    // 2.1 Check XML inside <tool_call>, e.g. <function=name><parameter={...}></parameter></function>
+    const fnXmlMatch = inner.match(/<function[ ="]*([a-z_]+)[" ]*>([\s\S]*?)<\/function>/i);
+    if (fnXmlMatch) {
+      const toolName = fnXmlMatch[1].trim().toLowerCase();
+      const paramMatch = fnXmlMatch[2].match(/<parameter(?:=([^\n>]*))?>([\s\S]*?)<\/parameter>/i);
+      let argRaw = '';
+      if (paramMatch) {
+        argRaw = (paramMatch[1] || paramMatch[2] || '').trim();
+      } else {
+        argRaw = fnXmlMatch[2].trim();
+      }
+      return { toolName, toolArgs: parseToolArgs(argRaw) };
+    }
+
+    // 2.2 Check JSON inside <tool_call>
+    try {
+      const parsed = JSON.parse(inner);
+      const toolName = parsed.name || parsed.tool || parsed.function?.name || parsed.action;
+      const toolArgs = parsed.arguments || parsed.parameters || parsed.args || parsed.input || {};
+      if (toolName) {
+        return {
+          toolName: String(toolName).toLowerCase(),
+          toolArgs: typeof toolArgs === 'string' ? parseToolArgs(toolArgs) : toolArgs
+        };
+      }
+    } catch {
+      // Regex extraction fallback for JSON-like string
+      const nameMatch = inner.match(/"(?:name|tool)"\s*:\s*"([a-z_]+)"/i);
+      if (nameMatch) {
+        const toolName = nameMatch[1].trim().toLowerCase();
+        return { toolName, toolArgs: parseToolArgs(inner) };
+      }
+    }
+  }
+
+  // 3. Raw <function=name> ... </function> without <tool_call>
+  const rawFnMatch = response.match(/<function[ ="]*([a-z_]+)[" ]*>([\s\S]*?)<\/function>/i);
+  if (rawFnMatch) {
+    const toolName = rawFnMatch[1].trim().toLowerCase();
+    const paramMatch = rawFnMatch[2].match(/<parameter(?:=([^\n>]*))?>([\s\S]*?)<\/parameter>/i);
+    let argRaw = '';
+    if (paramMatch) {
+      argRaw = (paramMatch[1] || paramMatch[2] || '').trim();
+    } else {
+      argRaw = rawFnMatch[2].trim();
+    }
+    return { toolName, toolArgs: parseToolArgs(argRaw) };
+  }
+
+  return null;
+}
+
 // 3. Harness Engine Runner
 export async function runHarnessAgent(
   sessionId: string,
@@ -851,16 +919,14 @@ ${modeInstruction}
       finalSummary = stepResponse;
       messages.push({ role: 'assistant', content: stepResponse });
 
-      // Match tool calls
-      const toolMatch = stepResponse.match(/```tool:([a-z_]+)\s*([\s\S]*?)```/);
-      if (!toolMatch) {
+      // Match tool calls (supports ```tool:xxx```, <tool_call> JSON, and <function=xxx> XML)
+      const toolCall = extractToolCall(stepResponse);
+      if (!toolCall) {
         // No more tool calls needed, task completed
         break;
       }
 
-      const toolName = toolMatch[1].trim();
-      const toolArgRaw = toolMatch[2].trim();
-      const toolArgs = parseToolArgs(toolArgRaw);
+      const { toolName, toolArgs } = toolCall;
 
       currentStepIndex = Math.min(currentStepIndex + 1, initialPlanSteps.length - 1);
       const activeStep = initialPlanSteps[currentStepIndex];
