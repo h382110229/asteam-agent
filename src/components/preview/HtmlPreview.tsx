@@ -35,15 +35,28 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title }) => {
     } catch {}
   };
 
-  const handleDownloadHtml = () => {
+  const handleDownloadHtml = async () => {
     try {
-      const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = title?.endsWith('.html') ? title : `${title || 'page'}.html`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const defaultName = title?.endsWith('.html') ? title : `${title || 'page'}.html`;
+      if (window.electronAPI?.saveFile) {
+        await window.electronAPI.saveFile({
+          defaultName,
+          content,
+          isBase64: false
+        });
+      } else {
+        const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = defaultName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(url);
+        }, 3000);
+      }
     } catch (e) {
       console.error('Failed to download HTML:', e);
     }

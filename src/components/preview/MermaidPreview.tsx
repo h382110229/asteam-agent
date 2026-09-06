@@ -157,25 +157,35 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
     if (!svgCode) return null;
     return new Promise((resolve) => {
       const img = new Image();
+      img.crossOrigin = 'anonymous';
       const svgBlob = new Blob([svgCode], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = (img.width || 900) * scale;
-        canvas.height = (img.height || 600) * scale;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#0f172a';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          URL.revokeObjectURL(url);
-          resolve(canvas);
-        } else {
-          URL.revokeObjectURL(url);
+        try {
+          const width = img.naturalWidth || img.width || 900;
+          const height = img.naturalHeight || img.height || 600;
+          const canvas = document.createElement('canvas');
+          canvas.width = width * scale;
+          canvas.height = height * scale;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const isDark = document.documentElement.classList.contains('dark');
+            ctx.fillStyle = isDark ? '#0f172a' : '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          console.error('Mermaid canvas draw error:', e);
           resolve(null);
+        } finally {
+          URL.revokeObjectURL(url);
         }
       };
-      img.onerror = () => {
+      img.onerror = (e) => {
+        console.error('Failed to load Mermaid SVG into Image:', e);
         URL.revokeObjectURL(url);
         resolve(null);
       };
@@ -185,22 +195,52 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
 
   const handleDownloadPng = async () => {
     const canvas = await getSvgAsCanvas(2);
-    if (!canvas) return;
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title || 'architecture'}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+    if (!canvas) {
+      alert('生成高清 PNG 失败');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    if (window.electronAPI?.saveFile) {
+      await window.electronAPI.saveFile({
+        defaultName: `${title || 'architecture'}.png`,
+        content: dataUrl,
+        isBase64: true
+      });
+    } else {
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title || 'architecture'}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(url);
+        }, 3000);
+      }, 'image/png');
+    }
   };
 
   const handleCopyImage = async () => {
     try {
       const canvas = await getSvgAsCanvas(2);
-      if (!canvas) return;
+      if (!canvas) {
+        alert('复制图片失败：无法转码为位图。');
+        return;
+      }
+      const dataUrl = canvas.toDataURL('image/png');
+      if (window.electronAPI?.copyImage) {
+        const success = await window.electronAPI.copyImage(dataUrl);
+        if (success) {
+          setCopiedImage(true);
+          setTimeout(() => setCopiedImage(false), 2000);
+          return;
+        }
+      }
+
+      // Fallback
       canvas.toBlob(async (blob) => {
         if (!blob) return;
         await navigator.clipboard.write([
@@ -211,18 +251,31 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
       }, 'image/png');
     } catch (e) {
       console.error('Failed to copy image to clipboard:', e);
+      alert('复制图片到剪贴板失败，请直接点击【导出 PNG】。');
     }
   };
 
-  const handleDownloadSvg = () => {
+  const handleDownloadSvg = async () => {
     if (!svgCode) return;
-    const blob = new Blob([svgCode], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${title || 'architecture'}.svg`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (window.electronAPI?.saveFile) {
+      await window.electronAPI.saveFile({
+        defaultName: `${title || 'architecture'}.svg`,
+        content: svgCode,
+        isBase64: false
+      });
+    } else {
+      const blob = new Blob([svgCode], { type: 'image/svg+xml' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title || 'architecture'}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 3000);
+    }
   };
 
   return (

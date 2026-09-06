@@ -9,6 +9,7 @@ export interface SkillItem {
   isBuiltin: boolean;
   prompt: string;
   category?: 'office' | 'dev' | 'custom';
+  filePath?: string;
 }
 
 const BUILTIN_SKILLS: SkillItem[] = [
@@ -176,6 +177,7 @@ export class SkillManager {
             description: `全局已安装技能 (${file})`,
             isBuiltin: false,
             category: 'custom',
+            filePath,
             prompt: `【激活全局自定义技能：${name}】\n${content}`
           });
         }
@@ -207,6 +209,7 @@ export class SkillManager {
             description: `位于工作区 .asteam/skills/${file}`,
             isBuiltin: false,
             category: 'custom',
+            filePath,
             prompt: `【激活工作区专属技能：${name}】\n${content}`
           });
         }
@@ -224,6 +227,29 @@ export class SkillManager {
     ];
   }
 
+  findSkill(query: string, workspacePath: string | null): SkillItem | undefined {
+    if (!query) return undefined;
+    const clean = query.trim().toLowerCase();
+    const cleanBase = path.basename(clean, '.md').replace(/^(?:custom_global_|custom:global:|custom_workspace_|custom:workspace:)/i, '');
+    const all = this.getAllAvailableSkills(workspacePath);
+
+    return all.find(s => {
+      const sId = s.id.toLowerCase();
+      const sIdBase = sId.replace(/^(?:custom:global:|custom:workspace:)/i, '');
+      const sName = s.name.toLowerCase();
+      const sFileName = s.filePath ? path.basename(s.filePath, '.md').toLowerCase() : '';
+
+      return (
+        sId === clean ||
+        sIdBase === clean ||
+        sIdBase === cleanBase ||
+        sFileName === cleanBase ||
+        sName === clean ||
+        sName.includes(cleanBase)
+      );
+    });
+  }
+
   installSkillFromContent(id: string, name: string, description: string, promptContent: string): SkillItem {
     const cleanId = id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
     const dir = this.getGlobalSkillsDir();
@@ -238,6 +264,7 @@ export class SkillManager {
       description: `全局已安装技能 (${cleanId}.md)`,
       isBuiltin: false,
       category: 'custom',
+      filePath,
       prompt: `【激活全局自定义技能：${name}】\n${fullContent}`
     };
   }

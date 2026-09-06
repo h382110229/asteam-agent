@@ -216,6 +216,31 @@ class WorkspaceTools {
       target = target.replace(/^~[\\/]/, userHome + path.sep);
     }
 
+    // 4. 智能识别并定向技能库 (ASTeam Skills) 虚拟与物理路径：
+    // 如 "skills/custom/global/xxx.md", "custom/global/xxx.md", "custom:global:xxx", ".asteam/skills/xxx.md"
+    const globalSkillsDir = path.join(userHome, '.asteam', 'skills');
+    const workspaceSkillsDir = this.workspacePath ? path.join(this.workspacePath, '.asteam', 'skills') : null;
+    const rawSkillBase = path.basename(target).replace(/^(?:custom_global_|custom:global:|custom_workspace_|custom:workspace:)/i, '');
+    const cleanSkillMd = rawSkillBase.endsWith('.md') ? rawSkillBase : `${rawSkillBase}.md`;
+
+    if (
+      target.includes('skills') ||
+      target.includes('custom') ||
+      target.startsWith('custom:') ||
+      target.startsWith('.asteam')
+    ) {
+      const candGlobal = path.join(globalSkillsDir, cleanSkillMd);
+      if (fs.existsSync(candGlobal)) {
+        return candGlobal;
+      }
+      if (workspaceSkillsDir) {
+        const candWorkspace = path.join(workspaceSkillsDir, cleanSkillMd);
+        if (fs.existsSync(candWorkspace)) {
+          return candWorkspace;
+        }
+      }
+    }
+
     if (path.isAbsolute(target)) {
       const normalized = path.normalize(target);
       // 在免项目宿主模式下，或明确写入用户桌面 (Desktop) 与用户主目录：全部安全放行！
@@ -238,8 +263,26 @@ class WorkspaceTools {
     if (!relPath || relPath.trim() === '') {
       throw new Error('viewFile 失败: 未提供文件路径 (filePath 不能为空)');
     }
+
+    // 优先检查是否匹配已安装或内置的 Skill 技能定义
+    const matchedSkill = skillManager.findSkill(relPath, this.workspacePath || null);
+    if (matchedSkill) {
+      if (matchedSkill.filePath && fs.existsSync(matchedSkill.filePath)) {
+        return fs.readFileSync(matchedSkill.filePath, 'utf-8');
+      }
+      return matchedSkill.prompt;
+    }
+
     const target = this.resolveSafe(relPath);
     if (!fs.existsSync(target)) {
+      // 兜底再次按文件名检查 skill
+      const fallbackSkill = skillManager.findSkill(path.basename(relPath, '.md'), this.workspacePath || null);
+      if (fallbackSkill) {
+        if (fallbackSkill.filePath && fs.existsSync(fallbackSkill.filePath)) {
+          return fs.readFileSync(fallbackSkill.filePath, 'utf-8');
+        }
+        return fallbackSkill.prompt;
+      }
       throw new Error(`File not found: ${relPath}`);
     }
     const stat = fs.statSync(target);
@@ -755,10 +798,20 @@ ${isHostMode
 \`\`\`tool:list_skills
 {}
 \`\`\`
+10. read_skill: 查阅指定技能的完整行动规约与 Prompt 定义。调用格式：
+\`\`\`tool:read_skill
+{"id": "技能ID或名称"}
+\`\`\`
 
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
 ${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''}
 ${modeInstruction}
+
+【多模态设计与可视化规约 (SVG / Mermaid / HTML)】
+- 当用户要求绘制 SVG 矢量图或视觉图表时：
+  1. 必须使用标准 XML 规范，必须包含 \`xmlns="http://www.w3.org/2000/svg"\`、\`viewBox\` 以及明确的 \`width\` 与 \`height\`；
+  2. 视觉美学规范：必须遵循高水准现代工业设计语言（Linear / Stripe 风格），采用精致配色（优雅渐变色 <defs><linearGradient>、圆角卡片 rx="10"、柔和阴影 <filter id="shadow">、精致图例与无衬线排版 font-family="system-ui, -apple-system, sans-serif"），严禁绘制仅有单调黑白粗框的简陋图形；
+  3. 色彩与对比：支持自适应暗色/明亮底色背景，确保文字与图形具有良好对比度。
 
 【执行规范】
 - 如果用户只是普通的咨询或交谈，直接给出详尽解答即可，无需强行调用工具。
@@ -915,8 +968,22 @@ ${modeInstruction}
           }
         } else if (toolName === 'list_skills') {
           const all = skillManager.getAllAvailableSkills(config.workspacePath || null);
-          const listStr = all.map(s => `- [${s.isBuiltin ? '内置' : '自定义'}] ${s.name} (${s.id}): ${s.description}`).join('\n');
-          observation = `当前系统已挂载技能列表 (${all.length} 项):\n${listStr}`;
+          const listStr = all.map(s => {
+            const loc = s.filePath ? `\n  - 文件路径: "${s.filePath}" (支持直接使用 view_file 读取)` : `\n  - 内置规约: (可调用 read_skill("${s.id}") 或 view_file 查看)`;
+            return `- [${s.isBuiltin ? '内置技能' : '自定义技能'}] ${s.name} (ID: ${s.id})${loc}\n  - 说明: ${s.description}`;
+          }).join('\n\n');
+          observation = `当前系统已挂载技能列表 (${all.length} 项):\n${listStr}\n\n💡 提示：若需查阅某技能的详细规约要求，可直接调用 read_skill 或使用 view_file 查看其文件路径。`;
+        } else if (toolName === 'read_skill') {
+          const skillId = toolArgs.id || toolArgs.skillId || toolArgs.name || toolArgs.skill;
+          if (!skillId) {
+            throw new Error('read_skill 失败: 请提供技能 ID 或名称 (参数格式: {"id": "skill_id"})');
+          }
+          const skill = skillManager.findSkill(skillId, config.workspacePath || null);
+          if (skill) {
+            observation = `【技能规约定义: ${skill.name} (ID: ${skill.id})】\n${skill.prompt}`;
+          } else {
+            throw new Error(`未找到技能: "${skillId}"。请先调用 list_skills 查看当前已挂载的所有技能清单。`);
+          }
         } else {
           // Check MCP tools
           const mcpResult = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: config.workspacePath || null });

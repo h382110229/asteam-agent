@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
@@ -293,6 +293,40 @@ function setupIPC() {
     }
 
     return true;
+  });
+
+  // Native Clipboard Image Write
+  ipcMain.handle('clipboard:writeImage', async (_event, dataUrl: string) => {
+    try {
+      const img = nativeImage.createFromDataURL(dataUrl);
+      clipboard.writeImage(img);
+      return true;
+    } catch (err: any) {
+      console.error('Failed to copy image to clipboard:', err);
+      return false;
+    }
+  });
+
+  // Native Save File Dialog
+  ipcMain.handle('dialog:saveFile', async (_event, { defaultName, content, isBase64 }: { defaultName: string; content: string; isBase64?: boolean }) => {
+    try {
+      if (!mainWindow) return false;
+      const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: path.join(app.getPath('downloads'), defaultName),
+        title: '保存文件'
+      });
+      if (canceled || !filePath) return false;
+      if (isBase64) {
+        const base64Data = content.replace(/^data:[^;]+;base64,/, '');
+        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+      } else {
+        fs.writeFileSync(filePath, content, 'utf-8');
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Failed to save file:', err);
+      return false;
+    }
   });
 
   // Agent Harness IPC

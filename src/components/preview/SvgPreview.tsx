@@ -31,57 +31,128 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
     } catch {}
   };
 
+  const prepareSvgString = (rawSvg: string): { svg: string; width: number; height: number } => {
+    let svg = rawSvg.trim();
+    if (!svg.includes('xmlns=')) {
+      svg = svg.replace(/<svg\b([^>]*)>/i, '<svg xmlns="http://www.w3.org/2000/svg" $1>');
+    }
+
+    let width = 800;
+    let height = 600;
+
+    const viewBoxMatch = svg.match(/viewBox=["']\s*([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s+([0-9.-]+)\s*["']/i);
+    if (viewBoxMatch) {
+      const vbW = parseFloat(viewBoxMatch[3]);
+      const vbH = parseFloat(viewBoxMatch[4]);
+      if (vbW > 0 && vbH > 0) {
+        width = Math.round(vbW);
+        height = Math.round(vbH);
+      }
+    }
+
+    const widthMatch = svg.match(/\bwidth=["']([0-9.]+)(?:px)?["']/i);
+    const heightMatch = svg.match(/\bheight=["']([0-9.]+)(?:px)?["']/i);
+    if (widthMatch) width = Math.round(parseFloat(widthMatch[1])) || width;
+    if (heightMatch) height = Math.round(parseFloat(heightMatch[1])) || height;
+
+    if (!svg.match(/<svg[^>]*\bwidth=["'][0-9.]+/i)) {
+      svg = svg.replace(/<svg\b/i, `<svg width="${width}" height="${height}" `);
+    }
+
+    return { svg, width, height };
+  };
+
   const getSvgAsCanvas = async (scale = 2): Promise<HTMLCanvasElement | null> => {
     if (!content) return null;
+    const { svg, width, height } = prepareSvgString(content);
+
     return new Promise((resolve) => {
       const img = new Image();
-      const svgBlob = new Blob([content], { type: 'image/svg+xml;charset=utf-8' });
+      img.crossOrigin = 'anonymous';
+      const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
       const url = URL.createObjectURL(svgBlob);
+
       img.onload = () => {
-        const width = img.naturalWidth || img.width || 800;
-        const height = img.naturalHeight || img.height || 600;
-        const canvas = document.createElement('canvas');
-        canvas.width = width * scale;
-        canvas.height = height * scale;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          const isDark = document.documentElement.classList.contains('dark');
-          ctx.fillStyle = isDark ? '#0f172a' : '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          URL.revokeObjectURL(url);
-          resolve(canvas);
-        } else {
-          URL.revokeObjectURL(url);
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = (img.naturalWidth || width) * scale;
+          canvas.height = (img.naturalHeight || height) * scale;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            const isDark = document.documentElement.classList.contains('dark');
+            ctx.fillStyle = isDark ? '#0f172a' : '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas);
+          } else {
+            resolve(null);
+          }
+        } catch (e) {
+          console.error('Canvas draw error:', e);
           resolve(null);
+        } finally {
+          URL.revokeObjectURL(url);
         }
       };
-      img.onerror = () => {
+
+      img.onerror = (e) => {
+        console.error('Failed to load SVG into Image:', e);
         URL.revokeObjectURL(url);
         resolve(null);
       };
+
       img.src = url;
     });
   };
 
   const handleDownloadPng = async () => {
     const canvas = await getSvgAsCanvas(2);
-    if (!canvas) return;
-    canvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${title || 'graphic'}.png`;
-      a.click();
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+    if (!canvas) {
+      alert('生成高清 PNG 失败，请检查 SVG 语法是否完整。');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    if (window.electronAPI?.saveFile) {
+      await window.electronAPI.saveFile({
+        defaultName: `${title || 'graphic'}.png`,
+        content: dataUrl,
+        isBase64: true
+      });
+    } else {
+      canvas.toBlob((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${title || 'graphic'}.png`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          a.remove();
+          URL.revokeObjectURL(url);
+        }, 3000);
+      }, 'image/png');
+    }
   };
 
   const handleCopyImage = async () => {
     try {
       const canvas = await getSvgAsCanvas(2);
-      if (!canvas) return;
+      if (!canvas) {
+        alert('复制图片失败：无法转码为位图。');
+        return;
+      }
+      const dataUrl = canvas.toDataURL('image/png');
+      if (window.electronAPI?.copyImage) {
+        const success = await window.electronAPI.copyImage(dataUrl);
+        if (success) {
+          setCopiedImage(true);
+          setTimeout(() => setCopiedImage(false), 2000);
+          return;
+        }
+      }
+
+      // Fallback to web clipboard API
       canvas.toBlob(async (blob) => {
         if (!blob) return;
         await navigator.clipboard.write([
@@ -92,17 +163,31 @@ export const SvgPreview: React.FC<SvgPreviewProps> = ({ content, title }) => {
       }, 'image/png');
     } catch (e) {
       console.error('Failed to copy image to clipboard:', e);
+      alert('复制图片到剪贴板失败，请尝试直接点击【导出 PNG】。');
     }
   };
 
-  const handleDownload = () => {
-    const blob = new Blob([content], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${title || 'graphic'}.svg`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const handleDownload = async () => {
+    const { svg } = prepareSvgString(content);
+    if (window.electronAPI?.saveFile) {
+      await window.electronAPI.saveFile({
+        defaultName: `${title || 'graphic'}.svg`,
+        content: svg,
+        isBase64: false
+      });
+    } else {
+      const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${title || 'graphic'}.svg`;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 3000);
+    }
   };
 
   return (

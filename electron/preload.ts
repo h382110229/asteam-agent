@@ -36,6 +36,10 @@ export interface ElectronAPI {
 
   // Multimodal Preview Pop-out
   popoutPreview: (data: { type: string; title?: string; content: string }) => Promise<boolean>;
+
+  // Native Clipboard & File Dialog
+  copyImage: (dataUrl: string) => Promise<boolean>;
+  saveFile: (options: { defaultName: string; content: string; isBase64?: boolean }) => Promise<boolean>;
 }
 
 const api: ElectronAPI = {
@@ -71,7 +75,9 @@ const api: ElectronAPI = {
 
   getOpenAtLogin: () => ipcRenderer.invoke('app:getOpenAtLogin'),
   setOpenAtLogin: (openAtLogin) => ipcRenderer.invoke('app:setOpenAtLogin', openAtLogin),
-  popoutPreview: (data) => ipcRenderer.invoke('preview:popout', data)
+  popoutPreview: (data) => ipcRenderer.invoke('preview:popout', data),
+  copyImage: (dataUrl) => ipcRenderer.invoke('clipboard:writeImage', dataUrl),
+  saveFile: (options) => ipcRenderer.invoke('dialog:saveFile', options)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

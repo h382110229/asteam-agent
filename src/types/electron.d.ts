@@ -34,6 +34,10 @@ export interface ElectronAPI {
 
   // Multimodal Preview Pop-out
   popoutPreview: (data: { type: string; title?: string; content: string }) => Promise<boolean>;
+
+  // Native Clipboard & File Dialog
+  copyImage: (dataUrl: string) => Promise<boolean>;
+  saveFile: (options: { defaultName: string; content: string; isBase64?: boolean }) => Promise<boolean>;
 }
 
 declare global {
