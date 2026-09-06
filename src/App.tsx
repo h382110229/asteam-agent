@@ -242,6 +242,11 @@ export const App: React.FC = () => {
             return next;
           });
         } else if (type === 'done') {
+          // 若上游网关或模型将全部输出归入 reasoning_content (thought)，导致正文 content 为空，自动提拔为正文
+          if (!lastMsg.content?.trim() && lastMsg.thought?.trim()) {
+            lastMsg.content = lastMsg.thought;
+            lastMsg.thought = '';
+          }
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
           setIsWaitingForUser(false);

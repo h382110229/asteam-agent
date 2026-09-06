@@ -979,7 +979,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                 {/* Multimodal Artifact Preview Card (置于结论最下方，突出交付物) */}
                 {msg.role === 'assistant' && (() => {
-                  const artifact = extractPreviewableArtifact(msg.content, msg.steps);
+                  const artifact = extractPreviewableArtifact(msg.content || msg.thought || '', msg.steps);
                   if (!artifact || !onOpenPreview) return null;
                   return (
                     <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/5 p-3 shadow-xs hover:border-[var(--primary)] transition-all">
