@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { storageHub } from './storage-hub';
 
 export interface SkillItem {
   id: string;
@@ -142,7 +143,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
 
 export class SkillManager {
   private getGlobalSkillsDir(): string {
-    const dir = path.join(os.homedir(), '.asteam', 'skills');
+    const dir = storageHub.getSkillsDir();
     if (!fs.existsSync(dir)) {
       try {
         fs.mkdirSync(dir, { recursive: true });
@@ -156,33 +157,44 @@ export class SkillManager {
   }
 
   loadGlobalSkills(): SkillItem[] {
-    const dir = this.getGlobalSkillsDir();
-    if (!fs.existsSync(dir)) return [];
+    const primaryDir = this.getGlobalSkillsDir();
+    const legacyDir = path.join(os.homedir(), '.asteam', 'skills');
+    const dirsToScan = [primaryDir];
+    if (primaryDir !== legacyDir && fs.existsSync(legacyDir)) {
+      dirsToScan.push(legacyDir);
+    }
 
     const result: SkillItem[] = [];
-    try {
-      const files = fs.readdirSync(dir);
-      for (const file of files) {
-        if (file.endsWith('.md')) {
-          const filePath = path.join(dir, file);
-          const content = fs.readFileSync(filePath, 'utf-8');
-          const skillId = file.replace(/\.md$/, '');
+    const seenIds = new Set<string>();
 
-          const titleMatch = content.match(/^#\s+(.+)$/m);
-          const name = titleMatch ? titleMatch[1].trim() : skillId;
+    for (const dir of dirsToScan) {
+      if (!fs.existsSync(dir)) continue;
+      try {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file.endsWith('.md')) {
+            const skillId = file.replace(/\.md$/, '');
+            if (seenIds.has(skillId)) continue;
+            seenIds.add(skillId);
 
-          result.push({
-            id: `custom:global:${skillId}`,
-            name: `[自定义] ${name}`,
-            description: `全局已安装技能 (${file})`,
-            isBuiltin: false,
-            category: 'custom',
-            filePath,
-            prompt: `【激活全局自定义技能：${name}】\n${content}`
-          });
+            const filePath = path.join(dir, file);
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const titleMatch = content.match(/^#\s+(.+)$/m);
+            const name = titleMatch ? titleMatch[1].trim() : skillId;
+
+            result.push({
+              id: `custom:global:${skillId}`,
+              name: `[自定义] ${name}`,
+              description: `全局已安装技能 (${file})`,
+              isBuiltin: false,
+              category: 'custom',
+              filePath,
+              prompt: `【激活全局自定义技能：${name}】\n${content}`
+            });
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
     return result;
   }
 

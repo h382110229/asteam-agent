@@ -29,11 +29,23 @@ import {
   Download,
   Upload,
   Link2,
-  FolderOpen
+  FolderOpen,
+  Database,
+  HardDrive,
+  Brain,
+  RefreshCw,
+  ArrowRightLeft,
+  ShieldAlert,
+  Save,
+  Check
 } from 'lucide-react';
 import {
   PROVIDER_PRESETS,
-  AppSettings
+  AppSettings,
+  FallbackProviderConfig,
+  DEFAULT_FALLBACK_PRESETS,
+  inferModelCapabilities,
+  ModelCapability
 } from '../config/providers';
 
 interface SettingsModalProps {
@@ -51,7 +63,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSave,
   workspacePath = null
 }) => {
-  const [activeTab, setActiveTab] = useState<'provider' | 'mcp_skills' | 'desktop'>('provider');
+  const [activeTab, setActiveTab] = useState<'provider' | 'storage' | 'memory' | 'mcp_skills' | 'desktop'>('provider');
   const [form, setForm] = useState<AppSettings>({
     ...settings,
     enabledMcpTools: settings.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector'],
@@ -63,11 +75,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       'unit_test',
       'git_commit_helper'
     ],
-    customMcpConfig: settings.customMcpConfig || '{\n  "mcpServers": {}\n}'
+    customMcpConfig: settings.customMcpConfig || '{\n  "mcpServers": {}\n}',
+    fallbackProviders: settings.fallbackProviders || DEFAULT_FALLBACK_PRESETS
   });
   const [showApiKey, setShowApiKey] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   const [testMessage, setTestMessage] = useState('');
+
+  // Fallback providers test status map
+  const [fallbackTestState, setFallbackTestState] = useState<Record<string, { status: 'idle' | 'testing' | 'success' | 'failed'; message: string }>>({});
+
+  // Storage Hub state (v1.3.0)
+  const [storageStats, setStorageStats] = useState<any | null>(null);
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrateResultMsg, setMigrateResultMsg] = useState<{ success: boolean; text: string } | null>(null);
+
+  // Memory Bank state (v1.3.0)
+  const [memoryContext, setMemoryContext] = useState<{
+    userProfile: string;
+    globalMemory: string;
+    projectMemory: string;
+    projectMemoryPath: string | null;
+  }>({
+    userProfile: '',
+    globalMemory: '',
+    projectMemory: '',
+    projectMemoryPath: null
+  });
+  const [activeMemSubTab, setActiveMemSubTab] = useState<'project' | 'profile' | 'global'>('project');
+  const [editingMemContent, setEditingMemContent] = useState('');
+  const [memorySaveStatus, setMemorySaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [memorySaveMsg, setMemorySaveMsg] = useState('');
 
   // Skills state
   const [allSkills, setAllSkills] = useState<any[]>([]);
@@ -91,11 +129,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const refreshStorageStats = async () => {
+    if (window.electronAPI?.getStorageStats) {
+      try {
+        const stats = await window.electronAPI.getStorageStats();
+        setStorageStats(stats);
+      } catch {}
+    }
+  };
+
+  const refreshMemory = async () => {
+    if (window.electronAPI?.getMemoryContext) {
+      try {
+        const data = await window.electronAPI.getMemoryContext(workspacePath);
+        setMemoryContext(data);
+        if (activeMemSubTab === 'project') {
+          setEditingMemContent(data.projectMemory || '');
+        } else if (activeMemSubTab === 'profile') {
+          setEditingMemContent(data.userProfile || '');
+        } else {
+          setEditingMemContent(data.globalMemory || '');
+        }
+      } catch {}
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       refreshSkills();
+      refreshStorageStats();
+      refreshMemory();
     }
   }, [isOpen, workspacePath]);
+
+  useEffect(() => {
+    if (activeMemSubTab === 'project') {
+      setEditingMemContent(memoryContext.projectMemory || '');
+    } else if (activeMemSubTab === 'profile') {
+      setEditingMemContent(memoryContext.userProfile || '');
+    } else {
+      setEditingMemContent(memoryContext.globalMemory || '');
+    }
+    setMemorySaveStatus('idle');
+    setMemorySaveMsg('');
+  }, [activeMemSubTab, memoryContext]);
 
   if (!isOpen) return null;
 
@@ -154,6 +231,172 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } catch (err: any) {
       setTestStatus('failed');
       setTestMessage(`网络连接异常: ${err.message}`);
+    }
+  };
+
+  // Fallback providers handlers (v1.3.0)
+  const handleToggleFallback = (fbId: string) => {
+    setForm(prev => ({
+      ...prev,
+      fallbackProviders: (prev.fallbackProviders || []).map(item =>
+        item.id === fbId ? { ...item, enabled: !item.enabled } : item
+      )
+    }));
+  };
+
+  const handleUpdateFallback = (fbId: string, field: keyof FallbackProviderConfig, val: any) => {
+    setForm(prev => ({
+      ...prev,
+      fallbackProviders: (prev.fallbackProviders || []).map(item => {
+        if (item.id !== fbId) return item;
+        const updated = { ...item, [field]: val };
+        // 若修改了模型名且未手动锁定能力，自动启发式推导
+        if (field === 'model' && typeof val === 'string' && val.trim()) {
+          updated.capabilities = inferModelCapabilities(val);
+        }
+        return updated;
+      })
+    }));
+  };
+
+  const handleToggleFallbackCapability = (fbId: string, cap: any) => {
+    setForm(prev => ({
+      ...prev,
+      fallbackProviders: (prev.fallbackProviders || []).map(item => {
+        if (item.id !== fbId) return item;
+        const currentCaps = item.capabilities || inferModelCapabilities(item.model);
+        const nextCaps = currentCaps.includes(cap)
+          ? currentCaps.filter((c: any) => c !== cap)
+          : [...currentCaps, cap];
+        return { ...item, capabilities: nextCaps };
+      })
+    }));
+  };
+
+  const handleAddCustomFallback = () => {
+    const newId = `fb-custom-${Date.now()}`;
+    const defaultModel = 'deepseek-chat';
+    const newProvider: FallbackProviderConfig = {
+      id: newId,
+      name: '自定义备用服务商',
+      baseUrl: '',
+      apiKey: '',
+      model: defaultModel,
+      enabled: true,
+      capabilities: inferModelCapabilities(defaultModel)
+    };
+    setForm(prev => ({
+      ...prev,
+      fallbackProviders: [...(prev.fallbackProviders || []), newProvider]
+    }));
+  };
+
+  const handleDeleteFallback = (fbId: string) => {
+    setForm(prev => ({
+      ...prev,
+      fallbackProviders: (prev.fallbackProviders || []).filter(item => item.id !== fbId)
+    }));
+  };
+
+  const handleTestFallbackProvider = async (fb: FallbackProviderConfig) => {
+    if (!fb.baseUrl) {
+      setFallbackTestState(prev => ({
+        ...prev,
+        [fb.id]: { status: 'failed', message: '请填写 Base URL' }
+      }));
+      return;
+    }
+    setFallbackTestState(prev => ({
+      ...prev,
+      [fb.id]: { status: 'testing', message: '测试中...' }
+    }));
+
+    try {
+      const url = `${fb.baseUrl.replace(/\/+$/, '')}/chat/completions`;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (fb.apiKey) headers['Authorization'] = `Bearer ${fb.apiKey}`;
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: fb.model || 'deepseek-chat',
+          messages: [{ role: 'user', content: 'Ping' }],
+          max_tokens: 5,
+          stream: false
+        })
+      });
+
+      if (res.ok) {
+        setFallbackTestState(prev => ({
+          ...prev,
+          [fb.id]: { status: 'success', message: '连通正常' }
+        }));
+      } else {
+        const txt = await res.text();
+        setFallbackTestState(prev => ({
+          ...prev,
+          [fb.id]: { status: 'failed', message: `状态 ${res.status}: ${txt.slice(0, 80)}` }
+        }));
+      }
+    } catch (err: any) {
+      setFallbackTestState(prev => ({
+        ...prev,
+        [fb.id]: { status: 'failed', message: `异常: ${err.message}` }
+      }));
+    }
+  };
+
+  // Storage Hub handlers (v1.3.0)
+  const handleSelectStorageDir = async () => {
+    if (!window.electronAPI?.selectDataDirectory) return;
+    const selected = await window.electronAPI.selectDataDirectory();
+    if (selected) {
+      const res = await window.electronAPI.setDataRootDir(selected);
+      if (res.success) {
+        setForm(prev => ({ ...prev, dataRootDir: res.rootDir }));
+        refreshStorageStats();
+      } else {
+        alert(res.error || '设置存储目录失败');
+      }
+    }
+  };
+
+  const handleMigrateStorage = async () => {
+    if (!window.electronAPI?.migrateStorageData) return;
+    setIsMigrating(true);
+    setMigrateResultMsg(null);
+    try {
+      const res = await window.electronAPI.migrateStorageData();
+      setMigrateResultMsg({ success: res.success, text: res.message });
+      refreshStorageStats();
+      refreshSkills();
+    } catch (err: any) {
+      setMigrateResultMsg({ success: false, text: err.message || '迁移失败' });
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
+  // Memory Bank handlers (v1.3.0)
+  const handleSaveMemory = async () => {
+    if (!window.electronAPI?.saveMemoryContent) return;
+    setMemorySaveStatus('saving');
+    setMemorySaveMsg('正在保存...');
+    try {
+      const res = await window.electronAPI.saveMemoryContent(activeMemSubTab, editingMemContent, workspacePath);
+      if (res.success) {
+        setMemorySaveStatus('saved');
+        setMemorySaveMsg('已成功持久化至记忆库');
+        refreshMemory();
+        setTimeout(() => setMemorySaveStatus('idle'), 3000);
+      } else {
+        setMemorySaveStatus('error');
+        setMemorySaveMsg(res.message);
+      }
+    } catch (err: any) {
+      setMemorySaveStatus('error');
+      setMemorySaveMsg(err.message || '保存失败');
     }
   };
 
@@ -316,9 +559,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('provider')}
-            className={`flex items-center space-x-2 border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
+            className={`flex items-center space-x-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
               activeTab === 'provider'
-                ? 'border-[var(--primary)] text-[var(--primary)]'
+                ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
                 : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
@@ -328,28 +571,54 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <button
             type="button"
+            onClick={() => setActiveTab('storage')}
+            className={`flex items-center space-x-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+              activeTab === 'storage'
+                ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
+                : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            <Database className="h-3.5 w-3.5" />
+            <span>数据与存储中枢</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('memory')}
+            className={`flex items-center space-x-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+              activeTab === 'memory'
+                ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
+                : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            <Brain className="h-3.5 w-3.5" />
+            <span>长期记忆库</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('mcp_skills')}
-            className={`flex items-center space-x-2 border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
+            className={`flex items-center space-x-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
               activeTab === 'mcp_skills'
-                ? 'border-[var(--primary)] text-[var(--primary)]'
+                ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
                 : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
             <Wrench className="h-3.5 w-3.5" />
-            <span>MCP 工具与技能库</span>
+            <span>MCP 与技能</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('desktop')}
-            className={`flex items-center space-x-2 border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
+            className={`flex items-center space-x-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
               activeTab === 'desktop'
-                ? 'border-[var(--primary)] text-[var(--primary)]'
+                ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
                 : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
             }`}
           >
             <Monitor className="h-3.5 w-3.5" />
-            <span>桌面与系统原生能力</span>
+            <span>系统与偏好</span>
           </button>
         </div>
 
@@ -431,6 +700,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] font-mono text-xs"
                   />
                 )}
+
+                {/* 主模型能力识别与标签提示 */}
+                {form.model && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-2">
+                    <span className="text-[10px] text-[var(--muted-foreground)]">主模型能力范围:</span>
+                    {inferModelCapabilities(form.model).map(cap => {
+                      const capLabels: Record<ModelCapability, { label: string; icon: string }> = {
+                        text: { label: '纯文本/代码', icon: '📝' },
+                        vision: { label: '视觉/多模态', icon: '👁️' },
+                        reasoning: { label: '深度思考/R1', icon: '🧠' },
+                        tools: { label: '函数工具', icon: '🛠️' },
+                        image_gen: { label: '图像生成', icon: '🎨' },
+                      };
+                      const meta = capLabels[cap] || { label: cap, icon: '🏷️' };
+                      return (
+                        <span
+                          key={cap}
+                          className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20 font-medium"
+                        >
+                          <span>{meta.icon}</span>
+                          <span>{meta.label}</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* API Key */}
@@ -506,6 +801,371 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>{testMessage}</span>
                   </div>
                 )}
+              </div>
+
+              {/* 🛡️ 多 LLM 供应商容灾备用池 (Multi-Provider Fallback Pool) */}
+              <div className="mt-6 pt-4 border-t border-[var(--border)] space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center space-x-1.5 font-semibold text-xs text-[var(--foreground)]">
+                      <ShieldCheck className="h-4 w-4 text-[var(--primary)]" />
+                      <span>多 LLM 供应商接入池与 524 自动容灾 (Fallback Pool)</span>
+                    </div>
+                    <p className="text-[11px] text-[var(--muted-foreground)]">
+                      当主线路遭遇 <strong>Cloudflare 524 超时</strong>、<strong>429 频控</strong> 或 <strong>500/502/503 节点宕机</strong> 时，底层自动无感平滑切换至备用线路重试。
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddCustomFallback}
+                    className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors shrink-0"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>添加备用线路</span>
+                  </button>
+                </div>
+
+                <div className="space-y-2.5">
+                  {(form.fallbackProviders || []).map((fb, idx) => {
+                    const tState = fallbackTestState[fb.id];
+                    return (
+                      <div
+                        key={fb.id}
+                        className={`rounded-xl border p-3 text-xs transition-colors ${
+                          fb.enabled
+                            ? 'border-[var(--primary)]/40 bg-[var(--primary)]/5 dark:bg-[var(--primary)]/10'
+                            : 'border-[var(--border)] bg-[var(--card)] opacity-80'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={fb.enabled}
+                              onChange={() => handleToggleFallback(fb.id)}
+                              className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
+                            />
+                            <span className="font-semibold text-[var(--foreground)]">
+                              备用线路 #{idx + 1}：{fb.name}
+                            </span>
+                            {fb.enabled && (
+                              <span className="rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-1.5 py-0.2 text-[9px] font-bold">
+                                已激活容灾
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <button
+                              type="button"
+                              onClick={() => handleTestFallbackProvider(fb)}
+                              disabled={tState?.status === 'testing'}
+                              className="rounded px-2 py-0.5 text-[10px] font-medium border border-[var(--border)] hover:bg-[var(--muted)] text-[var(--foreground)]"
+                            >
+                              {tState?.status === 'testing' ? '测试中...' : '测试连通'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFallback(fb.id)}
+                              className="p-1 text-[var(--muted-foreground)] hover:text-[var(--error)]"
+                              title="删除此备用线路"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {tState && (
+                          <div
+                            className={`mb-2 text-[10px] font-medium flex items-center space-x-1 ${
+                              tState.status === 'success'
+                                ? 'text-emerald-500'
+                                : tState.status === 'failed'
+                                ? 'text-[var(--error)]'
+                                : 'text-[var(--muted-foreground)]'
+                            }`}
+                          >
+                            {tState.status === 'success' ? (
+                              <CheckCircle2 className="h-3 w-3" />
+                            ) : (
+                              <AlertCircle className="h-3 w-3" />
+                            )}
+                            <span>{tState.message}</span>
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] text-[var(--muted-foreground)] mb-0.5">线路名称</label>
+                            <input
+                              type="text"
+                              value={fb.name}
+                              onChange={e => handleUpdateFallback(fb.id, 'name', e.target.value)}
+                              className="w-full rounded border border-[var(--input)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[var(--muted-foreground)] mb-0.5">接口地址 (Base URL)</label>
+                            <input
+                              type="text"
+                              value={fb.baseUrl}
+                              onChange={e => handleUpdateFallback(fb.id, 'baseUrl', e.target.value)}
+                              placeholder="https://..."
+                              className="w-full rounded border border-[var(--input)] bg-[var(--background)] px-2 py-1 text-xs font-mono text-[var(--foreground)]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[var(--muted-foreground)] mb-0.5">调用模型 (Model)</label>
+                            <input
+                              type="text"
+                              value={fb.model}
+                              onChange={e => handleUpdateFallback(fb.id, 'model', e.target.value)}
+                              placeholder="deepseek-chat"
+                              className="w-full rounded border border-[var(--input)] bg-[var(--background)] px-2 py-1 text-xs font-mono text-[var(--foreground)]"
+                            />
+                          </div>
+                          <div className="md:col-span-3">
+                            <label className="block text-[10px] text-[var(--muted-foreground)] mb-0.5">API Key (留空则沿用主 Key 或无需鉴权)</label>
+                            <input
+                              type="password"
+                              value={fb.apiKey}
+                              onChange={e => handleUpdateFallback(fb.id, 'apiKey', e.target.value)}
+                              placeholder="sk-..."
+                              className="w-full rounded border border-[var(--input)] bg-[var(--background)] px-2 py-1 text-xs font-mono text-[var(--foreground)]"
+                            />
+                          </div>
+                          <div className="md:col-span-3 pt-1 border-t border-[var(--border)]/40 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] text-[var(--muted-foreground)]">自适应能力标签:</span>
+                            {(['text', 'vision', 'reasoning', 'tools', 'image_gen'] as const).map(cap => {
+                              const activeCaps = fb.capabilities || inferModelCapabilities(fb.model);
+                              const isChecked = activeCaps.includes(cap);
+                              const capLabels: Record<ModelCapability, { label: string; icon: string }> = {
+                                text: { label: '文本/代码', icon: '📝' },
+                                vision: { label: '视觉/多模态', icon: '👁️' },
+                                reasoning: { label: '深度思考/R1', icon: '🧠' },
+                                tools: { label: '函数工具', icon: '🛠️' },
+                                image_gen: { label: '图像生成', icon: '🎨' },
+                              };
+                              const meta = capLabels[cap] || { label: cap, icon: '🏷️' };
+                              return (
+                                <button
+                                  key={cap}
+                                  type="button"
+                                  onClick={() => handleToggleFallbackCapability(fb.id, cap)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] flex items-center space-x-1 border transition-colors ${
+                                    isChecked
+                                      ? 'bg-[var(--primary)]/15 border-[var(--primary)] text-[var(--primary)] font-medium'
+                                      : 'bg-[var(--muted)]/40 border-transparent text-[var(--muted-foreground)] opacity-60 hover:opacity-100'
+                                  }`}
+                                  title={isChecked ? `点击移除 ${meta.label} 标签` : `点击为该备用线路启用 ${meta.label} 支持`}
+                                >
+                                  <span>{meta.icon}</span>
+                                  <span>{meta.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 📁 数据与存储中枢 (Storage & Data Hub) 面板 */}
+          {activeTab === 'storage' && (
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-1.5 font-semibold text-xs text-[var(--foreground)]">
+                  <HardDrive className="h-4 w-4 text-[var(--primary)]" />
+                  <span>数据与存储中枢 (Storage & Data Hub)</span>
+                </div>
+                <p className="text-[11px] text-[var(--muted-foreground)]">
+                  ASTeam Agent 支持将所有工作区、技能、长期记忆与生成交付产物存放于自定义磁盘（彻底脱离 C 盘系统盘，杜绝与其他智能体路径冲突）。
+                </p>
+              </div>
+
+              {/* 根目录选择器 */}
+              <div className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5 space-y-2">
+                <label className="block font-semibold text-xs text-[var(--foreground)]">当前数据根目录 (Data Root Directory)</label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    readOnly
+                    value={storageStats?.dataRootDir || form.dataRootDir || '正在获取...'}
+                    className="flex-1 rounded-lg border border-[var(--input)] bg-[var(--muted)] px-3 py-1.5 text-xs font-mono text-[var(--foreground)] cursor-default select-text"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSelectStorageDir}
+                    className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors shadow-xs shrink-0"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    <span>选择文件夹...</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-[var(--muted-foreground)]">
+                  💡 推荐指定大容量非系统盘（如 <code>D:\ASTeamData\</code> 或 <code>E:\ASTeamData\</code>）。
+                </p>
+              </div>
+
+              {/* 平滑迁移向导 */}
+              {storageStats?.hasLegacyData && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10 p-3.5 space-y-2 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2 text-amber-600 dark:text-amber-400 font-semibold text-xs">
+                      <ArrowRightLeft className="h-4 w-4" />
+                      <span>发现旧版数据待迁移</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleMigrateStorage}
+                      disabled={isMigrating}
+                      className="inline-flex items-center space-x-1 rounded-lg bg-amber-600 dark:bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isMigrating ? 'animate-spin' : ''}`} />
+                      <span>{isMigrating ? '迁移中...' : '一键平滑迁移现有数据'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-[var(--muted-foreground)]">
+                    在 <code>~/.asteam</code> 发现 {storageStats.legacyDataStats?.skillsCount || 0} 个历史自定义技能与 {storageStats.legacyDataStats?.workspaceFilesCount || 0} 个旧工作区文件。点击上方按钮可将全部数据安全搬家至新中枢目录，释放 C 盘空间。
+                  </p>
+                  {migrateResultMsg && (
+                    <div
+                      className={`text-[11px] font-medium ${
+                        migrateResultMsg.success ? 'text-emerald-500' : 'text-[var(--error)]'
+                      }`}
+                    >
+                      {migrateResultMsg.text}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 5 大模块子目录状态卡片 */}
+              <div className="space-y-2">
+                <span className="block font-semibold text-xs text-[var(--foreground)]">模块化目录结构与空间占用</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {storageStats?.subdirs && Object.entries(storageStats.subdirs).map(([key, item]: [string, any]) => {
+                    const sizeKB = Math.round((item.totalSize || 0) / 1024);
+                    const sizeMB = (sizeKB / 1024).toFixed(2);
+                    return (
+                      <div key={key} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-2.5 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-xs text-[var(--foreground)]">{item.name}</span>
+                          <span className="text-[10px] text-[var(--muted-foreground)] font-mono">
+                            {sizeKB > 1024 ? `${sizeMB} MB` : `${sizeKB} KB`}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-[var(--muted-foreground)] font-mono truncate" title={item.absolutePath}>
+                          {item.absolutePath}
+                        </p>
+                        <div className="text-[10px] text-[var(--primary)] font-medium">
+                          包含 {item.fileCount || 0} 个文件
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 🧠 长期记忆体系 (Memory Bank) 面板 */}
+          {activeTab === 'memory' && (
+            <div className="space-y-4 text-xs">
+              <div className="space-y-1">
+                <div className="flex items-center space-x-1.5 font-semibold text-xs text-[var(--foreground)]">
+                  <Brain className="h-4 w-4 text-[var(--primary)]" />
+                  <span>长期记忆与知识沉淀体系 (Memory Bank)</span>
+                </div>
+                <p className="text-[11px] text-[var(--muted-foreground)]">
+                  跨会话沉淀工程架构约定与技术栈偏好。每次任务启动时，Agent 底层将自动感知并注入该记忆。您也可以在聊天框中使用 <code>/remember &lt;内容&gt;</code> 快捷沉淀。
+                </p>
+              </div>
+
+              {/* 记忆维度子标签切换 */}
+              <div className="flex rounded-lg border border-[var(--border)] bg-[var(--muted)] p-1 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setActiveMemSubTab('project')}
+                  className={`flex-1 rounded py-1.5 font-medium transition-colors ${
+                    activeMemSubTab === 'project'
+                      ? 'bg-[var(--card)] text-[var(--foreground)] shadow-xs'
+                      : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  项目专属记忆 (.asteam/memory/MEMORY.md)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMemSubTab('profile')}
+                  className={`flex-1 rounded py-1.5 font-medium transition-colors ${
+                    activeMemSubTab === 'profile'
+                      ? 'bg-[var(--card)] text-[var(--foreground)] shadow-xs'
+                      : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  用户全局画像 (user_profile.md)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveMemSubTab('global')}
+                  className={`flex-1 rounded py-1.5 font-medium transition-colors ${
+                    activeMemSubTab === 'global'
+                      ? 'bg-[var(--card)] text-[var(--foreground)] shadow-xs'
+                      : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  全局通用沉淀 (GLOBAL_MEMORY.md)
+                </button>
+              </div>
+
+              {/* 记忆文本编辑区 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-xs text-[var(--foreground)]">
+                    {activeMemSubTab === 'project'
+                      ? `当前项目记忆 (${memoryContext.projectMemoryPath || '未打开工作区'})`
+                      : activeMemSubTab === 'profile'
+                      ? '用户偏好与协作风格画像'
+                      : '跨项目通用避坑经验'}
+                  </span>
+                  <div className="flex items-center space-x-2">
+                    {memorySaveMsg && (
+                      <span
+                        className={`text-[10px] font-medium flex items-center space-x-1 ${
+                          memorySaveStatus === 'saved'
+                            ? 'text-emerald-500'
+                            : memorySaveStatus === 'error'
+                            ? 'text-[var(--error)]'
+                            : 'text-[var(--muted-foreground)]'
+                        }`}
+                      >
+                        {memorySaveStatus === 'saved' && <Check className="h-3 w-3" />}
+                        <span>{memorySaveMsg}</span>
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleSaveMemory}
+                      disabled={memorySaveStatus === 'saving'}
+                      className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)] px-3 py-1 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors shadow-xs disabled:opacity-50"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      <span>{memorySaveStatus === 'saving' ? '保存中...' : '保存记忆'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  rows={12}
+                  value={editingMemContent}
+                  onChange={e => setEditingMemContent(e.target.value)}
+                  placeholder="在此直接编写或审阅 Markdown 记忆条目..."
+                  className="w-full rounded-xl border border-[var(--input)] bg-[var(--card)] p-3 font-mono text-xs text-[var(--foreground)] leading-relaxed focus:border-[var(--primary)] focus:outline-none shadow-2xs"
+                />
               </div>
             </div>
           )}

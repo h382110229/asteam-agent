@@ -6,6 +6,18 @@ import os from 'node:os';
 import { mcpManager } from './mcp-manager';
 import { skillManager } from './skill-manager';
 import { createWordDocx, createPowerPointPptx } from './office-generator';
+import { storageHub } from './storage-hub';
+import { memoryManager } from './memory-manager';
+
+export interface FallbackProviderItem {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  enabled: boolean;
+  capabilities?: string[];
+}
 
 export interface AgentConfig {
   baseUrl: string;
@@ -16,6 +28,8 @@ export interface AgentConfig {
   enabledMcpTools?: string[];
   enabledSkills?: string[];
   executionMode?: 'auto_edit' | 'plan_only' | 'safe_approval';
+  fallbackProviders?: FallbackProviderItem[];
+  capabilities?: string[];
 }
 
 export interface ChatMessage {
@@ -219,7 +233,8 @@ class WorkspaceTools {
 
     // 4. 智能识别并定向技能库 (ASTeam Skills) 虚拟与物理路径：
     // 如 "skills/custom/global/xxx.md", "custom/global/xxx.md", "custom:global:xxx", ".asteam/skills/xxx.md"
-    const globalSkillsDir = path.join(userHome, '.asteam', 'skills');
+    const globalSkillsDir = storageHub.getSkillsDir();
+    const legacyGlobalSkillsDir = path.join(userHome, '.asteam', 'skills');
     const workspaceSkillsDir = this.workspacePath ? path.join(this.workspacePath, '.asteam', 'skills') : null;
     const rawSkillBase = path.basename(target).replace(/^(?:custom_global_|custom:global:|custom_workspace_|custom:workspace:)/i, '');
     const cleanSkillMd = rawSkillBase.endsWith('.md') ? rawSkillBase : `${rawSkillBase}.md`;
@@ -234,6 +249,12 @@ class WorkspaceTools {
       if (fs.existsSync(candGlobal)) {
         return candGlobal;
       }
+      if (fs.existsSync(legacyGlobalSkillsDir)) {
+        const candLegacy = path.join(legacyGlobalSkillsDir, cleanSkillMd);
+        if (fs.existsSync(candLegacy)) {
+          return candLegacy;
+        }
+      }
       if (workspaceSkillsDir) {
         const candWorkspace = path.join(workspaceSkillsDir, cleanSkillMd);
         if (fs.existsSync(candWorkspace)) {
@@ -244,10 +265,12 @@ class WorkspaceTools {
 
     if (path.isAbsolute(target)) {
       const normalized = path.normalize(target);
-      // 在免项目宿主模式下，或明确写入用户桌面 (Desktop) 与用户主目录：全部安全放行！
+      const dataRoot = path.normalize(storageHub.getDataRootDir());
+      // 在免项目宿主模式下，或明确写入用户桌面 (Desktop)、数据中枢根目录与用户主目录：全部安全放行！
       if (
         this.isHostMode ||
         normalized.startsWith(path.normalize(this.workspacePath)) ||
+        normalized.startsWith(dataRoot) ||
         normalized.startsWith(desktopDir) ||
         normalized.startsWith(userHome)
       ) {
@@ -479,29 +502,51 @@ class WorkspaceTools {
   }
 }
 
-// 2. LLM Call Helper with Content-Type Auto Detection & SSE Stream parsing
-async function callLLMStream(
-  config: AgentConfig,
+interface SingleProviderTarget {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  capabilities?: string[];
+}
+
+function providerSupportsVision(p: SingleProviderTarget): boolean {
+  if (p.capabilities && p.capabilities.length > 0) {
+    return p.capabilities.includes('vision');
+  }
+  const name = (p.model || '').toLowerCase();
+  return (
+    name.includes('vision') ||
+    name.includes('vl') ||
+    name.includes('4o') ||
+    name.includes('gemini') ||
+    name.includes('claude-3') ||
+    name.includes('omni') ||
+    name.includes('mimo') ||
+    name === 'auto'
+  );
+}
+
+async function executeSingleProviderCall(
+  provider: SingleProviderTarget,
   messages: ChatMessage[],
   abortSignal: AbortSignal,
+  useStream: boolean,
   onDelta: (text: string, type?: 'content' | 'thought') => void
 ): Promise<string> {
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
-  
+  const url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
   };
-  if (config.apiKey) {
-    headers['Authorization'] = `Bearer ${config.apiKey}`;
+  if (provider.apiKey) {
+    headers['Authorization'] = `Bearer ${provider.apiKey}`;
   }
-
-  const useStream = config.stream !== false;
 
   const response = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: config.model || 'Auto',
+      model: provider.model || 'Auto',
       messages,
       stream: useStream,
       temperature: 0.3
@@ -512,41 +557,47 @@ async function callLLMStream(
   if (!response.ok) {
     const errText = await response.text();
     // 高可用动态故障转移 (Failover Retry)：
-    // 若网关在动态路由调度特定子模型时遇到了临时的 410 (如分发池中某个特定节点退役)，客户端自动无缝向高可用引擎节点重试一次，确保用户的长链任务不被打断
+    // 若网关在动态路由调度特定子模型时遇到了临时的 410 (如分发池中某个特定节点退役)
     if (response.status === 410 || errText.includes('end of life') || errText.includes('no longer available')) {
-      if (config.model !== 'deepseek-chat') {
-        return await callLLMStream({ ...config, model: 'deepseek-chat' }, messages, abortSignal, onDelta);
+      if (provider.model !== 'deepseek-chat') {
+        return await executeSingleProviderCall(
+          { ...provider, model: 'deepseek-chat' },
+          messages,
+          abortSignal,
+          useStream,
+          onDelta
+        );
       }
-      throw new Error(`当前模型服务节点暂时不可用 (HTTP 410)。建议在 [设置 -> AI 模型与供应商] 中切换其他可用模型。`);
     }
 
-    // 针对网关超时 (524 / 504) 或服务异常 (502 / 503) 等，剥离冗长的 HTML 垃圾代码，给出精准人话诊断
     let cleanMessage = '';
     if (response.status === 524) {
-      cleanMessage = `[网关响应超时 524 Timeout] ASteam API 网关与 Cloudflare 等待上游模型首字推理超时 (超过 100 秒)。若模型当前负载较高或处于长链思考，建议在设置中切换为并发更优的模型线路，或点击【重新尝试】。`;
+      cleanMessage = `[网关超时 HTTP 524] 等待上游模型推理超时 (超过 100 秒)`;
     } else if (response.status === 502 || response.status === 503 || response.status === 504) {
-      cleanMessage = `[网关服务异常 ${response.status}] ASteam API 网关或上游服务暂时不可用，服务节点可能正在调度维护，请稍后点击【重新尝试】。`;
+      cleanMessage = `[网关服务异常 HTTP ${response.status}] 上游服务暂时不可用或节点调度中`;
     } else if (response.status === 429) {
-      cleanMessage = `[请求频次超限 429 Rate Limit] 当前 API 调用频率超限或并发已满，请稍候 10~30 秒后重试。`;
+      cleanMessage = `[频控限流 HTTP 429] 当前调用频率超限或并发已满`;
     } else if (response.status === 401 || response.status === 403) {
-      cleanMessage = `[API 鉴权失败 ${response.status} Unauthorized] API Key 校验未通过，请点击设置检查您的 API Key 是否有效。`;
+      cleanMessage = `[鉴权失败 HTTP ${response.status}] API Key 校验未通过`;
     } else {
-      // 检查是否为 HTML 错误页面并提取标题
       if (errText.includes('<!DOCTYPE') || errText.includes('<html')) {
         const titleMatch = errText.match(/<title>([^<]+)<\/title>/i);
         const title = titleMatch ? titleMatch[1].trim() : `HTTP ${response.status} 错误`;
-        cleanMessage = `[API 请求异常 ${response.status}] 服务端网关返回: ${title}。`;
+        cleanMessage = `[API 异常 HTTP ${response.status}] ${title}`;
       } else {
-        cleanMessage = `API Request Failed (${response.status}): ${errText.slice(0, 300)}`;
+        cleanMessage = `[API 异常 HTTP ${response.status}] ${errText.slice(0, 200)}`;
       }
     }
 
-    throw new Error(cleanMessage);
+    const err = new Error(cleanMessage) as any;
+    err.status = response.status;
+    err.rawText = errText;
+    throw err;
   }
 
   const contentType = (response.headers.get('content-type') || '').toLowerCase();
-  
-  // Optimization 3: Handle non-streaming application/json fallback gracefully
+
+  // Handle non-streaming application/json
   if (contentType.includes('application/json') || !contentType.includes('text/event-stream')) {
     const json = await response.json();
     const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.delta?.content || '';
@@ -586,7 +637,6 @@ async function callLLMStream(
           const deltaContent = delta?.content || '';
           const deltaReasoning = delta?.reasoning_content || delta?.thought || '';
 
-          // 若有思考推理链（如 DeepSeek-R1 / mimo 推理），实时逐字推送 thought，保持连接持续传输
           if (deltaReasoning) {
             fullText += deltaReasoning;
             onDelta(deltaReasoning, 'thought');
@@ -595,14 +645,137 @@ async function callLLMStream(
             fullText += deltaContent;
             onDelta(deltaContent, 'content');
           }
-        } catch {
-          // ignore incomplete JSON chunk in stream
-        }
+        } catch {}
       }
     }
   }
 
   return fullText;
+}
+
+async function callLLMStream(
+  config: AgentConfig,
+  messages: ChatMessage[],
+  abortSignal: AbortSignal,
+  onDelta: (text: string, type?: 'content' | 'thought') => void
+): Promise<string> {
+  const useStream = config.stream !== false;
+
+  // 1. 会话特征探测: 是否包含图像附件或多模态信号
+  const needsVision = messages.some(m =>
+    typeof m.content === 'string' &&
+    (m.content.includes('![') || m.content.includes('data:image/') || m.content.includes('【用户附件图片:'))
+  );
+
+  // 2. 构建服务商候选优先级队列：主线路 -> 启用的备用线路列表
+  const rawProviderQueue: SingleProviderTarget[] = [
+    {
+      name: '主线路 (Primary)',
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model: config.model,
+      capabilities: config.capabilities
+    }
+  ];
+
+  if (config.fallbackProviders && config.fallbackProviders.length > 0) {
+    for (const fb of config.fallbackProviders) {
+      if (fb.enabled && fb.baseUrl && fb.baseUrl.trim()) {
+        rawProviderQueue.push({
+          name: fb.name || '备用线路',
+          baseUrl: fb.baseUrl.trim(),
+          apiKey: fb.apiKey || '',
+          model: fb.model || 'deepseek-chat',
+          capabilities: fb.capabilities
+        });
+      }
+    }
+  }
+
+  // 3. 多模态能力感知过滤 (Capability-Aware Filtering)
+  const providerQueue: SingleProviderTarget[] = [];
+  const skippedPureTextProviders: string[] = [];
+
+  for (const p of rawProviderQueue) {
+    if (needsVision && !providerSupportsVision(p)) {
+      skippedPureTextProviders.push(`${p.name} (${p.model})`);
+    } else {
+      providerQueue.push(p);
+    }
+  }
+
+  // 若本次需要视觉能力，但所有线路均不支持
+  if (needsVision && providerQueue.length === 0) {
+    throw new Error(
+      `[多模态能力拦截] 检测到当前会话包含图片/视觉输入，但当前主线路及备用服务商均不支持 Vision 视觉多模态能力（已跳过纯文本模型：${skippedPureTextProviders.join('、')}）。\n建议在【设置 -> AI 模型与供应商】中切换为主流多模态模型（如 Auto / GPT-4o / Gemini），或激活备用池中的视觉线路。`
+    );
+  }
+
+  // 若跳过了纯文本模型，在 thought 流中输出提示
+  if (needsVision && skippedPureTextProviders.length > 0) {
+    onDelta(
+      `\n\n> 👁️ **[多模态能力感知路由]** 检测到任务包含图片输入，系统已自动过滤纯文本线路 [${skippedPureTextProviders.join('、')}]，优先锁定具备 Vision 能力的服务商发起推理...\n\n`,
+      'thought'
+    );
+  }
+
+  const errors: string[] = [];
+
+  for (let i = 0; i < providerQueue.length; i++) {
+    const currentProvider = providerQueue[i];
+
+    try {
+      if (abortSignal.aborted) {
+        throw new Error('Task was aborted by user.');
+      }
+
+      return await executeSingleProviderCall(
+        currentProvider,
+        messages,
+        abortSignal,
+        useStream,
+        onDelta
+      );
+    } catch (err: any) {
+      if (abortSignal.aborted) {
+        throw err;
+      }
+
+      const status = err.status;
+      const msg = err.message || String(err);
+      errors.push(`[${currentProvider.name} - ${currentProvider.model}]: ${msg}`);
+
+      // 判定是否可进行无感故障转移 (Failover)：
+      // 524(Cloudflare超时), 429(限流), 500/502/503/504(网关宕机), 或网络连接被拒/fetch失败
+      const isRecoverable =
+        status === 524 ||
+        status === 429 ||
+        (status >= 500 && status <= 504) ||
+        msg.includes('fetch') ||
+        msg.includes('network') ||
+        msg.includes('timeout') ||
+        msg.includes('ECONNREFUSED');
+
+      const hasNextProvider = i + 1 < providerQueue.length;
+
+      if (isRecoverable && hasNextProvider) {
+        const nextProvider = providerQueue[i + 1];
+        const reasonText = status ? `HTTP ${status}` : '网络连接受阻';
+        const notice = `\n\n> 🛡️ **[524 自动容灾 · 故障转移]** ${currentProvider.name} 遭遇 ${reasonText}，系统已自动无感平滑切换至备用线路 **「${nextProvider.name}」** (模型: \`${nextProvider.model}\`) 发起重试...\n\n`;
+        onDelta(notice, 'thought');
+        console.warn(`[Failover] Switch from ${currentProvider.name} to ${nextProvider.name} due to: ${msg}`);
+        continue; // 切换至下一线路重试
+      } else {
+        // 无法容灾或候选池已耗尽
+        if (!hasNextProvider && providerQueue.length > 1) {
+          throw new Error(`所有兼容当前任务能力的 LLM 线路重试均失败：\n${errors.join('\n')}`);
+        }
+        throw err;
+      }
+    }
+  }
+
+  throw new Error(`LLM 调用失败: 未能从服务商池中获得有效响应。\n${errors.join('\n')}`);
 }
 
 // Robust JSON and Tool Args Extractor (handles Windows paths, unescaped newlines/quotes)
@@ -770,7 +943,7 @@ export async function runHarnessAgent(
     const isHostMode = !hasWorkspace;
     const effectiveWorkspace = hasWorkspace
       ? config.workspacePath!
-      : path.join(os.homedir(), 'ASTeam-Workspace');
+      : storageHub.getWorkspacesDir();
 
     if (!fs.existsSync(effectiveWorkspace)) {
       try {
@@ -810,6 +983,9 @@ export async function runHarnessAgent(
     ]));
 
     const skillPrompts = skillManager.getAggregatedSkillPrompt(effectiveEnabledSkills, config.workspacePath || null);
+
+    // 注入长期记忆上下文 (Memory Bank: 项目级 MEMORY.md 与全局 user_profile.md)
+    const memoryContextPrompt = memoryManager.assembleMemoryContext(config.workspacePath || null);
 
     let userMentionInstruction = '';
     if (userMentionedSkills.length > 0) {
@@ -910,7 +1086,13 @@ ${isHostMode
 \`\`\`tool:read_skill
 {"id": "技能ID或名称"}
 \`\`\`
+11. remember_fact: 将关于当前工程架构、技术栈规范或通用避坑经验沉淀至持久记忆库中（跨会话常驻）。调用格式：
+\`\`\`tool:remember_fact
+{"scope": "project", "fact": "关键技术约定或避坑条目"}
+\`\`\`
+其中 scope 可为 "project" (项目记忆库) 或 "global" (全局记忆库)。
 
+${memoryContextPrompt}
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
 ${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''}
 ${userMentionInstruction}
@@ -1091,6 +1273,14 @@ ${modeInstruction}
           } else {
             throw new Error(`未找到技能: "${skillId}"。请先调用 list_skills 查看当前已挂载的所有技能清单。`);
           }
+        } else if (toolName === 'remember_fact') {
+          const scope = (toolArgs.scope === 'global' || !config.workspacePath) ? 'global' : 'project';
+          const fact = toolArgs.fact || toolArgs.content || toolArgs.text || '';
+          if (!fact || !fact.trim()) {
+            throw new Error('remember_fact 参数错误: 请提供 fact 字段以记录要点 (例如 {"scope": "project", "fact": "..."})');
+          }
+          const memRes = memoryManager.addMemoryFact(scope, fact.trim(), config.workspacePath || null);
+          observation = `[长期记忆沉淀成功] ${memRes.message}\n已持久化落盘条目: "${fact.trim()}"`;
         } else {
           // Check MCP tools
           const mcpResult = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: config.workspacePath || null });

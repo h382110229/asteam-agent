@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
 import { getGitStatus, getFileDiff, discardFileChange } from './git-manager';
 import { skillManager } from './skill-manager';
+import { storageHub } from './storage-hub';
+import { memoryManager } from './memory-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -262,6 +264,53 @@ function setupIPC() {
 
   ipcMain.handle('skills:delete', async (_event, skillId: string) => {
     return skillManager.deleteCustomSkill(skillId);
+  });
+
+  // Storage Hub IPC (v1.3.0)
+  ipcMain.handle('storage:getStats', async () => {
+    return storageHub.getStorageStats();
+  });
+
+  ipcMain.handle('storage:selectDataDir', async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 ASTeam Agent 自定义数据与存储根目录',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('storage:setDataRootDir', async (_event, newPath: string) => {
+    return storageHub.setDataRootDir(newPath);
+  });
+
+  ipcMain.handle('storage:migrateData', async () => {
+    return await storageHub.migrateLegacyData();
+  });
+
+  // Memory Bank IPC (v1.3.0)
+  ipcMain.handle('memory:getAll', async (_event, workspacePath: string | null) => {
+    return {
+      userProfile: memoryManager.readUserProfile(),
+      globalMemory: memoryManager.readGlobalMemory(),
+      projectMemory: memoryManager.readProjectMemory(workspacePath),
+      projectMemoryPath: memoryManager.getProjectMemoryPath(workspacePath)
+    };
+  });
+
+  ipcMain.handle('memory:saveContent', async (_event, { type, content, workspacePath }: { type: 'project' | 'profile' | 'global'; content: string; workspacePath: string | null }) => {
+    return memoryManager.saveMemoryContent(type, content, workspacePath);
+  });
+
+  ipcMain.handle('memory:addFact', async (_event, { scope, fact, workspacePath }: { scope: 'project' | 'global'; fact: string; workspacePath: string | null }) => {
+    return memoryManager.addMemoryFact(scope, fact, workspacePath);
+  });
+
+  ipcMain.handle('memory:parseCommand', async (_event, text: string) => {
+    return memoryManager.parseExplicitCommand(text);
   });
 
   // Multimodal Preview Pop-out Window IPC

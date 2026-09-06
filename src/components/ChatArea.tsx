@@ -32,6 +32,7 @@ import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestion
 import { LiveTerminalCard } from './LiveTerminalCard';
 import { ExecutionMode } from '../types/project';
 import { PreviewData } from './WorkspaceDrawer';
+import { inferModelCapabilities } from '../config/providers';
 
 export interface FileAttachment {
   name: string;
@@ -1223,6 +1224,27 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           )}
 
+          {/* Vision Mismatch Defensive Hint */}
+          {attachments.some(a => a.type?.startsWith('image/')) && !inferModelCapabilities(currentModel).includes('vision') && (
+            <div className="flex items-center justify-between rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400 animate-in fade-in-50">
+              <div className="flex items-center space-x-1.5 min-w-0">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span className="truncate">
+                  当前主模型 <strong className="font-semibold">{currentModel}</strong> 为纯文本架构，无法直接识别图像。系统在调用时将自动路由至具备 Vision 能力的备用线路。
+                </span>
+              </div>
+              {onOpenSettings && (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="ml-2 underline font-medium hover:text-amber-500 shrink-0 cursor-pointer"
+                >
+                  检查线路配置
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Status Meta Bar */}
           <div className="flex items-center justify-between px-1 text-[11px] text-[var(--muted-foreground)] select-none">
             <div className="flex items-center space-x-2">
@@ -1293,7 +1315,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               </span>
             ) : (
               <span className="hidden sm:inline-block text-[10px]">
-                输入 <code>/</code> 唤出指令 · 输入 <code>@</code> 唤出技能 · 支持拖拽/粘贴附件 · Enter 发送
+                输入 <code>/remember</code> 沉淀记忆 · 输入 <code>@</code> 引用技能 · 支持拖拽/粘贴附件 · Enter 发送
               </span>
             )}
           </div>
@@ -1334,8 +1356,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   : isWaitingForUser
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath
-                  ? `向 ASTeam Agent 指派任务（支持输入 / 唤出指令，@ 唤出技能，支持拖入或粘贴附件/图片）...`
-                  : `指派本机宿主任务（支持输入 / 唤出指令，@ 唤出技能，支持拖拽或粘贴附件/图片）...`
+                  ? `指派任务（支持输入 /remember 沉淀记忆，输入 @ 唤出技能，支持拖入附件）...`
+                  : `指派本机任务（支持输入 /remember 沉淀全局记忆，输入 @ 唤出技能，支持拖拽附件）...`
               }
               className="max-h-44 min-h-[28px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none select-text"
             />

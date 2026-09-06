@@ -398,6 +398,45 @@ export const App: React.FC = () => {
     if (!text.trim() && (!attachments || attachments.length === 0)) return;
     if (isRunning && !isWaitingForUser) return;
 
+    // v1.3.0 快捷指令: /remember <内容> 或 /learn <内容> 显式持久化至长期记忆库
+    const trimmedInput = text.trim();
+    const rememberMatch = trimmedInput.match(/^\/(?:remember|learn)\s+([\s\S]+)$/i);
+    if (rememberMatch && rememberMatch[1]?.trim() && window.electronAPI?.addMemoryFact) {
+      const factToSave = rememberMatch[1].trim();
+      const scope = currentWorkspacePath ? 'project' : 'global';
+      const res = await window.electronAPI.addMemoryFact(scope, factToSave, currentWorkspacePath);
+
+      const userMsg: ChatMessageItem = {
+        id: `msg-user-${Date.now()}`,
+        role: 'user',
+        content: trimmedInput,
+        timestamp: Date.now()
+      };
+
+      const assistantMsg: ChatMessageItem = {
+        id: `msg-assistant-${Date.now() + 1}`,
+        role: 'assistant',
+        content: `🧠 **[长期记忆已沉淀 · 跨会话激活]**\n\n已成功持久化落盘至 **${scope === 'project' ? '当前项目库 (.asteam/memory/MEMORY.md)' : '全局记忆库 (GLOBAL_MEMORY.md)'}**：\n\n> ${factToSave}\n\n💡 该工程规约/避坑要点已常驻生效，在此项目的所有后续任务与新会话中，Agent 将始终自动感知并严格遵循此约定。`,
+        thought: '已通过显式指令完成本地工程记忆沉淀。',
+        steps: [
+          {
+            id: `step-mem-${Date.now()}`,
+            title: '持久化沉淀至 Memory Bank',
+            status: 'completed',
+            tool: 'remember_fact',
+            result: res.message
+          }
+        ],
+        timestamp: Date.now() + 1
+      };
+
+      setMessagesMap(prev => ({
+        ...prev,
+        [activeSessionId]: [...(prev[activeSessionId] || []), userMsg, assistantMsg]
+      }));
+      return;
+    }
+
     let fullContent = text.trim();
     if (attachments && attachments.length > 0) {
       const attachSnippets = attachments.map(att => {
@@ -470,7 +509,8 @@ export const App: React.FC = () => {
       workspacePath: currentWorkspacePath,
       enabledMcpTools: settings.enabledMcpTools,
       enabledSkills: settings.enabledSkills,
-      executionMode: mode
+      executionMode: mode,
+      fallbackProviders: settings.fallbackProviders
     };
 
     if (window.electronAPI) {

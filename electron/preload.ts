@@ -46,6 +46,18 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<boolean>;
   openPath: (targetPath: string) => Promise<boolean>;
   openInBrowser: (options: { content: string; title?: string; defaultPath?: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+
+  // Storage Hub (v1.3.0)
+  getStorageStats: () => Promise<any>;
+  selectDataDirectory: () => Promise<string | null>;
+  setDataRootDir: (newPath: string) => Promise<{ success: boolean; rootDir: string; error?: string }>;
+  migrateStorageData: () => Promise<{ success: boolean; migratedSkills: number; migratedWorkspaceFiles: number; message: string }>;
+
+  // Memory Bank (v1.3.0)
+  getMemoryContext: (workspacePath: string | null) => Promise<{ userProfile: string; globalMemory: string; projectMemory: string; projectMemoryPath: string | null }>;
+  saveMemoryContent: (type: 'project' | 'profile' | 'global', content: string, workspacePath: string | null) => Promise<{ success: boolean; message: string }>;
+  addMemoryFact: (scope: 'project' | 'global', fact: string, workspacePath: string | null) => Promise<{ success: boolean; targetPath: string; message: string }>;
+  parseMemoryCommand: (text: string) => Promise<{ isCommand: boolean; fact?: string }>;
 }
 
 const api: ElectronAPI = {
@@ -88,7 +100,19 @@ const api: ElectronAPI = {
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
   openPath: (targetPath) => ipcRenderer.invoke('shell:openPath', targetPath),
-  openInBrowser: (options) => ipcRenderer.invoke('shell:openInBrowser', options)
+  openInBrowser: (options) => ipcRenderer.invoke('shell:openInBrowser', options),
+
+  // Storage Hub (v1.3.0)
+  getStorageStats: () => ipcRenderer.invoke('storage:getStats'),
+  selectDataDirectory: () => ipcRenderer.invoke('storage:selectDataDir'),
+  setDataRootDir: (newPath) => ipcRenderer.invoke('storage:setDataRootDir', newPath),
+  migrateStorageData: () => ipcRenderer.invoke('storage:migrateData'),
+
+  // Memory Bank (v1.3.0)
+  getMemoryContext: (workspacePath) => ipcRenderer.invoke('memory:getAll', workspacePath),
+  saveMemoryContent: (type, content, workspacePath) => ipcRenderer.invoke('memory:saveContent', { type, content, workspacePath }),
+  addMemoryFact: (scope, fact, workspacePath) => ipcRenderer.invoke('memory:addFact', { scope, fact, workspacePath }),
+  parseMemoryCommand: (text) => ipcRenderer.invoke('memory:parseCommand', text)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

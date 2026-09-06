@@ -44,6 +44,18 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<boolean>;
   openPath: (targetPath: string) => Promise<boolean>;
   openInBrowser: (options: { content: string; title?: string; defaultPath?: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+
+  // Storage Hub (v1.3.0)
+  getStorageStats: () => Promise<any>;
+  selectDataDirectory: () => Promise<string | null>;
+  setDataRootDir: (newPath: string) => Promise<{ success: boolean; rootDir: string; error?: string }>;
+  migrateStorageData: () => Promise<{ success: boolean; migratedSkills: number; migratedWorkspaceFiles: number; message: string }>;
+
+  // Memory Bank (v1.3.0)
+  getMemoryContext: (workspacePath: string | null) => Promise<{ userProfile: string; globalMemory: string; projectMemory: string; projectMemoryPath: string | null }>;
+  saveMemoryContent: (type: 'project' | 'profile' | 'global', content: string, workspacePath: string | null) => Promise<{ success: boolean; message: string }>;
+  addMemoryFact: (scope: 'project' | 'global', fact: string, workspacePath: string | null) => Promise<{ success: boolean; targetPath: string; message: string }>;
+  parseMemoryCommand: (text: string) => Promise<{ isCommand: boolean; fact?: string }>;
 }
 
 declare global {
