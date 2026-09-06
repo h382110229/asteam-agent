@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import mermaid from 'mermaid';
 import {
   ZoomIn,
   ZoomOut,
@@ -28,19 +27,20 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      securityLevel: 'loose',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-    });
-
     let isMounted = true;
     setLoading(true);
     setRenderError(null);
 
     const renderGraph = async () => {
       try {
+        const { default: mermaid } = await import('mermaid');
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'dark',
+          securityLevel: 'loose',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+        });
+
         const id = 'mermaid-render-' + Math.random().toString(36).substring(2, 9);
         const { svg } = await mermaid.render(id, content.trim());
         if (isMounted) {

@@ -32,9 +32,9 @@ export const App: React.FC = () => {
   }, [theme]);
 
   const toggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    const nextTheme: 'light' | 'dark' = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    const updated = { ...settings, theme: nextTheme };
+    const updated: AppSettings = { ...settings, theme: nextTheme };
     setSettings(updated);
     localStorage.setItem('asteam_settings', JSON.stringify(updated));
   };
@@ -128,7 +128,8 @@ export const App: React.FC = () => {
     localStorage.setItem('asteam_messages', JSON.stringify(messagesMap));
   }, [messagesMap]);
 
-  // 4. Workspace Workbench Drawer State (Preview + Git Diff + Live Terminal)
+  // 4. Git Status & Workspace Workbench Drawer State (Preview + Git Diff + Live Terminal)
+  const [gitStatus, setGitStatus] = useState<GitStatusSummary | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<WorkspaceDrawerTab>('diff');
   const [previewData, setPreviewData] = useState<PreviewData | null>(null);
