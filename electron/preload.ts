@@ -40,6 +40,12 @@ export interface ElectronAPI {
   // Native Clipboard & File Dialog
   copyImage: (dataUrl: string) => Promise<boolean>;
   saveFile: (options: { defaultName: string; content: string; isBase64?: boolean }) => Promise<boolean>;
+
+  // External System & Browser Actions
+  openExternal: (url: string) => Promise<boolean>;
+  showItemInFolder: (filePath: string) => Promise<boolean>;
+  openPath: (targetPath: string) => Promise<boolean>;
+  openInBrowser: (options: { content: string; title?: string; defaultPath?: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
 }
 
 const api: ElectronAPI = {
@@ -77,7 +83,12 @@ const api: ElectronAPI = {
   setOpenAtLogin: (openAtLogin) => ipcRenderer.invoke('app:setOpenAtLogin', openAtLogin),
   popoutPreview: (data) => ipcRenderer.invoke('preview:popout', data),
   copyImage: (dataUrl) => ipcRenderer.invoke('clipboard:writeImage', dataUrl),
-  saveFile: (options) => ipcRenderer.invoke('dialog:saveFile', options)
+  saveFile: (options) => ipcRenderer.invoke('dialog:saveFile', options),
+
+  openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  showItemInFolder: (filePath) => ipcRenderer.invoke('shell:showItemInFolder', filePath),
+  openPath: (targetPath) => ipcRenderer.invoke('shell:openPath', targetPath),
+  openInBrowser: (options) => ipcRenderer.invoke('shell:openInBrowser', options)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

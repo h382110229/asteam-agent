@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage, shell } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
@@ -326,6 +326,66 @@ function setupIPC() {
     } catch (err: any) {
       console.error('Failed to save file:', err);
       return false;
+    }
+  });
+
+  // External System & Browser Actions
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    try {
+      if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://'))) {
+        await shell.openExternal(url);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error('Failed to open external url:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('shell:showItemInFolder', async (_event, filePath: string) => {
+    try {
+      if (filePath && fs.existsSync(filePath)) {
+        shell.showItemInFolder(filePath);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error('Failed to show item in folder:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('shell:openPath', async (_event, targetPath: string) => {
+    try {
+      if (targetPath && fs.existsSync(targetPath)) {
+        await shell.openPath(targetPath);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error('Failed to open path:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('shell:openInBrowser', async (_event, { content, title, defaultPath }: { content: string; title?: string; defaultPath?: string }) => {
+    try {
+      let targetPath = defaultPath;
+      if (!targetPath || !fs.existsSync(targetPath)) {
+        const tmpDir = path.join(app.getPath('temp'), 'asteam-previews');
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        const safeName = (title || 'preview').replace(/[\\/:*?"<>|]/g, '_').replace(/\.html?$/i, '') + `_${Date.now()}.html`;
+        targetPath = path.join(tmpDir, safeName);
+        fs.writeFileSync(targetPath, content, 'utf-8');
+      }
+      await shell.openPath(targetPath);
+      return { success: true, filePath: targetPath };
+    } catch (err: any) {
+      console.error('Failed to open in browser:', err);
+      return { success: false, error: err.message };
     }
   });
 

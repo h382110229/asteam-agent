@@ -38,6 +38,12 @@ export interface ElectronAPI {
   // Native Clipboard & File Dialog
   copyImage: (dataUrl: string) => Promise<boolean>;
   saveFile: (options: { defaultName: string; content: string; isBase64?: boolean }) => Promise<boolean>;
+
+  // External System & Browser Actions
+  openExternal: (url: string) => Promise<boolean>;
+  showItemInFolder: (filePath: string) => Promise<boolean>;
+  openPath: (targetPath: string) => Promise<boolean>;
+  openInBrowser: (options: { content: string; title?: string; defaultPath?: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
 }
 
 declare global {

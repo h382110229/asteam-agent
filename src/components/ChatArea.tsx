@@ -24,7 +24,8 @@ import {
   Settings,
   ChevronDown,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Globe
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
@@ -79,7 +80,7 @@ const SLASH_COMMANDS = [
   { cmd: '/grill-me', title: 'Grill-me 互动问答', desc: '进入采访决策模式：Agent 逐一向您抛出架构选型卡片' }
 ];
 
-function extractPreviewableArtifact(content: string, steps?: AgentStep[]): PreviewData | null {
+export function extractPreviewableArtifact(content: string, steps?: AgentStep[]): PreviewData | null {
   // 1. 优先从规划执行步骤 (AgentStep[]) 中直接提取 write_file 生成的真实交付产物
   if (steps && steps.length > 0) {
     for (let i = steps.length - 1; i >= 0; i--) {
@@ -94,7 +95,8 @@ function extractPreviewableArtifact(content: string, steps?: AgentStep[]): Previ
             return {
               type: 'html',
               title: fileName || 'HTML 页面预览',
-              content: contentStr
+              content: contentStr,
+              filePath
             };
           }
         } else if (filePath.endsWith('.svg')) {
@@ -102,7 +104,8 @@ function extractPreviewableArtifact(content: string, steps?: AgentStep[]): Previ
             return {
               type: 'svg',
               title: fileName || 'SVG 矢量设计图',
-              content: contentStr
+              content: contentStr,
+              filePath
             };
           }
         }
@@ -140,7 +143,8 @@ function extractPreviewableArtifact(content: string, steps?: AgentStep[]): Previ
         return {
           type: 'html',
           title: fileName || 'HTML 页面预览',
-          content: htmlContent
+          content: htmlContent,
+          filePath
         };
       }
     }
@@ -165,7 +169,8 @@ function extractPreviewableArtifact(content: string, steps?: AgentStep[]): Previ
         return {
           type: 'svg',
           title: fileName || 'SVG 矢量设计图',
-          content: svgContent
+          content: svgContent,
+          filePath
         };
       }
     }
@@ -996,14 +1001,35 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           </div>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => onOpenPreview(artifact)}
-                        className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-xs shrink-0 ml-2"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>打开实时预览</span>
-                      </button>
+                      <div className="flex items-center space-x-1.5 shrink-0 ml-2">
+                        {artifact.type === 'html' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.electronAPI?.openInBrowser) {
+                                window.electronAPI.openInBrowser({
+                                  content: artifact.content,
+                                  title: artifact.title,
+                                  defaultPath: artifact.filePath
+                                });
+                              }
+                            }}
+                            title="在系统默认浏览器中打开全屏真实大屏 (Chrome/Edge)"
+                            className="flex items-center space-x-1 rounded-lg border border-[var(--primary)]/40 bg-white/80 dark:bg-[var(--card)] text-[var(--primary)] hover:bg-[var(--primary)]/10 px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <Globe className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">浏览器打开</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onOpenPreview(artifact)}
+                          className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-xs"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>打开实时预览</span>
+                        </button>
+                      </div>
                     </div>
                   );
                 })()}

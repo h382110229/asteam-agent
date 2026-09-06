@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Monitor,
   Tablet,
@@ -10,15 +10,18 @@ import {
   Copy,
   Check,
   Code,
-  Download
+  Download,
+  Globe,
+  FolderOpen
 } from 'lucide-react';
 
 interface HtmlPreviewProps {
   content: string;
   title?: string;
+  filePath?: string;
 }
 
-export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title }) => {
+export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title, filePath }) => {
   const [viewport, setViewport] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>('dark');
   const [showCode, setShowCode] = useState(false);
@@ -26,6 +29,15 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title }) => {
   const [iframeKey, setIframeKey] = useState(0);
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const [browserOpening, setBrowserOpening] = useState(false);
+  const [savedFilePath, setSavedFilePath] = useState<string | undefined>(filePath);
+
+  useEffect(() => {
+    if (filePath) {
+      setSavedFilePath(filePath);
+    }
+  }, [filePath]);
 
   const handleCopy = async () => {
     try {
@@ -59,16 +71,6 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title }) => {
       }
     } catch (e) {
       console.error('Failed to download HTML:', e);
-    }
-  };
-
-  const handleOpenExternal = () => {
-    try {
-      const blob = new Blob([content], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (e) {
-      console.error('Failed to open external preview:', e);
     }
   };
 
@@ -107,6 +109,36 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title }) => {
 ${content}
 </body>
 </html>`;
+
+  const handleOpenInDefaultBrowser = async () => {
+    try {
+      setBrowserOpening(true);
+      if (window.electronAPI?.openInBrowser) {
+        const res = await window.electronAPI.openInBrowser({
+          content: wrappedContent,
+          title: title || 'preview',
+          defaultPath: savedFilePath
+        });
+        if (res.success && res.filePath) {
+          setSavedFilePath(res.filePath);
+        }
+      } else {
+        const blob = new Blob([wrappedContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+      }
+    } catch (e) {
+      console.error('Failed to open in default browser:', e);
+    } finally {
+      setTimeout(() => setBrowserOpening(false), 1000);
+    }
+  };
+
+  const handleRevealInFolder = async () => {
+    if (savedFilePath && window.electronAPI?.showItemInFolder) {
+      await window.electronAPI.showItemInFolder(savedFilePath);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col bg-[var(--background)] overflow-hidden">
@@ -198,13 +230,29 @@ ${content}
             <Download className="h-3.5 w-3.5" />
           </button>
 
+          {savedFilePath && (
+            <button
+              type="button"
+              onClick={handleRevealInFolder}
+              title={`在 Windows 资源管理器中定位 (${savedFilePath})`}
+              className="rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--muted)] transition-colors"
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+            </button>
+          )}
+
           <button
             type="button"
-            onClick={handleOpenExternal}
-            title="在独立浏览器窗口打开"
-            className="rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+            onClick={handleOpenInDefaultBrowser}
+            title="在系统默认浏览器中打开 (Chrome/Edge)"
+            className={`rounded p-1.5 transition-colors flex items-center space-x-1 ${
+              browserOpening
+                ? 'text-[var(--primary)] bg-[var(--primary)]/15 animate-pulse'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--muted)]'
+            }`}
           >
-            <ExternalLink className="h-3.5 w-3.5" />
+            <Globe className="h-3.5 w-3.5" />
+            <span className="text-[11px] font-medium hidden md:inline">浏览器外置打开</span>
           </button>
         </div>
       </div>

@@ -247,6 +247,10 @@ export const App: React.FC = () => {
             lastMsg.content = lastMsg.thought;
             lastMsg.thought = '';
           }
+          // 若模型无正文输出但有任务完成总结，用任务总结作为正文呈现
+          if (!lastMsg.content?.trim() && typeof payload === 'string' && payload.trim()) {
+            lastMsg.content = payload;
+          }
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
           setIsWaitingForUser(false);
@@ -559,7 +563,7 @@ export const App: React.FC = () => {
         workspacePath={currentWorkspacePath}
       />
 
-      {/* 4. Workspace Workbench Drawer (Live Preview + Git Diff + Live Terminal) */}
+      {/* 4. Workspace Workbench Drawer (Live Preview + Artifacts Shelf + Git Diff + Live Terminal) */}
       <WorkspaceDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
@@ -571,6 +575,11 @@ export const App: React.FC = () => {
         onRefreshGit={refreshGitStatus}
         activeSessionId={activeSessionId}
         terminalOutput={terminalOutputs[activeSessionId] || ''}
+        messages={activeMessages}
+        onSelectPreview={(data) => {
+          setPreviewData(data);
+          setDrawerTab('preview');
+        }}
       />
     </div>
   );

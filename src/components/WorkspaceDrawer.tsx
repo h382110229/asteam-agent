@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   X,
   GitBranch,
@@ -15,20 +15,41 @@ import {
   Maximize2,
   Minimize2,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Package,
+  Globe,
+  FolderOpen,
+  FileText,
+  Presentation,
+  Download,
+  Copy,
+  Clock,
+  Search
 } from 'lucide-react';
 import { GitStatusSummary, GitFileStatus } from '../types/project';
+import { ChatMessageItem, extractPreviewableArtifact } from './ChatArea';
 import { HtmlPreview } from './preview/HtmlPreview';
 import { MermaidPreview } from './preview/MermaidPreview';
 import { SvgPreview } from './preview/SvgPreview';
 import { LiveTerminalCard } from './LiveTerminalCard';
 
-export type WorkspaceDrawerTab = 'preview' | 'diff' | 'terminal';
+export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'terminal';
 
 export interface PreviewData {
   type: 'html' | 'mermaid' | 'svg';
   title?: string;
   content: string;
+  filePath?: string;
+}
+
+export interface ArtifactItem {
+  id: string;
+  type: 'html' | 'svg' | 'mermaid' | 'docx' | 'pptx' | 'file';
+  title: string;
+  content?: string;
+  filePath?: string;
+  timestamp: number;
+  previewData?: PreviewData;
 }
 
 interface WorkspaceDrawerProps {
@@ -42,6 +63,8 @@ interface WorkspaceDrawerProps {
   onRefreshGit: () => void;
   activeSessionId?: string;
   terminalOutput?: string;
+  messages?: ChatMessageItem[];
+  onSelectPreview?: (data: PreviewData) => void;
 }
 
 export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
@@ -54,7 +77,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   gitStatus,
   onRefreshGit,
   activeSessionId = 'global',
-  terminalOutput = ''
+  terminalOutput = '',
+  messages = [],
+  onSelectPreview
 }) => {
   const [currentTab, setCurrentTab] = useState<WorkspaceDrawerTab>(activeTab);
   const [isFullScreen, setIsFullScreen] = useState(false);
@@ -122,6 +147,231 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const [fileDiff, setFileDiff] = useState<string>('');
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [discardSuccess, setDiscardSuccess] = useState<string | null>(null);
+
+  // Artifacts Shelf state & collection
+  const [artifactFilter, setArtifactFilter] = useState<'all' | 'html' | 'svg' | 'mermaid' | 'docs'>('all');
+  const [artifactSearch, setArtifactSearch] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const artifacts = useMemo<ArtifactItem[]>(() => {
+    const items: ArtifactItem[] = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Current active previewData
+    if (previewData) {
+      const key = `preview:${previewData.type}:${previewData.title || ''}:${previewData.filePath || ''}`;
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        items.push({
+          id: 'current-active-preview',
+          type: previewData.type,
+          title: previewData.title || (previewData.type === 'html' ? 'HTML 页面预览' : previewData.type === 'svg' ? 'SVG 矢量设计' : 'Mermaid 架构图'),
+          content: previewData.content,
+          filePath: previewData.filePath,
+          timestamp: Date.now(),
+          previewData
+        });
+      }
+    }
+
+    // 2. Scan assistant messages
+    for (let mIdx = messages.length - 1; mIdx >= 0; mIdx--) {
+      const msg = messages[mIdx];
+      if (msg.role !== 'assistant') continue;
+
+      if (msg.steps && msg.steps.length > 0) {
+        for (let sIdx = msg.steps.length - 1; sIdx >= 0; sIdx--) {
+          const step = msg.steps[sIdx];
+          if (!step.args) continue;
+
+          if (step.tool === 'write_file') {
+            const filePath = step.args.filePath || step.args.path || step.args.file || '';
+            const fileName = filePath.split(/[\\/]/).pop() || '';
+            const contentStr = typeof step.args.content === 'string' ? step.args.content : '';
+
+            if (filePath.endsWith('.html') || filePath.endsWith('.htm')) {
+              const key = `file:${filePath || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
+                  type: 'html',
+                  title: fileName || 'HTML 交付大屏',
+                  content: contentStr,
+                  filePath,
+                  timestamp: msg.timestamp,
+                  previewData: {
+                    type: 'html',
+                    title: fileName,
+                    content: contentStr,
+                    filePath
+                  }
+                });
+              }
+            } else if (filePath.endsWith('.svg')) {
+              const key = `file:${filePath || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
+                  type: 'svg',
+                  title: fileName || 'SVG 矢量设计图',
+                  content: contentStr,
+                  filePath,
+                  timestamp: msg.timestamp,
+                  previewData: {
+                    type: 'svg',
+                    title: fileName,
+                    content: contentStr,
+                    filePath
+                  }
+                });
+              }
+            } else if (filePath.endsWith('.docx')) {
+              const key = `file:${filePath || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
+                  type: 'docx',
+                  title: fileName || 'Word 商业方案报告',
+                  filePath,
+                  timestamp: msg.timestamp
+                });
+              }
+            } else if (filePath.endsWith('.pptx')) {
+              const key = `file:${filePath || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
+                  type: 'pptx',
+                  title: fileName || 'PowerPoint 商业幻灯片',
+                  filePath,
+                  timestamp: msg.timestamp
+                });
+              }
+            }
+          } else if (step.tool === 'generate_docx') {
+            const filePath = step.args.filePath || step.args.path || (step.result && step.result.match(/([a-zA-Z]:[^\s]+?\.docx|\/[^\s]+?\.docx)/)?.[1]) || '';
+            const fileName = filePath ? filePath.split(/[\\/]/).pop() || '' : (step.args.title ? `${step.args.title}.docx` : '方案白皮书.docx');
+            const key = `docx:${filePath || fileName}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              items.push({
+                id: `step-${mIdx}-${sIdx}`,
+                type: 'docx',
+                title: fileName,
+                filePath,
+                timestamp: msg.timestamp
+              });
+            }
+          } else if (step.tool === 'generate_pptx') {
+            const filePath = step.args.filePath || step.args.path || (step.result && step.result.match(/([a-zA-Z]:[^\s]+?\.pptx|\/[^\s]+?\.pptx)/)?.[1]) || '';
+            const fileName = filePath ? filePath.split(/[\\/]/).pop() || '' : (step.args.title ? `${step.args.title}.pptx` : '商业演讲.pptx');
+            const key = `pptx:${filePath || fileName}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              items.push({
+                id: `step-${mIdx}-${sIdx}`,
+                type: 'pptx',
+                title: fileName,
+                filePath,
+                timestamp: msg.timestamp
+              });
+            }
+          }
+        }
+      }
+
+      // Check extracted previewable artifact from content/thought
+      const artifact = extractPreviewableArtifact(msg.content || msg.thought || '', msg.steps);
+      if (artifact) {
+        const key = `artifact:${artifact.type}:${artifact.title || ''}:${artifact.filePath || ''}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          items.push({
+            id: `msg-${mIdx}`,
+            type: artifact.type,
+            title: artifact.title || (artifact.type === 'html' ? 'HTML 页面预览' : artifact.type === 'svg' ? 'SVG 矢量设计' : 'Mermaid 架构图'),
+            content: artifact.content,
+            filePath: artifact.filePath,
+            timestamp: msg.timestamp,
+            previewData: artifact
+          });
+        }
+      }
+    }
+
+    return items;
+  }, [messages, previewData]);
+
+  const filteredArtifacts = useMemo(() => {
+    return artifacts.filter(item => {
+      if (artifactFilter === 'html' && item.type !== 'html') return false;
+      if (artifactFilter === 'svg' && item.type !== 'svg') return false;
+      if (artifactFilter === 'mermaid' && item.type !== 'mermaid') return false;
+      if (artifactFilter === 'docs' && item.type !== 'docx' && item.type !== 'pptx') return false;
+      if (artifactSearch.trim()) {
+        const q = artifactSearch.toLowerCase();
+        return item.title.toLowerCase().includes(q) || (item.filePath && item.filePath.toLowerCase().includes(q));
+      }
+      return true;
+    });
+  }, [artifacts, artifactFilter, artifactSearch]);
+
+  const handleOpenArtifactInBrowser = async (item: ArtifactItem) => {
+    if (!item.content && !item.filePath) return;
+    if (window.electronAPI?.openInBrowser) {
+      await window.electronAPI.openInBrowser({
+        content: item.content || '',
+        title: item.title,
+        defaultPath: item.filePath
+      });
+    } else if (item.content) {
+      const blob = new Blob([item.content], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleRevealArtifact = async (filePath?: string) => {
+    if (filePath && window.electronAPI?.showItemInFolder) {
+      await window.electronAPI.showItemInFolder(filePath);
+    }
+  };
+
+  const handleOpenArtifactPath = async (filePath?: string) => {
+    if (filePath && window.electronAPI?.openPath) {
+      await window.electronAPI.openPath(filePath);
+    }
+  };
+
+  const handleDownloadArtifact = async (item: ArtifactItem) => {
+    if (!item.content) return;
+    try {
+      const ext = item.type === 'html' ? '.html' : item.type === 'svg' ? '.svg' : '.txt';
+      const defaultName = item.title.includes('.') ? item.title : `${item.title}${ext}`;
+      if (window.electronAPI?.saveFile) {
+        await window.electronAPI.saveFile({
+          defaultName,
+          content: item.content,
+          isBase64: false
+        });
+      }
+    } catch (e) {
+      console.error('Failed to save artifact:', e);
+    }
+  };
+
+  const handleCopyArtifact = async (item: ArtifactItem) => {
+    if (!item.content) return;
+    try {
+      await navigator.clipboard.writeText(item.content);
+      setCopiedId(item.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {}
+  };
 
   useEffect(() => {
     if (activeTab) {
@@ -237,6 +487,26 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
             <button
               type="button"
+              onClick={() => handleTabSwitch('artifacts')}
+              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                currentTab === 'artifacts'
+                  ? 'bg-[var(--primary)] text-white shadow-xs'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+              }`}
+            >
+              <Package className="h-3.5 w-3.5" />
+              <span>交付制品货架</span>
+              {artifacts.length > 0 && (
+                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                  currentTab === 'artifacts' ? 'bg-white/25 text-white' : 'bg-[var(--primary)]/15 text-[var(--primary)]'
+                }`}>
+                  {artifacts.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleTabSwitch('diff')}
               className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'diff'
@@ -316,7 +586,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               ) : previewData.type === 'svg' ? (
                 <SvgPreview content={previewData.content} title={previewData.title} />
               ) : (
-                <HtmlPreview content={previewData.content} title={previewData.title} />
+                <HtmlPreview content={previewData.content} title={previewData.title} filePath={previewData.filePath} />
               )
             ) : (
               <div className="flex h-full flex-col items-center justify-center p-8 text-center text-[var(--muted-foreground)]">
@@ -329,15 +599,251 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                 <p className="text-xs max-w-sm leading-relaxed mb-6">
                   当 Agent 生成 HTML 网页、Vue/React 代码、SVG 矢量设计图或 Mermaid 流程架构图时，点击消息中的【👁️ 实时预览】即可在此全屏呈现。
                 </p>
-                <button
-                  type="button"
-                  onClick={() => handleTabSwitch('diff')}
-                  className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
-                >
-                  查看当前 Git 变更 &rarr;
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handleTabSwitch('artifacts')}
+                    className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                  >
+                    查看交付制品货架 ({artifacts.length}) &rarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTabSwitch('diff')}
+                    className="rounded-lg border border-[var(--border)] px-4 py-2 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                  >
+                    查看 Git 变更 &rarr;
+                  </button>
+                </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Tab 2: Artifacts Shelf (交付制品归档货架) */}
+        {currentTab === 'artifacts' && (
+          <div className="flex flex-1 flex-col overflow-hidden bg-[var(--background)]">
+            {/* Shelf Toolbar: Filter Chips & Search */}
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-2.5 bg-[var(--card)]/50">
+              {/* Category Filter Chips */}
+              <div className="flex items-center space-x-1 overflow-x-auto text-xs py-0.5">
+                {[
+                  { id: 'all', label: '全部产物', count: artifacts.length },
+                  { id: 'html', label: 'HTML 大屏', count: artifacts.filter(a => a.type === 'html').length },
+                  { id: 'svg', label: 'SVG 设计', count: artifacts.filter(a => a.type === 'svg').length },
+                  { id: 'mermaid', label: 'Mermaid 拓扑', count: artifacts.filter(a => a.type === 'mermaid').length },
+                  { id: 'docs', label: '商业公文', count: artifacts.filter(a => a.type === 'docx' || a.type === 'pptx').length },
+                ].map(chip => (
+                  <button
+                    key={chip.id}
+                    type="button"
+                    onClick={() => setArtifactFilter(chip.id as any)}
+                    className={`flex items-center space-x-1 rounded-full px-2.5 py-1 transition-colors cursor-pointer ${
+                      artifactFilter === chip.id
+                        ? 'bg-[var(--primary)] text-white font-medium shadow-xs'
+                        : 'bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                    }`}
+                  >
+                    <span>{chip.label}</span>
+                    {chip.count > 0 && (
+                      <span className={`text-[10px] rounded-full px-1.5 py-0.2 ${
+                        artifactFilter === chip.id ? 'bg-white/25 text-white' : 'bg-[var(--border)] text-[var(--muted-foreground)]'
+                      }`}>
+                        {chip.count}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative flex items-center min-w-[160px] max-w-[220px]">
+                <Search className="absolute left-2.5 h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+                <input
+                  type="text"
+                  placeholder="搜索交付物..."
+                  value={artifactSearch}
+                  onChange={e => setArtifactSearch(e.target.value)}
+                  className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] pl-8 pr-3 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                />
+              </div>
+            </div>
+
+            {/* Artifacts Grid / List */}
+            <div className="flex-1 overflow-y-auto p-4">
+              {filteredArtifacts.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center p-8 text-center text-[var(--muted-foreground)]">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--muted)] text-[var(--muted-foreground)] mb-4">
+                    <Package className="h-8 w-8" />
+                  </div>
+                  <h3 className="font-semibold text-sm text-[var(--foreground)] mb-1">
+                    {artifacts.length === 0 ? '本会话暂未生成交付制品' : '未找到匹配的交付制品'}
+                  </h3>
+                  <p className="text-xs max-w-sm leading-relaxed mb-4">
+                    当 Agent 生成 HTML 监控大屏、SVG 矢量设计图、Mermaid 流程图或 Office 报告时，系统会自动将交付物收纳在此货架中，方便集中查阅、外置打开与多端导出。
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {filteredArtifacts.map(art => {
+                    const isHtml = art.type === 'html';
+                    const isSvg = art.type === 'svg';
+                    const isMermaid = art.type === 'mermaid';
+                    const isDocx = art.type === 'docx';
+                    const isPptx = art.type === 'pptx';
+
+                    return (
+                      <div
+                        key={art.id}
+                        className="group relative flex flex-col justify-between rounded-xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-xs hover:border-[var(--primary)]/40 hover:shadow-md transition-all"
+                      >
+                        {/* Card Header */}
+                        <div className="flex items-start justify-between gap-2 mb-2.5">
+                          <div className="flex items-center space-x-2.5">
+                            <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${
+                              isHtml ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                              isSvg ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                              isMermaid ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' :
+                              isDocx ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' :
+                              isPptx ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                              'bg-purple-500/10 text-purple-600'
+                            }`}>
+                              {isHtml && <Globe className="h-5 w-5" />}
+                              {isSvg && <Sparkles className="h-5 w-5" />}
+                              {isMermaid && <GitBranch className="h-5 w-5" />}
+                              {isDocx && <FileText className="h-5 w-5" />}
+                              {isPptx && <Presentation className="h-5 w-5" />}
+                            </div>
+
+                            <div className="overflow-hidden">
+                              <h4 className="text-xs font-semibold text-[var(--foreground)] truncate max-w-[200px]" title={art.title}>
+                                {art.title}
+                              </h4>
+                              <div className="flex items-center space-x-1.5 text-[10px] text-[var(--muted-foreground)] mt-0.5">
+                                <span className={`px-1.5 py-0.2 rounded font-medium ${
+                                  isHtml ? 'bg-blue-500/10 text-blue-600' :
+                                  isSvg ? 'bg-emerald-500/10 text-emerald-600' :
+                                  isMermaid ? 'bg-cyan-500/10 text-cyan-600' :
+                                  isDocx ? 'bg-indigo-500/10 text-indigo-600' :
+                                  'bg-amber-500/10 text-amber-600'
+                                }`}>
+                                  {isHtml ? 'HTML 页面' : isSvg ? 'SVG 矢量' : isMermaid ? 'Mermaid' : isDocx ? 'Word 文档' : isPptx ? 'PPT 幻灯片' : '文件'}
+                                </span>
+                                {art.timestamp && (
+                                  <span className="flex items-center space-x-0.5">
+                                    <Clock className="h-2.5 w-2.5" />
+                                    <span>{new Date(art.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* File Path Pill (if exists) */}
+                        {art.filePath && (
+                          <div
+                            onClick={() => handleRevealArtifact(art.filePath)}
+                            title={`点击在 Windows 资源管理器中定位: ${art.filePath}`}
+                            className="flex items-center space-x-1 rounded bg-[var(--muted)]/60 px-2 py-1 text-[10px] text-[var(--muted-foreground)] font-mono truncate mb-3 cursor-pointer hover:bg-[var(--muted)] hover:text-[var(--primary)] transition-colors"
+                          >
+                            <FolderOpen className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{art.filePath}</span>
+                          </div>
+                        )}
+
+                        {/* Action Buttons */}
+                        <div className="flex items-center justify-between border-t border-[var(--border)] pt-3 mt-1">
+                          <div className="flex items-center space-x-1.5">
+                            {/* Primary Action: View Preview in workbench */}
+                            {art.previewData && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (art.previewData) {
+                                    onSelectPreview?.(art.previewData);
+                                    handleTabSwitch('preview');
+                                  }
+                                }}
+                                className="flex items-center space-x-1 rounded-md bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--primary)]/90 transition-colors shadow-2xs cursor-pointer"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                <span>立即预览</span>
+                              </button>
+                            )}
+
+                            {/* External action for docx/pptx */}
+                            {(isDocx || isPptx) && art.filePath && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenArtifactPath(art.filePath)}
+                                className="flex items-center space-x-1 rounded-md bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--primary)]/90 transition-colors shadow-2xs cursor-pointer"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                <span>系统打开</span>
+                              </button>
+                            )}
+
+                            {/* External browser open for HTML */}
+                            {isHtml && (
+                              <button
+                                type="button"
+                                onClick={() => handleOpenArtifactInBrowser(art)}
+                                title="在系统默认浏览器中打开 (Chrome/Edge 全屏体验)"
+                                className="flex items-center space-x-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-colors cursor-pointer"
+                              >
+                                <Globe className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">浏览器打开</span>
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Secondary utility actions */}
+                          <div className="flex items-center space-x-1">
+                            {art.filePath && (
+                              <button
+                                type="button"
+                                onClick={() => handleRevealArtifact(art.filePath)}
+                                title="在资源管理器中定位"
+                                className="rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                              >
+                                <FolderOpen className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
+                            {art.content && (
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadArtifact(art)}
+                                title="另存为本地文件"
+                                className="rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                              >
+                                <Download className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+
+                            {art.content && (
+                              <button
+                                type="button"
+                                onClick={() => handleCopyArtifact(art)}
+                                title="复制源码/内容"
+                                className="rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                              >
+                                {copiedId === art.id ? (
+                                  <Check className="h-3.5 w-3.5 text-emerald-500" />
+                                ) : (
+                                  <Copy className="h-3.5 w-3.5" />
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
