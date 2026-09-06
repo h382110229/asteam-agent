@@ -17,10 +17,12 @@ import {
   FileCode,
   Image as ImageIcon,
   Eye,
-  Terminal
+  Terminal,
+  CornerDownLeft
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
+import { LiveTerminalCard } from './LiveTerminalCard';
 import { ExecutionMode } from '../types/project';
 import { PreviewData } from './WorkspaceDrawer';
 
@@ -141,6 +143,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // 动态侦测当前最新消息中是否有处于 running 状态的终端命令
+  const lastMsg = messages[messages.length - 1];
+  const activeRunningTerminalStep = (() => {
+    if (!isRunning && !isWaitingForUser) return null;
+    if (lastMsg?.role === 'assistant' && lastMsg.steps) {
+      const step = lastMsg.steps.find(s => s.tool === 'run_terminal_command' && s.status === 'running');
+      if (step) return step;
+    }
+    return null;
+  })();
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -171,7 +184,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const handleSend = () => {
     const trimmed = input.trim();
-    if ((!trimmed && attachments.length === 0) || (isRunning && !isWaitingForUser)) return;
+    if (!trimmed && attachments.length === 0) return;
+
+    // 【重要】若当前处于终端命令运行中，输入的内容直接作为标准输入 (stdin) 发送给底层进程！
+    if (activeRunningTerminalStep && activeSessionId && trimmed) {
+      if (window.electronAPI) {
+        window.electronAPI.sendTerminalInput(activeSessionId, trimmed);
+      }
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
+
+    if (isRunning && !isWaitingForUser) return;
 
     if (trimmed === '/diff') {
       onOpenGitDiff?.();
@@ -480,6 +507,37 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           ))
         )}
+
+        {/* 正在运行的独立交互控制台卡片 (直接置底弹出，绝不藏在折叠内部) */}
+        {activeRunningTerminalStep && (
+          <div className="my-4 rounded-2xl border-2 border-amber-500/80 bg-[#0c1017] p-3.5 shadow-2xl animate-in zoom-in-95 duration-150 select-text">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#30363d] select-none">
+              <div className="flex items-center space-x-2">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                </span>
+                <span className="font-bold text-xs text-amber-400 tracking-wide">
+                  ⚡ 实时控制台交互就绪 (Live Console)
+                </span>
+              </div>
+              <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded px-2 py-0.5 font-mono font-bold animate-pulse">
+                等待标准输入 (可输入 y 确认)
+              </span>
+            </div>
+
+            <LiveTerminalCard
+              sessionId={activeSessionId || 'current'}
+              stepId={activeRunningTerminalStep.id}
+              command={activeRunningTerminalStep.args?.command}
+              status="running"
+              liveOutput={terminalOutputs?.[activeRunningTerminalStep.id] || (activeSessionId ? terminalOutputs?.[activeSessionId] : '') || ''}
+              onStop={onStopAgent}
+              isExpandable={false}
+            />
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -618,7 +676,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
 
           {/* Textarea and Action Buttons */}
-          <div className="flex items-end space-x-2 rounded-xl border border-[var(--border)] bg-[var(--background)] p-2 shadow-xs focus-within:border-[var(--primary)] focus-within:ring-1 focus-within:ring-[var(--primary)]">
+          <div className={`flex items-end space-x-2 rounded-xl border p-2 shadow-xs transition-all ${
+            activeRunningTerminalStep
+              ? 'border-amber-500/80 ring-1 ring-amber-500/50 bg-[#0d121c]'
+              : 'border-[var(--border)] bg-[var(--background)] focus-within:border-[var(--primary)] focus-within:ring-1 focus-within:ring-[var(--primary)]'
+          }`}>
             {/* Attachment Button */}
             <button
               type="button"
@@ -636,7 +698,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
               placeholder={
-                isWaitingForUser
+                activeRunningTerminalStep
+                  ? `⚡ 终端命令正在等待交互输入... 在此输入 y / n / 参数按 Enter 即刻发送，或直接点击右侧黄色发送按钮`
+                  : isWaitingForUser
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath
                   ? `向 ASTeam Agent 指派任务（支持输入 /plan, /review, /diff，支持拖入附件）...`
@@ -645,7 +709,28 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               className="max-h-44 min-h-[28px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none select-text"
             />
 
-            {isRunning && !isWaitingForUser ? (
+            {activeRunningTerminalStep ? (
+              <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={onStopAgent}
+                  title="中断当前命令执行 (Ctrl+C)"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--error)] text-[var(--error-foreground)] hover:opacity-90 transition-opacity shadow-xs select-none cursor-pointer"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  title="向终端发送输入 (Enter)"
+                  className="flex h-8 items-center space-x-1 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-40 select-none"
+                >
+                  <CornerDownLeft className="h-3.5 w-3.5" />
+                  <span>发送至终端</span>
+                </button>
+              </div>
+            ) : isRunning && !isWaitingForUser ? (
               <button
                 type="button"
                 onClick={onStopAgent}

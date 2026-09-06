@@ -82,13 +82,14 @@ export function submitTerminalInput(sessionId: string, input: string): boolean {
   const active = activeExecutions.get(sessionId);
   if (active && active.currentProcess && !active.currentProcess.killed && active.currentProcess.stdin) {
     try {
-      const toSend = input.endsWith('\n') ? input : input + '\n';
+      const eol = process.platform === 'win32' ? '\r\n' : '\n';
+      const toSend = input.endsWith('\n') ? input : (input + eol);
       active.currentProcess.stdin.write(toSend);
       // Echo input to frontend terminal for immediate feedback
       active.callbacks?.onTerminalData?.({
         sessionId,
         stepId: active.currentStepId,
-        chunk: `\x1b[36m> ${input}\x1b[0m\n`,
+        chunk: `\x1b[36m> ${input}\x1b[0m\r\n`,
         stream: 'stdin'
       });
       return true;
@@ -330,7 +331,8 @@ class WorkspaceTools {
       const child = spawn(shell, shellArgs, {
         cwd: this.workspacePath,
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-        windowsHide: true
+        windowsHide: true,
+        stdio: ['pipe', 'pipe', 'pipe']
       });
 
       const active = activeExecutions.get(sessionId);

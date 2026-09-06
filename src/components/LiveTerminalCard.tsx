@@ -57,6 +57,13 @@ export const LiveTerminalCard: React.FC<LiveTerminalCardProps> = ({
     }
   }, [displayOutput, isAutoScroll]);
 
+  // Auto focus input when running
+  useEffect(() => {
+    if (status === 'running' && inputRef.current) {
+      inputRef.current.focus();
+    }
+  }, [status]);
+
   const handleSendInput = (textToSend?: string) => {
     const input = (textToSend !== undefined ? textToSend : stdinText).trim();
     if (!input && textToSend === undefined) return;

@@ -206,6 +206,13 @@ export const App: React.FC = () => {
             currentSteps.push(updatedStep);
           }
           lastMsg.steps = currentSteps;
+
+          // 当终端命令正在运行等待或执行时，放开用户输入状态，允许即时推入 stdin
+          if (updatedStep.tool === 'run_terminal_command' && updatedStep.status === 'running') {
+            setIsWaitingForUser(true);
+          } else if (updatedStep.tool === 'run_terminal_command' && (updatedStep.status === 'completed' || updatedStep.status === 'failed')) {
+            setIsWaitingForUser(false);
+          }
         } else if (type === 'question') {
           lastMsg.question = {
             questionId: payload.questionId,
