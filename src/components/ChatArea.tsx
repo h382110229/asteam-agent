@@ -508,21 +508,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           ))
         )}
 
-        {/* 正在运行的独立交互控制台卡片 (直接置底弹出，绝不藏在折叠内部) */}
+        {/* 正在运行的独立交互控制台卡片 (直接置底浮现，与 ASteam UI 体系严格保持一致) */}
         {activeRunningTerminalStep && (
-          <div className="my-4 rounded-2xl border-2 border-amber-500/80 bg-[#0c1017] p-3.5 shadow-2xl animate-in zoom-in-95 duration-150 select-text">
-            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#30363d] select-none">
+          <div className="my-4 rounded-2xl border border-[var(--primary)]/40 bg-[var(--card)] p-3.5 shadow-lg animate-in zoom-in-95 duration-150 select-text">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border)] select-none">
               <div className="flex items-center space-x-2">
-                <span className="relative flex h-3 w-3">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--primary)]"></span>
                 </span>
-                <span className="font-bold text-xs text-amber-400 tracking-wide">
-                  ⚡ 实时控制台交互就绪 (Live Console)
+                <span className="font-semibold text-xs text-[var(--foreground)] tracking-wide">
+                  ⚡ 实时控制台管道已就绪 (Live Console)
                 </span>
               </div>
-              <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 rounded px-2 py-0.5 font-mono font-bold animate-pulse">
-                等待标准输入 (可输入 y 确认)
+              <span className="text-[10px] bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30 rounded-full px-2.5 py-0.5 font-medium animate-pulse">
+                等待交互输入 (支持 stdin 交互)
               </span>
             </div>
 

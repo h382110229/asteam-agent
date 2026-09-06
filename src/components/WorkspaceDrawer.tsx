@@ -360,7 +360,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
         {/* Tab 3: Expanded Live Terminal */}
         {currentTab === 'terminal' && (
-          <div className="flex-1 p-4 bg-[#0a0e17] overflow-y-auto">
+          <div className="flex-1 p-4 bg-[var(--background)] overflow-y-auto">
             <LiveTerminalCard
               sessionId={activeSessionId}
               status="running"

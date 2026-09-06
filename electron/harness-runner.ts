@@ -322,9 +322,9 @@ class WorkspaceTools {
       let isSettled = false;
 
       const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-      // 在 Windows 下强制设置控制台输出编码为 UTF-8，以防止中文字符乱码
+      // 在 Windows 下强制设置控制台输入/输出编码为 UTF-8 并抑制非必要的进度流干扰
       const wrappedCommand = process.platform === 'win32'
-        ? `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; ${command}`
+        ? `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; ${command}`
         : command;
       const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', wrappedCommand] : ['-c', wrappedCommand];
 
