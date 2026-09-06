@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Send,
   Square,
@@ -248,6 +248,69 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
+  // @ Skill Mention 状态
+  const [availableSkills, setAvailableSkills] = useState<any[]>([]);
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const [skillQuery, setSkillQuery] = useState('');
+  const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadSkills = async () => {
+      if (window.electronAPI?.getAllSkills) {
+        try {
+          const skills = await window.electronAPI.getAllSkills(workspacePath || null);
+          if (isMounted && Array.isArray(skills)) {
+            setAvailableSkills(skills);
+          }
+        } catch (e) {
+          console.warn('Failed to load skills for @ mention:', e);
+        }
+      }
+    };
+    loadSkills();
+    return () => {
+      isMounted = false;
+    };
+  }, [workspacePath]);
+
+  const filteredSkills = useMemo(() => {
+    if (!skillQuery) return availableSkills;
+    const q = skillQuery.toLowerCase();
+    return availableSkills.filter(s => {
+      const nameMatch = (s.name || '').toLowerCase().includes(q);
+      const idMatch = (s.id || '').toLowerCase().includes(q);
+      const descMatch = (s.description || '').toLowerCase().includes(q);
+      return nameMatch || idMatch || descMatch;
+    });
+  }, [availableSkills, skillQuery]);
+
+  const handleSelectSkill = (skill: any) => {
+    if (!textareaRef.current) return;
+    const textarea = textareaRef.current;
+    const cursor = textarea.selectionStart || input.length;
+    const textBeforeCursor = input.slice(0, cursor);
+    const textAfterCursor = input.slice(cursor);
+
+    const replacedBefore = textBeforeCursor.replace(/(?:^|\s)@([a-zA-Z0-9_\-:]*)$/, (match) => {
+      const prefix = match.startsWith(' ') ? ' ' : '';
+      const cleanId = skill.id.replace(/^custom:(global|workspace):/, '');
+      return `${prefix}@${cleanId} `;
+    });
+
+    const newInput = replacedBefore + textAfterCursor;
+    setInput(newInput);
+    setShowSkillMenu(false);
+
+    setTimeout(() => {
+      textarea.focus();
+      const newCursor = replacedBefore.length;
+      textarea.setSelectionRange(newCursor, newCursor);
+      textarea.style.height = 'auto';
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 180)}px`;
+    }, 0);
+  };
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -314,6 +377,33 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 优先处理 @ 技能菜单的键盘上下导航、Tab/回车选取与 Esc 退出
+    if (showSkillMenu && filteredSkills.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedSkillIndex(i => (i + 1) % filteredSkills.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedSkillIndex(i => (i - 1 + filteredSkills.length) % filteredSkills.length);
+        return;
+      }
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        e.preventDefault();
+        const selected = filteredSkills[selectedSkillIndex];
+        if (selected) {
+          handleSelectSkill(selected);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSkillMenu(false);
+        return;
+      }
+    }
+
     if (showSlashMenu && (e.key === 'Escape' || e.key === 'Tab')) {
       setShowSlashMenu(false);
       return;
@@ -347,18 +437,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       onOpenGitDiff?.();
       setInput('');
       setShowSlashMenu(false);
+      setShowSkillMenu(false);
       return;
     }
     if (trimmed === '/preview') {
       onOpenPreview?.({ type: 'html', title: '多模态产物预览', content: '<h3>请选择消息中的 HTML / Mermaid / SVG 进行预览</h3>' });
       setInput('');
       setShowSlashMenu(false);
+      setShowSkillMenu(false);
       return;
     }
     if (trimmed === '/terminal') {
       onOpenTerminal?.();
       setInput('');
       setShowSlashMenu(false);
+      setShowSkillMenu(false);
       return;
     }
 
@@ -380,6 +473,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     setInput('');
     setAttachments([]);
     setShowSlashMenu(false);
+    setShowSkillMenu(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -391,10 +485,24 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
 
-    if (val === '/' || (val.startsWith('/') && !val.includes(' '))) {
-      setShowSlashMenu(true);
-    } else {
+    // 侦测光标位置前的 @ 技能提及触发词
+    const cursor = e.target.selectionStart || val.length;
+    const textBeforeCursor = val.slice(0, cursor);
+    const atMatch = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\-:]*)$/);
+
+    if (atMatch) {
+      const query = atMatch[1].toLowerCase();
+      setSkillQuery(query);
+      setShowSkillMenu(true);
+      setSelectedSkillIndex(0);
       setShowSlashMenu(false);
+    } else {
+      setShowSkillMenu(false);
+      if (val === '/' || (val.startsWith('/') && !val.includes(' '))) {
+        setShowSlashMenu(true);
+      } else {
+        setShowSlashMenu(false);
+      }
     }
   };
 
@@ -982,6 +1090,74 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         </div>
       )}
 
+      {/* Skill Mention Autocomplete Popup (@) */}
+      {showSkillMenu && (
+        <div className="absolute bottom-28 left-4 right-4 max-w-lg mx-auto z-40 rounded-xl border border-[var(--border)] bg-[var(--card)]/95 backdrop-blur-md p-1.5 shadow-2xl animate-in slide-in-from-bottom-2 select-none">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border)] mb-1">
+            <div className="flex items-center space-x-1.5 text-[11px] font-semibold text-[var(--foreground)]">
+              <Sparkles className="h-3.5 w-3.5 text-[var(--primary)]" />
+              <span>调用已安装技能 (@Skill)</span>
+            </div>
+            <span className="text-[10px] text-[var(--muted-foreground)]">
+              ↑↓ 切换 · 回车/Tab 选择 · Esc 退出
+            </span>
+          </div>
+
+          <div className="max-h-56 overflow-y-auto space-y-0.5">
+            {filteredSkills.length === 0 ? (
+              <div className="p-3 text-center text-xs text-[var(--muted-foreground)]">
+                未找到匹配 "{skillQuery}" 的技能，可在设置中安装导入
+              </div>
+            ) : (
+              filteredSkills.map((skill, idx) => {
+                const isSelected = idx === selectedSkillIndex;
+                const isCustom = skill.id.startsWith('custom:');
+                const isWorkspace = skill.id.startsWith('custom:workspace:');
+                const cleanId = skill.id.replace(/^custom:(global|workspace):/, '');
+
+                return (
+                  <div
+                    key={skill.id}
+                    onClick={() => handleSelectSkill(skill)}
+                    onMouseEnter={() => setSelectedSkillIndex(idx)}
+                    className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 cursor-pointer text-xs transition-colors ${
+                      isSelected
+                        ? 'bg-[var(--primary)]/15 text-[var(--foreground)]'
+                        : 'hover:bg-[var(--muted)] text-[var(--muted-foreground)]'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 truncate pr-2">
+                      <span className="font-mono font-bold text-[var(--primary)] text-xs shrink-0">
+                        @{cleanId}
+                      </span>
+                      <span className="font-medium text-[var(--foreground)] truncate">
+                        {skill.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center space-x-1.5 shrink-0">
+                      {isWorkspace ? (
+                        <span className="rounded bg-indigo-500/15 text-indigo-500 border border-indigo-500/30 px-1.5 py-0.2 text-[9px] font-bold">
+                          项目
+                        </span>
+                      ) : isCustom ? (
+                        <span className="rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 px-1.5 py-0.2 text-[9px] font-bold">
+                          自定义
+                        </span>
+                      ) : (
+                        <span className="rounded bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30 px-1.5 py-0.2 text-[9px] font-bold">
+                          内置
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Input Area Bar */}
       <div
         onDragOver={handleDragOver}
@@ -1091,7 +1267,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               </span>
             ) : (
               <span className="hidden sm:inline-block text-[10px]">
-                输入 <code>/</code> 唤出指令 · 支持拖拽/粘贴添加附件 · Enter 发送
+                输入 <code>/</code> 唤出指令 · 输入 <code>@</code> 唤出技能 · 支持拖拽/粘贴附件 · Enter 发送
               </span>
             )}
           </div>
@@ -1132,8 +1308,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   : isWaitingForUser
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath
-                  ? `向 ASTeam Agent 指派任务（支持输入 /plan, /review, /diff，支持拖入或直接粘贴附件/图片）...`
-                  : `指派本机宿主任务（支持输入 /plan，支持直接拖拽或 Ctrl+V 粘贴附件/图片）...`
+                  ? `向 ASTeam Agent 指派任务（支持输入 / 唤出指令，@ 唤出技能，支持拖入或粘贴附件/图片）...`
+                  : `指派本机宿主任务（支持输入 / 唤出指令，@ 唤出技能，支持拖拽或粘贴附件/图片）...`
               }
               className="max-h-44 min-h-[28px] w-full resize-none bg-transparent px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none select-text"
             />

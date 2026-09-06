@@ -11,6 +11,7 @@ export interface AgentConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  stream?: boolean;
   workspacePath?: string | null;
   enabledMcpTools?: string[];
   enabledSkills?: string[];
@@ -483,7 +484,7 @@ async function callLLMStream(
   config: AgentConfig,
   messages: ChatMessage[],
   abortSignal: AbortSignal,
-  onDelta: (text: string) => void
+  onDelta: (text: string, type?: 'content' | 'thought') => void
 ): Promise<string> {
   const url = `${config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   
@@ -494,13 +495,15 @@ async function callLLMStream(
     headers['Authorization'] = `Bearer ${config.apiKey}`;
   }
 
+  const useStream = config.stream !== false;
+
   const response = await fetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       model: config.model || 'Auto',
       messages,
-      stream: true,
+      stream: useStream,
       temperature: 0.3
     }),
     signal: abortSignal
@@ -520,7 +523,7 @@ async function callLLMStream(
     // 针对网关超时 (524 / 504) 或服务异常 (502 / 503) 等，剥离冗长的 HTML 垃圾代码，给出精准人话诊断
     let cleanMessage = '';
     if (response.status === 524) {
-      cleanMessage = `[网关响应超时 524 Timeout] ASteam API 网关等待上游模型推理超时。当前服务端并发负载较高或模型生成耗时过长，建议点击【重新尝试】再次发起，或在设置中切换模型线路。`;
+      cleanMessage = `[网关响应超时 524 Timeout] ASteam API 网关与 Cloudflare 等待上游模型首字推理超时 (超过 100 秒)。若模型当前负载较高或处于长链思考，建议在设置中切换为并发更优的模型线路，或点击【重新尝试】。`;
     } else if (response.status === 502 || response.status === 503 || response.status === 504) {
       cleanMessage = `[网关服务异常 ${response.status}] ASteam API 网关或上游服务暂时不可用，服务节点可能正在调度维护，请稍后点击【重新尝试】。`;
     } else if (response.status === 429) {
@@ -548,7 +551,7 @@ async function callLLMStream(
     const json = await response.json();
     const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.delta?.content || '';
     if (content) {
-      onDelta(content);
+      onDelta(content, 'content');
     }
     return content;
   }
@@ -579,10 +582,18 @@ async function callLLMStream(
         if (dataStr === '[DONE]') break;
         try {
           const parsed = JSON.parse(dataStr);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            fullText += delta;
-            onDelta(delta);
+          const delta = parsed.choices?.[0]?.delta;
+          const deltaContent = delta?.content || '';
+          const deltaReasoning = delta?.reasoning_content || delta?.thought || '';
+
+          // 若有思考推理链（如 DeepSeek-R1 / mimo 推理），实时逐字推送 thought，保持连接持续传输
+          if (deltaReasoning) {
+            fullText += deltaReasoning;
+            onDelta(deltaReasoning, 'thought');
+          }
+          if (deltaContent) {
+            fullText += deltaContent;
+            onDelta(deltaContent, 'content');
           }
         } catch {
           // ignore incomplete JSON chunk in stream
@@ -778,7 +789,36 @@ export async function runHarnessAgent(
     callbacks.onPlan(initialPlanSteps);
 
     const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector']);
-    const skillPrompts = skillManager.getAggregatedSkillPrompt(config.enabledSkills || ['code_review', 'unit_test', 'git_commit_helper'], config.workspacePath || null);
+
+    // 动态侦测并强制激活用户在输入中通过 @ 显式提及的技能
+    const userMentionedSkills: string[] = [];
+    const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+    if (lastUserMsg && typeof lastUserMsg.content === 'string') {
+      const mentionMatches = Array.from(lastUserMsg.content.matchAll(/@([a-zA-Z0-9_\-:]+)/g));
+      for (const match of mentionMatches) {
+        const skillKey = match[1];
+        const found = skillManager.findSkill(skillKey, config.workspacePath || null);
+        if (found && !userMentionedSkills.includes(found.id)) {
+          userMentionedSkills.push(found.id);
+        }
+      }
+    }
+
+    const effectiveEnabledSkills = Array.from(new Set([
+      ...(config.enabledSkills || ['code_review', 'unit_test', 'git_commit_helper']),
+      ...userMentionedSkills
+    ]));
+
+    const skillPrompts = skillManager.getAggregatedSkillPrompt(effectiveEnabledSkills, config.workspacePath || null);
+
+    let userMentionInstruction = '';
+    if (userMentionedSkills.length > 0) {
+      const names = userMentionedSkills.map(id => {
+        const s = skillManager.findSkill(id, config.workspacePath || null);
+        return s ? `「${s.name}」(@${id})` : `@${id}`;
+      }).join('、');
+      userMentionInstruction = `\n\n【用户显式指派技能】\n用户在本轮输入中通过 @ 显式指定了以下专属技能：${names}。你必须严格遵循该技能的规范、版式结构与输出标准予以执行！`;
+    }
 
     let modeInstruction = '';
     if (config.executionMode === 'plan_only') {
@@ -873,6 +913,7 @@ ${isHostMode
 
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
 ${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''}
+${userMentionInstruction}
 ${modeInstruction}
 
 【多模态设计与可视化规约 (SVG / Mermaid / HTML)】
@@ -910,9 +951,9 @@ ${modeInstruction}
         config,
         messages,
         abortController.signal,
-        (token) => {
+        (token, type) => {
           stepResponse += token;
-          callbacks.onToken(token, 'content');
+          callbacks.onToken(token, type || 'content');
         }
       );
 

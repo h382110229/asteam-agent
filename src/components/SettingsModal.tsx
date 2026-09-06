@@ -138,7 +138,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         body: JSON.stringify({
           model: form.model || 'Auto',
           messages: [{ role: 'user', content: 'Ping' }],
-          max_tokens: 5
+          max_tokens: 5,
+          stream: form.streamResponse !== false
         })
       });
 
@@ -454,6 +455,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                   </button>
                 </div>
+              </div>
+
+              {/* Stream Mode Toggle Switch */}
+              <div className="flex items-start justify-between rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-2xs">
+                <div className="space-y-1 pr-4">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-xs font-semibold text-[var(--foreground)]">流式响应模式 (Stream Mode)</span>
+                    <span className="rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-1.5 py-0.2 text-[9px] font-bold">默认推荐</span>
+                  </div>
+                  <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed">
+                    以 Server-Sent Events (SSE) 逐字流式接收大模型生成结果与思考推理链。保持长连接持续传输，有效防止 Cloudflare 等前置 CDN 网关在模型长耗时推理时触发 100 秒超时断连 (HTTP 524)。若特殊自建代理不支持 SSE，可临时关闭。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForm(prev => ({ ...prev, streamResponse: prev.streamResponse === false ? true : false }))}
+                  className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5 ${
+                    form.streamResponse !== false ? 'bg-[var(--primary)]' : 'bg-[var(--muted)]'
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                      form.streamResponse !== false ? 'translate-x-4' : 'translate-x-0'
+                    }`}
+                  />
+                </button>
               </div>
 
               {/* Test Connection Button & Status */}

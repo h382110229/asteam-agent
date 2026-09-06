@@ -65,6 +65,7 @@ export interface AppSettings {
   baseUrl: string;
   apiKey: string;
   model: string;
+  streamResponse?: boolean; // 流式响应传输模式 (默认 true)
   openAtLogin: boolean;
   minimizeToTray: boolean;
   theme: 'light' | 'dark';
@@ -78,6 +79,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   baseUrl: 'https://llmapi.ashawk.online/v1',
   apiKey: '',
   model: 'Auto',
+  streamResponse: true,
   openAtLogin: false,
   minimizeToTray: true,
   theme: 'light',

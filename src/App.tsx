@@ -457,6 +457,7 @@ export const App: React.FC = () => {
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
       model: settings.model,
+      stream: settings.streamResponse !== false,
       workspacePath: currentWorkspacePath,
       enabledMcpTools: settings.enabledMcpTools,
       enabledSkills: settings.enabledSkills,
