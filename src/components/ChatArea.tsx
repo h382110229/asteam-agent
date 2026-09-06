@@ -21,7 +21,10 @@ import {
   CornerDownLeft,
   AlertCircle,
   RefreshCw,
-  Settings
+  Settings,
+  ChevronDown,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
@@ -76,10 +79,119 @@ const SLASH_COMMANDS = [
   { cmd: '/grill-me', title: 'Grill-me 互动问答', desc: '进入采访决策模式：Agent 逐一向您抛出架构选型卡片' }
 ];
 
-function extractPreviewableArtifact(content: string): PreviewData | null {
+function extractPreviewableArtifact(content: string, steps?: AgentStep[]): PreviewData | null {
+  // 1. 优先从规划执行步骤 (AgentStep[]) 中直接提取 write_file 生成的真实交付产物
+  if (steps && steps.length > 0) {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i];
+      if (step.tool === 'write_file' && step.args) {
+        const filePath = step.args.filePath || step.args.path || step.args.file || '';
+        const fileName = filePath.split(/[\\/]/).pop() || '';
+        const contentStr = typeof step.args.content === 'string' ? step.args.content : '';
+
+        if (filePath.endsWith('.html') || filePath.endsWith('.htm')) {
+          if (contentStr.trim()) {
+            return {
+              type: 'html',
+              title: fileName || 'HTML 页面预览',
+              content: contentStr
+            };
+          }
+        } else if (filePath.endsWith('.svg')) {
+          if (contentStr.trim()) {
+            return {
+              type: 'svg',
+              title: fileName || 'SVG 矢量设计图',
+              content: contentStr
+            };
+          }
+        }
+      }
+    }
+  }
+
   if (!content) return null;
 
-  // 1. Mermaid
+  // 2. 检查正文中的 ```tool:write_file 代码块 (识别生成的目标 HTML 或 SVG 文件)
+  const writeToolMatch = content.match(/```tool:write_file\s*([\s\S]*?)```/i);
+  if (writeToolMatch) {
+    const rawArgs = writeToolMatch[1].trim();
+    const fileMatch = rawArgs.match(/"(?:filePath|path|file)"\s*:\s*"([^"]+)"/i);
+    const filePath = fileMatch ? fileMatch[1] : '';
+    const fileName = filePath.split(/[\\/]/).pop() || '';
+
+    if (filePath.endsWith('.html') || filePath.endsWith('.htm')) {
+      let htmlContent = '';
+      try {
+        const parsed = JSON.parse(rawArgs);
+        htmlContent = parsed.content || '';
+      } catch {
+        const cMatch = rawArgs.match(/"content"\s*:\s*"([\s\S]*)"\s*}\s*$/);
+        if (cMatch) {
+          htmlContent = cMatch[1]
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\');
+        }
+      }
+      if (htmlContent) {
+        return {
+          type: 'html',
+          title: fileName || 'HTML 页面预览',
+          content: htmlContent
+        };
+      }
+    }
+
+    if (filePath.endsWith('.svg')) {
+      let svgContent = '';
+      try {
+        const parsed = JSON.parse(rawArgs);
+        svgContent = parsed.content || '';
+      } catch {
+        const cMatch = rawArgs.match(/"content"\s*:\s*"([\s\S]*)"\s*}\s*$/);
+        if (cMatch) {
+          svgContent = cMatch[1]
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\r')
+            .replace(/\\t/g, '\t')
+            .replace(/\\"/g, '"')
+            .replace(/\\\\/g, '\\');
+        }
+      }
+      if (svgContent) {
+        return {
+          type: 'svg',
+          title: fileName || 'SVG 矢量设计图',
+          content: svgContent
+        };
+      }
+    }
+  }
+
+  // 3. 显式 HTML 代码块 ```html ... ```
+  const htmlMatch = content.match(/```html\s*([\s\S]*?)```/i);
+  if (htmlMatch && htmlMatch[1].trim()) {
+    return {
+      type: 'html',
+      title: 'HTML 页面预览',
+      content: htmlMatch[1].trim()
+    };
+  }
+
+  // 4. 原始完整 HTML 文档 (<!DOCTYPE html ... </html>)
+  const doctypeMatch = content.match(/(<!DOCTYPE\s+html[\s\S]*?<\/html>)/i);
+  if (doctypeMatch && doctypeMatch[1].trim()) {
+    return {
+      type: 'html',
+      title: 'HTML 页面预览',
+      content: doctypeMatch[1].trim()
+    };
+  }
+
+  // 5. Mermaid 架构流程图 ```mermaid ... ```
   const mermaidMatch = content.match(/```mermaid\s*([\s\S]*?)```/i);
   if (mermaidMatch && mermaidMatch[1].trim()) {
     return {
@@ -89,7 +201,7 @@ function extractPreviewableArtifact(content: string): PreviewData | null {
     };
   }
 
-  // 2. SVG
+  // 6. 显式 SVG 代码块 ```svg 或 ```xml <svg ... </svg>
   const svgBlockMatch = content.match(/```(?:svg|xml)\s*(<svg[\s\S]*?<\/svg>)\s*```/i);
   if (svgBlockMatch && svgBlockMatch[1].trim()) {
     return {
@@ -98,22 +210,14 @@ function extractPreviewableArtifact(content: string): PreviewData | null {
       content: svgBlockMatch[1].trim()
     };
   }
-  const rawSvgMatch = content.match(/(<svg\b[^>]*>[\s\S]*?<\/svg>)/i);
-  if (rawSvgMatch && rawSvgMatch[1].trim()) {
+
+  // 7. 独立完整 SVG 矢量图（必须带标准命名空间且长度 > 100，避免匹配 HTML 中的内联小图标）
+  const rawSvgMatch = content.match(/(<svg\b[^>]*xmlns="http:\/\/www\.w3\.org\/2000\/svg"[^>]*>[\s\S]*?<\/svg>)/i);
+  if (rawSvgMatch && rawSvgMatch[1].trim() && rawSvgMatch[1].length > 100) {
     return {
       type: 'svg',
       title: 'SVG 矢量设计图',
       content: rawSvgMatch[1].trim()
-    };
-  }
-
-  // 3. HTML
-  const htmlMatch = content.match(/```html\s*([\s\S]*?)```/i);
-  if (htmlMatch && htmlMatch[1].trim()) {
-    return {
-      type: 'html',
-      title: 'HTML 页面预览',
-      content: htmlMatch[1].trim()
     };
   }
 
@@ -159,22 +263,39 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     return null;
   })();
 
-  // 实时捕获当前正在执行的步骤，用于顶部常驻任务进程看板
+  // 查找最近一条包含规划执行步骤的消息（支持运行中实时追踪与执行完毕后的结果常驻查看）
+  const latestMsgWithSteps = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === 'assistant' && m.steps && m.steps.length > 0) {
+        return m;
+      }
+    }
+    return null;
+  })();
+
+  const currentSteps = latestMsgWithSteps?.steps || [];
+  const totalStepsCount = currentSteps.length;
+  const completedStepsCount = currentSteps.filter(s => s.status === 'completed').length;
+  const isAllStepsCompleted = totalStepsCount > 0 && completedStepsCount === totalStepsCount;
+
+  // 实时捕获当前正在执行或等待的步骤，用于置顶任务进程看板
   const activeRunningStep = (() => {
     if (!isRunning) return null;
-    if (lastMsg?.role === 'assistant' && lastMsg.steps) {
-      const running = lastMsg.steps.find(s => s.status === 'running');
+    if (currentSteps.length > 0) {
+      const running = currentSteps.find(s => s.status === 'running');
       if (running) return running;
-      const pending = lastMsg.steps.find(s => s.status === 'pending');
+      const pending = currentSteps.find(s => s.status === 'pending');
       if (pending) return pending;
     }
     return null;
   })();
 
-  const totalStepsCount = (lastMsg?.role === 'assistant' && lastMsg.steps) ? lastMsg.steps.length : 0;
-  const completedStepsCount = (lastMsg?.role === 'assistant' && lastMsg.steps)
-    ? lastMsg.steps.filter(s => s.status === 'completed').length
-    : 0;
+  const [isTopStepsDropdownOpen, setIsTopStepsDropdownOpen] = useState(false);
+  const [dismissedBannerMsgId, setDismissedBannerMsgId] = useState<string | null>(null);
+
+  // 当任务处于运行中，或已有规划步骤且未被用户手动关闭时，始终常驻置顶展示进程看板（彻底根除被信息流刷掉找不到进程的痛点）
+  const shouldShowTopBanner = isRunning || (totalStepsCount > 0 && dismissedBannerMsgId !== latestMsgWithSteps?.id);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -359,39 +480,137 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         className="hidden"
       />
 
-      {/* 实时置顶任务进程动态看板：当 Agent 正在规划或执行时常驻顶部，保证信息流向下滚屏时进程始终一目了然 */}
-      {isRunning && (
-        <div className="z-30 flex items-center justify-between border-b border-[var(--primary)]/20 bg-[var(--card)]/95 px-4 py-2 text-xs shadow-xs backdrop-blur-md select-none animate-in slide-in-from-top-2 duration-150 shrink-0">
-          <div className="flex items-center space-x-2.5 min-w-0">
-            <span className="relative flex h-2.5 w-2.5 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--primary)]"></span>
-            </span>
-            <span className="font-semibold text-xs text-[var(--foreground)] truncate">
-              {activeRunningStep ? activeRunningStep.title : 'Agent 正在分析需求并自主调度中...'}
-            </span>
-            {activeRunningStep?.tool && (
-              <span className="rounded bg-[var(--muted)] border border-[var(--border)] px-1.5 py-0.5 text-[10px] font-mono text-[var(--muted-foreground)] shrink-0">
-                {activeRunningStep.tool}
-              </span>
-            )}
+      {/* 实时置顶任务进程动态看板：支持运行中监控与完成态常驻，并可就地一键展开步骤全貌 */}
+      {shouldShowTopBanner && (
+        <div className="z-30 shrink-0 border-b border-[var(--primary)]/30 bg-[var(--card)]/95 shadow-sm backdrop-blur-md select-none transition-all">
+          <div className="flex items-center justify-between px-4 py-2.5 text-xs">
+            <div className="flex items-center space-x-2.5 min-w-0 flex-1 mr-3">
+              {isRunning ? (
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--primary)]"></span>
+                </span>
+              ) : isAllStepsCompleted ? (
+                <CheckCircle2 className="h-4 w-4 text-[var(--primary)] shrink-0" />
+              ) : (
+                <Clock className="h-4 w-4 text-[var(--muted-foreground)] shrink-0" />
+              )}
+
+              <div className="flex items-center space-x-2 min-w-0 truncate">
+                <span className="font-semibold text-xs text-[var(--foreground)] truncate">
+                  {isRunning
+                    ? (activeRunningStep ? `正在执行: ${activeRunningStep.title}` : 'Agent 需求分析与自主调度中...')
+                    : `deepseek-harness 规划与执行已就绪 (${completedStepsCount}/${totalStepsCount} 步骤完成)`
+                  }
+                </span>
+
+                {isRunning && activeRunningStep?.tool && (
+                  <span className="rounded bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20 px-1.5 py-0.5 text-[10px] font-mono shrink-0">
+                    {activeRunningStep.tool}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 shrink-0">
+              {/* Progress track */}
+              {totalStepsCount > 0 && (
+                <div className="hidden sm:flex items-center space-x-2 mr-1">
+                  <div className="w-16 h-1.5 rounded-full bg-[var(--muted)] overflow-hidden">
+                    <div
+                      className="h-full bg-[var(--primary)] transition-all duration-300"
+                      style={{ width: `${Math.round((completedStepsCount / Math.max(1, totalStepsCount)) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
+                    {completedStepsCount}/{totalStepsCount}
+                  </span>
+                </div>
+              )}
+
+              {/* Toggle Steps Checklist Button */}
+              {totalStepsCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsTopStepsDropdownOpen(!isTopStepsDropdownOpen)}
+                  className="flex items-center space-x-1 rounded-md bg-[var(--muted)] hover:bg-[var(--border)] px-2 py-1 text-xs text-[var(--foreground)] font-medium transition-colors cursor-pointer"
+                  title="展开/收起步骤清单"
+                >
+                  <span>{isTopStepsDropdownOpen ? '收起步骤' : '检视步骤'}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${isTopStepsDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+
+              {/* Stop button while running */}
+              {isRunning && (
+                <button
+                  type="button"
+                  onClick={onStopAgent}
+                  className="flex items-center space-x-1 rounded-md bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20 px-2 py-1 text-xs font-medium transition-colors cursor-pointer"
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                  <span>中止</span>
+                </button>
+              )}
+
+              {/* Dismiss button when completed */}
+              {!isRunning && (
+                <button
+                  type="button"
+                  onClick={() => setDismissedBannerMsgId(latestMsgWithSteps?.id || 'dismissed')}
+                  className="rounded p-1 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                  title="隐藏顶部看板"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center space-x-3 shrink-0">
-            {totalStepsCount > 0 && (
-              <span className="font-mono text-[11px] text-[var(--muted-foreground)]">
-                {completedStepsCount} / {totalStepsCount} 步骤完成
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={onStopAgent}
-              className="flex items-center space-x-1 rounded px-2 py-0.5 text-[11px] text-[var(--accent)] hover:bg-[var(--accent)]/10 transition-colors cursor-pointer"
-            >
-              <Square className="h-3 w-3 fill-current" />
-              <span>停止</span>
-            </button>
-          </div>
+          {/* Collapsible Steps Drawer right from top banner */}
+          {isTopStepsDropdownOpen && currentSteps.length > 0 && (
+            <div className="border-t border-[var(--border)] bg-[var(--card)]/98 p-3 max-h-56 overflow-y-auto space-y-2 text-xs shadow-inner animate-in slide-in-from-top-1 duration-150">
+              <div className="flex items-center justify-between text-[11px] text-[var(--muted-foreground)] font-medium pb-1 border-b border-[var(--border)]/40 mb-1.5">
+                <span>任务执行全流程检查清单</span>
+                <span>共 {currentSteps.length} 个规划步骤</span>
+              </div>
+              {currentSteps.map((step, idx) => (
+                <div
+                  key={step.id || idx}
+                  className="flex items-center justify-between rounded-lg bg-[var(--muted)]/40 p-2 border border-[var(--border)]/50"
+                >
+                  <div className="flex items-center space-x-2 min-w-0">
+                    {step.status === 'completed' ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
+                    ) : step.status === 'running' ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--primary)] shrink-0" />
+                    ) : step.status === 'failed' ? (
+                      <AlertCircle className="h-3.5 w-3.5 text-[var(--accent)] shrink-0" />
+                    ) : (
+                      <div className="h-3.5 w-3.5 rounded-full border border-dashed border-[var(--muted-foreground)] shrink-0" />
+                    )}
+                    <span className="font-medium text-xs text-[var(--foreground)] truncate">
+                      {idx + 1}. {step.title}
+                    </span>
+                    {step.tool && (
+                      <span className="rounded bg-[var(--background)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--muted-foreground)] border border-[var(--border)] shrink-0">
+                        {step.tool}
+                      </span>
+                    )}
+                  </div>
+                  <span className={`text-[10px] font-mono shrink-0 ml-2 ${
+                    step.status === 'completed' ? 'text-[var(--primary)]' :
+                    step.status === 'running' ? 'text-amber-500 font-bold' :
+                    step.status === 'failed' ? 'text-[var(--accent)]' : 'text-[var(--muted-foreground)]'
+                  }`}>
+                    {step.status === 'completed' ? '已完成' :
+                     step.status === 'running' ? '执行中...' :
+                     step.status === 'failed' ? '失败' : '排队中'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -589,9 +808,31 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   );
                 })()}
 
+                {/* 任务步骤里程碑快速回顾 (置底呈现，与交付制品并列，阅读完长文结论无需往上翻找) */}
+                {msg.role === 'assistant' && msg.steps && msg.steps.length > 0 && (
+                  <div className="mt-2 flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-3 py-2 text-xs select-none">
+                    <div className="flex items-center space-x-2">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
+                      <span className="font-semibold text-xs text-[var(--foreground)]">
+                        规划与执行轨迹归档 ({msg.steps.filter(s => s.status === 'completed').length} / {msg.steps.length} 步骤已通过)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsTopStepsDropdownOpen(true);
+                      }}
+                      className="text-xs text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer font-medium"
+                    >
+                      <span>展开顶部步骤全貌</span>
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
+
                 {/* Multimodal Artifact Preview Card (置于结论最下方，突出交付物) */}
                 {msg.role === 'assistant' && (() => {
-                  const artifact = extractPreviewableArtifact(msg.content);
+                  const artifact = extractPreviewableArtifact(msg.content, msg.steps);
                   if (!artifact || !onOpenPreview) return null;
                   return (
                     <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/5 p-3 shadow-xs hover:border-[var(--primary)] transition-all">
