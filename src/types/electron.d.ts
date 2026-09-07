@@ -56,6 +56,20 @@ export interface ElectronAPI {
   saveMemoryContent: (type: 'project' | 'profile' | 'global', content: string, workspacePath: string | null) => Promise<{ success: boolean; message: string }>;
   addMemoryFact: (scope: 'project' | 'global', fact: string, workspacePath: string | null) => Promise<{ success: boolean; targetPath: string; message: string }>;
   parseMemoryCommand: (text: string) => Promise<{ isCommand: boolean; fact?: string }>;
+
+  // Context & File Indexing (v1.4.0)
+  indexWorkspaceFiles: (dirPath: string) => Promise<Array<{ name: string; relPath: string; ext: string }>>;
+  readWorkspaceFile: (workspacePath: string, relPath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  getGitDiffSummary: (repoPath: string) => Promise<{ branch: string; statusText: string; diffText: string }>;
+
+  // Project Rules (v1.4.0)
+  getProjectRules: (workspacePath: string | null) => Promise<{ hasRules: boolean; filePath: string | null; ruleType: 'asteamrules' | 'asteam_rules_file' | 'asteam_md' | 'none'; content: string }>;
+  saveProjectRules: (workspacePath: string, content: string) => Promise<{ success: boolean; filePath: string; message: string }>;
+  getRulePresets: () => Promise<Array<{ id: string; name: string; description: string; template: string }>>;
+
+  // Shadow Checkpoint & Rollback (v1.4.0)
+  listCheckpoints: (workspacePath: string | null, sessionId?: string) => Promise<any[]>;
+  rollbackCheckpoint: (checkpointId: string, workspacePath: string | null) => Promise<{ success: boolean; message: string; restoredFiles: string[]; removedFiles: string[] }>;
 }
 
 declare global {

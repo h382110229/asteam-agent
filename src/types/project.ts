@@ -57,3 +57,32 @@ export interface GitStatusSummary {
   totalAdditions: number;
   totalDeletions: number;
 }
+
+export interface CheckpointItem {
+  id: string;
+  sessionId: string;
+  workspacePath: string;
+  timestamp: number;
+  title: string;
+  description?: string;
+  modifiedFiles: string[];
+  newFiles: string[];
+  isGitRepo: boolean;
+  backupDirPath: string;
+  rolledBack?: boolean;
+  rolledBackAt?: number;
+}
+
+export interface ProjectRulesInfo {
+  hasRules: boolean;
+  filePath: string | null;
+  ruleType: 'asteamrules' | 'asteam_rules_file' | 'asteam_md' | 'none';
+  content: string;
+}
+
+export interface WorkspaceFileItem {
+  name: string;
+  relPath: string;
+  ext: string;
+}
+

@@ -232,7 +232,6 @@ const UserStatusBadge: React.FC<UserStatusBadgeProps> = ({
             )}
           </span>
         )}
-      </span>
       </div>
     );
   };

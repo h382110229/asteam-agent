@@ -3,10 +3,11 @@ import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea, ChatMessageItem } from './components/ChatArea';
 import { SettingsModal } from './components/SettingsModal';
+import { ProjectRulesModal } from './components/ProjectRulesModal';
 import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/WorkspaceDrawer';
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
-import { Project, ProjectSession, GitStatusSummary, ExecutionMode } from './types/project';
+import { Project, ProjectSession, GitStatusSummary, ExecutionMode, ProjectRulesInfo } from './types/project';
 
 export const App: React.FC = () => {
   // 1. Settings & Theme
@@ -151,6 +152,11 @@ export const App: React.FC = () => {
     setIsDrawerOpen(true);
   }, []);
 
+  const handleOpenTimeline = useCallback(() => {
+    setDrawerTab('timeline');
+    setIsDrawerOpen(true);
+  }, []);
+
   const refreshGitStatus = useCallback(async () => {
     if (!currentWorkspacePath || !window.electronAPI) {
       setGitStatus(null);
@@ -163,6 +169,59 @@ export const App: React.FC = () => {
       setGitStatus(null);
     }
   }, [currentWorkspacePath]);
+
+  // 5. Project Rules State (v1.4.0)
+  const [projectRules, setProjectRules] = useState<ProjectRulesInfo | null>(null);
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
+
+  const refreshProjectRules = useCallback(async () => {
+    if (!currentWorkspacePath || !window.electronAPI?.getProjectRules) {
+      setProjectRules(null);
+      return;
+    }
+    try {
+      const rules = await window.electronAPI.getProjectRules(currentWorkspacePath);
+      setProjectRules(rules || null);
+    } catch {
+      setProjectRules(null);
+    }
+  }, [currentWorkspacePath]);
+
+  useEffect(() => {
+    refreshProjectRules();
+  }, [refreshProjectRules]);
+
+  const handleOpenRules = useCallback(() => {
+    setIsRulesModalOpen(true);
+  }, []);
+
+  const handleRollbackCheckpoint = useCallback(async (checkpointId: string): Promise<boolean> => {
+    if (!window.electronAPI) return false;
+    try {
+      const res = await window.electronAPI.rollbackCheckpoint(checkpointId, currentWorkspacePath);
+      if (res && res.success) {
+        setMessagesMap(prevMap => {
+          const list = [...(prevMap[activeSessionId] || [])];
+          const updated = list.map(m => {
+            if (m.checkpoint && m.checkpoint.id === checkpointId) {
+              return {
+                ...m,
+                checkpoint: { ...m.checkpoint, rolledBack: true }
+              };
+            }
+            return m;
+          });
+          return { ...prevMap, [activeSessionId]: updated };
+        });
+        await refreshGitStatus();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Rollback checkpoint failed:', err);
+      return false;
+    }
+  }, [currentWorkspacePath, activeSessionId, refreshGitStatus]);
 
   useEffect(() => {
     refreshGitStatus();
@@ -241,6 +300,10 @@ export const App: React.FC = () => {
             }
             return next;
           });
+        } else if (type === 'checkpoint') {
+          if (payload.checkpoint) {
+            lastMsg.checkpoint = payload.checkpoint;
+          }
         } else if (type === 'done') {
           // 若上游网关或模型将全部输出归入 reasoning_content (thought)，导致正文 content 为空，自动提拔为正文
           if (!lastMsg.content?.trim() && lastMsg.thought?.trim()) {
@@ -553,6 +616,8 @@ export const App: React.FC = () => {
         gitStatus={gitStatus}
         onOpenGitDiff={handleOpenGitDiff}
         onOpenDrawer={() => setIsDrawerOpen(true)}
+        projectRules={projectRules}
+        onOpenRules={handleOpenRules}
       />
 
       {/* 2. Main Workspace Layout */}
@@ -588,9 +653,12 @@ export const App: React.FC = () => {
           onOpenGitDiff={handleOpenGitDiff}
           onOpenPreview={handleOpenPreview}
           onOpenTerminal={handleOpenTerminal}
+          onOpenTimeline={handleOpenTimeline}
+          onRollbackCheckpoint={handleRollbackCheckpoint}
           onOpenSettings={() => setIsSettingsOpen(true)}
           activeSessionId={activeSessionId}
           terminalOutputs={terminalOutputs}
+          onOpenRules={handleOpenRules}
         />
       </div>
 
@@ -603,7 +671,16 @@ export const App: React.FC = () => {
         workspacePath={currentWorkspacePath}
       />
 
-      {/* 4. Workspace Workbench Drawer (Live Preview + Artifacts Shelf + Git Diff + Live Terminal) */}
+      {/* 3.1 Project Rules Modal (v1.4.0) */}
+      <ProjectRulesModal
+        isOpen={isRulesModalOpen}
+        onClose={() => setIsRulesModalOpen(false)}
+        workspacePath={currentWorkspacePath}
+        projectRules={projectRules}
+        onRulesUpdated={refreshProjectRules}
+      />
+
+      {/* 4. Workspace Workbench Drawer (Live Preview + Artifacts Shelf + Git Diff + Live Terminal + Timeline) */}
       <WorkspaceDrawer
         isOpen={isDrawerOpen}
         onClose={() => setIsDrawerOpen(false)}
@@ -613,6 +690,7 @@ export const App: React.FC = () => {
         workspacePath={currentWorkspacePath}
         gitStatus={gitStatus}
         onRefreshGit={refreshGitStatus}
+        onRollbackCheckpoint={handleRollbackCheckpoint}
         activeSessionId={activeSessionId}
         terminalOutput={terminalOutputs[activeSessionId] || ''}
         messages={activeMessages}

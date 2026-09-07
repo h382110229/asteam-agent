@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   X,
   GitBranch,
@@ -24,19 +24,26 @@ import {
   Download,
   Copy,
   Clock,
-  Search
+  Search,
+  History,
+  RotateCcw,
+  CheckCircle2,
+  AlertCircle,
+  Image as ImageIcon,
+  Video,
+  Volume2
 } from 'lucide-react';
-import { GitStatusSummary, GitFileStatus } from '../types/project';
+import { GitStatusSummary, GitFileStatus, CheckpointItem } from '../types/project';
 import { ChatMessageItem, extractPreviewableArtifact } from './ChatArea';
 import { HtmlPreview } from './preview/HtmlPreview';
 import { MermaidPreview } from './preview/MermaidPreview';
 import { SvgPreview } from './preview/SvgPreview';
 import { LiveTerminalCard } from './LiveTerminalCard';
 
-export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'terminal';
+export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal';
 
 export interface PreviewData {
-  type: 'html' | 'mermaid' | 'svg';
+  type: 'html' | 'mermaid' | 'svg' | 'image' | 'video' | 'audio';
   title?: string;
   content: string;
   filePath?: string;
@@ -44,7 +51,7 @@ export interface PreviewData {
 
 export interface ArtifactItem {
   id: string;
-  type: 'html' | 'svg' | 'mermaid' | 'docx' | 'pptx' | 'file';
+  type: 'html' | 'svg' | 'mermaid' | 'docx' | 'pptx' | 'image' | 'video' | 'audio' | 'file';
   title: string;
   content?: string;
   filePath?: string;
@@ -61,6 +68,7 @@ interface WorkspaceDrawerProps {
   workspacePath: string | null;
   gitStatus: GitStatusSummary | null;
   onRefreshGit: () => void;
+  onRollbackCheckpoint?: (checkpointId: string) => Promise<boolean>;
   activeSessionId?: string;
   terminalOutput?: string;
   messages?: ChatMessageItem[];
@@ -76,6 +84,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   workspacePath,
   gitStatus,
   onRefreshGit,
+  onRollbackCheckpoint,
   activeSessionId = 'global',
   terminalOutput = '',
   messages = [],
@@ -83,6 +92,55 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 }) => {
   const [currentTab, setCurrentTab] = useState<WorkspaceDrawerTab>(activeTab);
   const [isFullScreen, setIsFullScreen] = useState(false);
+
+  // Checkpoints Timeline State (v1.4.0)
+  const [checkpoints, setCheckpoints] = useState<CheckpointItem[]>([]);
+  const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
+  const [rollingBackCheckpointId, setRollingBackCheckpointId] = useState<string | null>(null);
+  const [rollbackSuccessMsg, setRollbackSuccessMsg] = useState<string | null>(null);
+
+  const refreshCheckpoints = useCallback(async () => {
+    if (!window.electronAPI?.listCheckpoints) return;
+    setLoadingCheckpoints(true);
+    try {
+      const list = await window.electronAPI.listCheckpoints(workspacePath || null);
+      if (Array.isArray(list)) {
+        setCheckpoints(list);
+      }
+    } catch (e) {
+      console.warn('Failed to load checkpoints:', e);
+    } finally {
+      setLoadingCheckpoints(false);
+    }
+  }, [workspacePath]);
+
+  useEffect(() => {
+    if (isOpen) {
+      refreshCheckpoints();
+    }
+  }, [isOpen, refreshCheckpoints]);
+
+  const handleRollback = async (ckptId: string) => {
+    const ok = window.confirm(`确定要将工作区还原至快照 (${ckptId}) 时的状态吗？此操作将覆盖还原快照点中被修改的文件。`);
+    if (!ok) return;
+
+    setRollingBackCheckpointId(ckptId);
+    try {
+      if (onRollbackCheckpoint) {
+        await onRollbackCheckpoint(ckptId);
+      } else if (window.electronAPI?.rollbackCheckpoint) {
+        const res = await window.electronAPI.rollbackCheckpoint(ckptId, workspacePath);
+        if (res.success) {
+          setRollbackSuccessMsg(res.message);
+          setTimeout(() => setRollbackSuccessMsg(null), 3000);
+          onRefreshGit();
+        }
+      }
+      refreshCheckpoints();
+    } finally {
+      setRollingBackCheckpointId(null);
+    }
+  };
 
   // Draggable Drawer Width states
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
@@ -149,7 +207,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const [discardSuccess, setDiscardSuccess] = useState<string | null>(null);
 
   // Artifacts Shelf state & collection
-  const [artifactFilter, setArtifactFilter] = useState<'all' | 'html' | 'svg' | 'mermaid' | 'docs'>('all');
+  const [artifactFilter, setArtifactFilter] = useState<'all' | 'html' | 'svg' | 'image' | 'video' | 'audio' | 'mermaid' | 'docs'>('all');
   const [artifactSearch, setArtifactSearch] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -251,6 +309,25 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                   timestamp: msg.timestamp
                 });
               }
+            } else if (filePath.match(/\.(png|jpg|jpeg|webp|gif)$/i)) {
+              const key = `image:${filePath || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
+                  type: 'image',
+                  title: fileName || 'AI 图像资产',
+                  content: filePath,
+                  filePath,
+                  timestamp: msg.timestamp,
+                  previewData: {
+                    type: 'image',
+                    title: fileName,
+                    content: filePath,
+                    filePath
+                  }
+                });
+              }
             }
           } else if (step.tool === 'generate_docx') {
             const filePath = step.args.filePath || step.args.path || (step.result && step.result.match(/([a-zA-Z]:[^\s]+?\.docx|\/[^\s]+?\.docx)/)?.[1]) || '';
@@ -280,6 +357,73 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                 timestamp: msg.timestamp
               });
             }
+          } else if (step.tool === 'generate_image') {
+            const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
+            const imgUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:png|jpg|jpeg|webp|gif)[^\s)]*)/i) : null;
+            const imgUrl = imgUrlMatch ? imgUrlMatch[1] : '';
+            const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : (step.args?.prompt ? `${step.args.prompt.slice(0, 15)}.png` : 'AI图片.png');
+            const key = `image:${rawPath || imgUrl || fileName}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              items.push({
+                id: `step-${mIdx}-${sIdx}`,
+                type: 'image',
+                title: fileName,
+                content: imgUrl || rawPath,
+                filePath: rawPath,
+                timestamp: msg.timestamp,
+                previewData: {
+                  type: 'image',
+                  title: fileName,
+                  content: imgUrl || rawPath,
+                  filePath: rawPath
+                }
+              });
+            }
+          } else if (step.tool === 'generate_video') {
+            const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:预定保存路径:\s*"([^"]+)")/)?.[1]) || '';
+            const vidUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:mp4|webm|mov)[^\s)]*)/i) : null;
+            const vidUrl = vidUrlMatch ? vidUrlMatch[1] : '';
+            const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : (step.args?.prompt ? `${step.args.prompt.slice(0, 15)}.mp4` : 'AI视频.mp4');
+            const key = `video:${rawPath || vidUrl || fileName}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              items.push({
+                id: `step-${mIdx}-${sIdx}`,
+                type: 'video',
+                title: fileName,
+                content: vidUrl || rawPath,
+                filePath: rawPath,
+                timestamp: msg.timestamp,
+                previewData: {
+                  type: 'video',
+                  title: fileName,
+                  content: vidUrl || rawPath,
+                  filePath: rawPath
+                }
+              });
+            }
+          } else if (step.tool === 'text_to_speech') {
+            const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
+            const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI语音.mp3';
+            const key = `audio:${rawPath || fileName}`;
+            if (!seenKeys.has(key)) {
+              seenKeys.add(key);
+              items.push({
+                id: `step-${mIdx}-${sIdx}`,
+                type: 'audio',
+                title: fileName,
+                content: rawPath,
+                filePath: rawPath,
+                timestamp: msg.timestamp,
+                previewData: {
+                  type: 'audio',
+                  title: fileName,
+                  content: rawPath,
+                  filePath: rawPath
+                }
+              });
+            }
           }
         }
       }
@@ -293,7 +437,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           items.push({
             id: `msg-${mIdx}`,
             type: artifact.type,
-            title: artifact.title || (artifact.type === 'html' ? 'HTML 页面预览' : artifact.type === 'svg' ? 'SVG 矢量设计' : 'Mermaid 架构图'),
+            title: artifact.title || (artifact.type === 'html' ? 'HTML 页面预览' : artifact.type === 'svg' ? 'SVG 矢量设计' : artifact.type === 'video' ? 'AI 视频' : artifact.type === 'audio' ? 'AI 语音' : 'Mermaid 架构图'),
             content: artifact.content,
             filePath: artifact.filePath,
             timestamp: msg.timestamp,
@@ -310,6 +454,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     return artifacts.filter(item => {
       if (artifactFilter === 'html' && item.type !== 'html') return false;
       if (artifactFilter === 'svg' && item.type !== 'svg') return false;
+      if (artifactFilter === 'image' && item.type !== 'image') return false;
+      if (artifactFilter === 'video' && item.type !== 'video') return false;
+      if (artifactFilter === 'audio' && item.type !== 'audio') return false;
       if (artifactFilter === 'mermaid' && item.type !== 'mermaid') return false;
       if (artifactFilter === 'docs' && item.type !== 'docx' && item.type !== 'pptx') return false;
       if (artifactSearch.trim()) {
@@ -525,6 +672,26 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
             <button
               type="button"
+              onClick={() => handleTabSwitch('timeline')}
+              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                currentTab === 'timeline'
+                  ? 'bg-[var(--primary)] text-white shadow-xs'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+              }`}
+            >
+              <History className="h-3.5 w-3.5" />
+              <span>时光机 (快照)</span>
+              {checkpoints.length > 0 && (
+                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                  currentTab === 'timeline' ? 'bg-white/25 text-white' : 'bg-[var(--primary)]/15 text-[var(--primary)]'
+                }`}>
+                  {checkpoints.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              type="button"
               onClick={() => handleTabSwitch('terminal')}
               className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'terminal'
@@ -585,6 +752,114 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                 <MermaidPreview content={previewData.content} title={previewData.title} />
               ) : previewData.type === 'svg' ? (
                 <SvgPreview content={previewData.content} title={previewData.title} />
+              ) : previewData.type === 'image' ? (
+                <div className="flex h-full flex-col items-center justify-center p-6 bg-[var(--background)] overflow-auto select-none">
+                  <div className="max-w-2xl w-full flex flex-col items-center space-y-4">
+                    <div className="rounded-2xl overflow-hidden border border-[var(--border)] shadow-xl bg-[var(--card)] p-2">
+                      <img
+                        src={previewData.content.startsWith('http') || previewData.content.startsWith('data:') ? previewData.content : (previewData.filePath || '')}
+                        alt={previewData.title || 'AI 生成图片'}
+                        className="max-h-[68vh] w-auto object-contain rounded-xl"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      {previewData.filePath && (
+                        <button
+                          type="button"
+                          onClick={() => handleRevealArtifact(previewData.filePath!)}
+                          className="flex items-center space-x-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] cursor-pointer shadow-2xs"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          <span>在资源管理器中定位</span>
+                        </button>
+                      )}
+                      {previewData.filePath && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenArtifactPath(previewData.filePath!)}
+                          className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] text-white px-3 py-1.5 text-xs font-medium hover:bg-[var(--primary-hover)] cursor-pointer shadow-2xs"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>系统相册打开</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : previewData.type === 'video' ? (
+                <div className="flex h-full flex-col items-center justify-center p-6 bg-[var(--background)] overflow-auto select-none">
+                  <div className="max-w-2xl w-full flex flex-col items-center space-y-4">
+                    <div className="rounded-2xl overflow-hidden border border-[var(--border)] shadow-xl bg-black p-2 w-full flex items-center justify-center">
+                      <video
+                        src={previewData.content.startsWith('http') || previewData.content.startsWith('data:') ? previewData.content : (previewData.filePath || '')}
+                        controls
+                        autoPlay
+                        className="max-h-[68vh] w-auto max-w-full rounded-xl"
+                      />
+                    </div>
+                    <div className="flex items-center space-x-3">
+                      {previewData.filePath && (
+                        <button
+                          type="button"
+                          onClick={() => handleRevealArtifact(previewData.filePath!)}
+                          className="flex items-center space-x-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] cursor-pointer shadow-2xs"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          <span>在资源管理器中定位</span>
+                        </button>
+                      )}
+                      {previewData.filePath && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenArtifactPath(previewData.filePath!)}
+                          className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] text-white px-3 py-1.5 text-xs font-medium hover:bg-[var(--primary-hover)] cursor-pointer shadow-2xs"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>系统播放器打开</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : previewData.type === 'audio' ? (
+                <div className="flex h-full flex-col items-center justify-center p-6 bg-[var(--background)] overflow-auto select-none">
+                  <div className="max-w-lg w-full flex flex-col items-center space-y-5 p-6 rounded-2xl border border-[var(--border)] shadow-xl bg-[var(--card)]">
+                    <div className="h-16 w-16 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center">
+                      <Volume2 className="h-8 w-8" />
+                    </div>
+                    <div className="text-center">
+                      <h4 className="font-semibold text-sm text-[var(--foreground)]">{previewData.title || 'AI 语音音频'}</h4>
+                      <p className="text-xs text-[var(--muted-foreground)] mt-1">{previewData.filePath || '已渲染音频流'}</p>
+                    </div>
+                    <audio
+                      src={previewData.content.startsWith('http') || previewData.content.startsWith('data:') ? previewData.content : (previewData.filePath || '')}
+                      controls
+                      className="w-full"
+                    />
+                    <div className="flex items-center space-x-3 pt-2">
+                      {previewData.filePath && (
+                        <button
+                          type="button"
+                          onClick={() => handleRevealArtifact(previewData.filePath!)}
+                          className="flex items-center space-x-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-xs text-[var(--foreground)] hover:bg-[var(--muted)] cursor-pointer shadow-2xs"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          <span>在资源管理器中定位</span>
+                        </button>
+                      )}
+                      {previewData.filePath && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenArtifactPath(previewData.filePath!)}
+                          className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] text-white px-3 py-1.5 text-xs font-medium hover:bg-[var(--primary-hover)] cursor-pointer shadow-2xs"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span>系统播放器打开</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               ) : (
                 <HtmlPreview content={previewData.content} title={previewData.title} filePath={previewData.filePath} />
               )
@@ -597,7 +872,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                   暂无待预览的产物
                 </h3>
                 <p className="text-xs max-w-sm leading-relaxed mb-6">
-                  当 Agent 生成 HTML 网页、Vue/React 代码、SVG 矢量设计图或 Mermaid 流程架构图时，点击消息中的【👁️ 实时预览】即可在此全屏呈现。
+                  当 Agent 生成 HTML 网页、Vue/React 代码、SVG 矢量设计图、AI 图像或 Mermaid 流程架构图时，点击消息中的【👁️ 实时预览】即可在此全屏呈现。
                 </p>
                 <div className="flex items-center space-x-2">
                   <button
@@ -631,6 +906,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                   { id: 'all', label: '全部产物', count: artifacts.length },
                   { id: 'html', label: 'HTML 大屏', count: artifacts.filter(a => a.type === 'html').length },
                   { id: 'svg', label: 'SVG 设计', count: artifacts.filter(a => a.type === 'svg').length },
+                  { id: 'image', label: 'AI 图像', count: artifacts.filter(a => a.type === 'image').length },
+                  { id: 'video', label: 'AI 视频', count: artifacts.filter(a => a.type === 'video').length },
+                  { id: 'audio', label: 'AI 语音', count: artifacts.filter(a => a.type === 'audio').length },
                   { id: 'mermaid', label: 'Mermaid 拓扑', count: artifacts.filter(a => a.type === 'mermaid').length },
                   { id: 'docs', label: '商业公文', count: artifacts.filter(a => a.type === 'docx' || a.type === 'pptx').length },
                 ].map(chip => (
@@ -688,6 +966,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                   {filteredArtifacts.map(art => {
                     const isHtml = art.type === 'html';
                     const isSvg = art.type === 'svg';
+                    const isImage = art.type === 'image';
+                    const isVideo = art.type === 'video';
+                    const isAudio = art.type === 'audio';
                     const isMermaid = art.type === 'mermaid';
                     const isDocx = art.type === 'docx';
                     const isPptx = art.type === 'pptx';
@@ -703,6 +984,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                             <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${
                               isHtml ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
                               isSvg ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                              isImage ? 'bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400' :
+                              isVideo ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
+                              isAudio ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
                               isMermaid ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' :
                               isDocx ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' :
                               isPptx ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
@@ -710,6 +994,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                             }`}>
                               {isHtml && <Globe className="h-5 w-5" />}
                               {isSvg && <Sparkles className="h-5 w-5" />}
+                              {isImage && <ImageIcon className="h-5 w-5" />}
+                              {isVideo && <Video className="h-5 w-5" />}
+                              {isAudio && <Volume2 className="h-5 w-5" />}
                               {isMermaid && <GitBranch className="h-5 w-5" />}
                               {isDocx && <FileText className="h-5 w-5" />}
                               {isPptx && <Presentation className="h-5 w-5" />}
@@ -723,11 +1010,14 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                                 <span className={`px-1.5 py-0.2 rounded font-medium ${
                                   isHtml ? 'bg-blue-500/10 text-blue-600' :
                                   isSvg ? 'bg-emerald-500/10 text-emerald-600' :
+                                  isImage ? 'bg-fuchsia-500/10 text-fuchsia-600' :
+                                  isVideo ? 'bg-rose-500/10 text-rose-600' :
+                                  isAudio ? 'bg-amber-500/10 text-amber-600' :
                                   isMermaid ? 'bg-cyan-500/10 text-cyan-600' :
                                   isDocx ? 'bg-indigo-500/10 text-indigo-600' :
                                   'bg-amber-500/10 text-amber-600'
                                 }`}>
-                                  {isHtml ? 'HTML 页面' : isSvg ? 'SVG 矢量' : isMermaid ? 'Mermaid' : isDocx ? 'Word 文档' : isPptx ? 'PPT 幻灯片' : '文件'}
+                                  {isHtml ? 'HTML 页面' : isSvg ? 'SVG 矢量' : isImage ? 'AI 图像' : isVideo ? 'AI 视频' : isAudio ? 'AI 语音' : isMermaid ? 'Mermaid' : isDocx ? 'Word 文档' : isPptx ? 'PPT 幻灯片' : '文件'}
                                 </span>
                                 {art.timestamp && (
                                   <span className="flex items-center space-x-0.5">
@@ -739,6 +1029,30 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                             </div>
                           </div>
                         </div>
+
+                        {/* Image Thumbnail if image type */}
+                        {isImage && art.content && (
+                          <div
+                            onClick={() => {
+                              if (art.previewData) {
+                                onSelectPreview?.(art.previewData);
+                                handleTabSwitch('preview');
+                              }
+                            }}
+                            className="relative mb-3 h-28 w-full overflow-hidden rounded-lg bg-black/5 dark:bg-white/5 border border-[var(--border)] cursor-pointer flex items-center justify-center group/img"
+                          >
+                            <img
+                              src={art.content.startsWith('http') || art.content.startsWith('data:') ? art.content : (art.filePath || '')}
+                              alt={art.title}
+                              className="h-full w-full object-cover transition-transform group-hover/img:scale-105 duration-200"
+                              loading="lazy"
+                            />
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white text-xs space-x-1">
+                              <Eye className="h-4 w-4" />
+                              <span>点击放大预览</span>
+                            </div>
+                          </div>
+                        )}
 
                         {/* File Path Pill (if exists) */}
                         {art.filePath && (
@@ -772,8 +1086,8 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                               </button>
                             )}
 
-                            {/* External action for docx/pptx */}
-                            {(isDocx || isPptx) && art.filePath && (
+                            {/* External action for docx/pptx/image */}
+                            {(isDocx || isPptx || isImage) && art.filePath && (
                               <button
                                 type="button"
                                 onClick={() => handleOpenArtifactPath(art.filePath)}
@@ -963,7 +1277,131 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           </div>
         )}
 
-        {/* Tab 3: Expanded Live Terminal */}
+        {/* Tab 4: Checkpoints Timeline (时光机与一键回滚 - v1.4.0) */}
+        {currentTab === 'timeline' && (
+          <div className="flex-1 flex flex-col p-4 bg-[var(--background)] overflow-hidden">
+            {/* Timeline Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-[var(--border)] mb-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h3 className="font-semibold text-xs text-[var(--foreground)]">
+                    时光机快照库 (Checkpoints)
+                  </h3>
+                  <span className="rounded-full bg-[var(--primary)]/10 text-[var(--primary)] px-2 py-0.5 text-[10px] font-bold">
+                    共 {checkpoints.length} 个快照点
+                  </span>
+                </div>
+                <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5">
+                  Agent 在执行写入前后台自动拍摄影子快照，支持 1 秒还原工作区任何历史状态
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={refreshCheckpoints}
+                disabled={loadingCheckpoints}
+                className="flex items-center space-x-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] px-2.5 py-1.5 text-xs text-[var(--foreground)] transition-colors cursor-pointer disabled:opacity-50"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${loadingCheckpoints ? 'animate-spin' : ''}`} />
+                <span>刷新</span>
+              </button>
+            </div>
+
+            {/* Rollback Success Toast */}
+            {rollbackSuccessMsg && (
+              <div className="mb-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-2.5 text-xs text-emerald-600 dark:text-emerald-400 flex items-center space-x-2 animate-in fade-in">
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+                <span>{rollbackSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* Checkpoints List */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {checkpoints.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-center text-[var(--muted-foreground)]">
+                  <History className="h-10 w-10 stroke-1 text-[var(--muted-foreground)]/40 mb-3" />
+                  <p className="text-xs font-medium">当前工作区暂无时光机快照</p>
+                  <p className="text-[11px] mt-1 text-[var(--muted-foreground)]/80">
+                    当 Agent 收到指令并生成、修改项目文件时，系统将自动在此建立影子 Checkpoint
+                  </p>
+                </div>
+              ) : (
+                checkpoints.map(item => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3.5 shadow-2xs hover:border-[var(--primary)]/40 transition-all space-y-2.5"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[var(--primary)]/15 text-[var(--primary)]">
+                          <History className="h-3.5 w-3.5" />
+                        </span>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-semibold text-xs text-[var(--foreground)]">
+                              {item.title || '代码修改快照'}
+                            </span>
+                            <span className="rounded bg-[var(--muted)] px-1.5 py-0.2 font-mono text-[9px] text-[var(--muted-foreground)]">
+                              {item.id}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-[var(--muted-foreground)]">
+                            拍摄时间: {new Date(item.timestamp).toLocaleString('zh-CN', { hour12: false })}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div>
+                        {item.rolledBack ? (
+                          <span className="inline-flex items-center space-x-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            <CheckCircle2 className="h-3 w-3" />
+                            <span>已回滚还原</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={rollingBackCheckpointId === item.id}
+                            onClick={() => handleRollback(item.id)}
+                            className="flex items-center space-x-1 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 px-2.5 py-1 text-xs font-medium transition-all cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+                          >
+                            <RotateCcw className={`h-3 w-3 ${rollingBackCheckpointId === item.id ? 'animate-spin' : ''}`} />
+                            <span>{rollingBackCheckpointId === item.id ? '还原中...' : '还原至此快照'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Files affected */}
+                    <div className="space-y-1">
+                      {item.modifiedFiles.length > 0 && (
+                        <div className="flex items-center space-x-1.5 flex-wrap gap-1 text-[11px]">
+                          <span className="text-[10px] text-amber-500 font-medium">修改文件:</span>
+                          {item.modifiedFiles.map(f => (
+                            <span key={f} className="rounded bg-[var(--muted)]/80 px-1.5 py-0.5 font-mono text-[10px] text-[var(--foreground)] border border-[var(--border)]">
+                              {f}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {item.newFiles.length > 0 && (
+                        <div className="flex items-center space-x-1.5 flex-wrap gap-1 text-[11px]">
+                          <span className="text-[10px] text-emerald-500 font-medium">新增文件:</span>
+                          {item.newFiles.map(f => (
+                            <span key={f} className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                              +{f}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 5: Expanded Live Terminal */}
         {currentTab === 'terminal' && (
           <div className="flex-1 p-4 bg-[var(--background)] overflow-y-auto">
             <LiveTerminalCard

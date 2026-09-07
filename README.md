@@ -1,12 +1,39 @@
-# ASTeam Agent (v1.3.0)
+# ASTeam Agent (v1.4.0)
 
-> 企业级 Windows 桌面智能体客户端 · 基于 `deepseek-harness` 内核深度封装，集成数据与存储中枢隔离、长期记忆知识库、多LLM自动容灾池、实时交互控制台、原生多模态产物所见即所得预览、原生 Office 文档生成、自主演进技能体系与全能宿主操作能力。
+> 企业级 Windows 桌面智能体客户端 · 基于 `deepseek-harness` 内核深度封装，集成项目架构规约体系、全能上下文提及中心、影子快照时光机、LLMAPI Auto 全模态驱动引擎、数据与存储中枢隔离、长期记忆知识库、多LLM自动容灾池、实时交互控制台、原生多模态产物所见即所得预览、原生 Office 文档生成、自主演进技能体系与全能宿主操作能力。
 
 ---
 
 ## 🌟 核心特性总览
 
-### 1. 📁 数据与存储中枢 (Storage & Data Hub · v1.3.0 新增)
+### 1. 📜 项目级行为准则与架构规约 (Project Rules · v1.4.0 新增)
+- **智能嗅探项目规约**：自动感知项目根目录下的 `.asteamrules`、`.asteam/rules` 或 `ASTEAM.md`；
+- **System Prompt 顶层注入**：在任何交互会话启动时，以最高优先级注入智能体底层思考上下文，严苛遵循团队编码规范（如 TypeScript 严格规范、前端禁 any、色彩规范等）；
+- **内置三套企业级工程模版**：提供 TypeScript 严苛规范、全栈通用规范、Python 生产级工程规范，支持前端一键创建并落盘；
+- **顶部规约状态勋章 (Rules Badge)**：实时显示当前生效的规约规则数与字符量，支持一键点击抽屉查阅。
+
+### 2. 🎯 全能 `@` 上下文提及中心 (Unified Context Mention Hub · v1.4.0 新增)
+- **多 Tab 上下文菜单**：聊天输入框键入 `@` 即可唤起半透明玻璃拟态上下文浮窗，支持【全部 / 文件 / Git 变更 / 技能】四合一无缝切换；
+- **`@file` 文件模糊搜索与注入**：支持实时模糊搜索工作区代码文件，消息发送时以标准 Markdown 代码块无损挂载到 Prompt 附加上下文中；
+- **`@git-diff` 未提交变更捕获**：一键捕获当前工作区所有暂存与未暂存的 Git 修改，无需手动复制 diff 内容即可向 Agent 发起审查与调试；
+- **`@skill` 技能快捷引用**：无缝挑选并组合已安装的工程与分析技能。
+
+### 3. ⏪ 影子快照与时光机一键回滚 (Checkpoint & Timeline · v1.4.0 新增)
+- **修改前自动捕获快照**：Agent 在执行文件创建或写入修改前，底层自动捕获被改动文件的影子版本；
+- **聊天流【⏪ 撤销本轮修改】**：每次执行完成后提供一键撤销按钮，1 秒钟平滑回滚至修改前状态；
+- **工作台【时光机 (Timeline)】抽屉**：可视化历史快照列表，展示生成时间、变更文件数量与代码增删指标，支持任意历史快照点一键还原，并联动更新 Git 状态。
+
+### 4. 🎨 LLMAPI Auto 全模态多模型驱动引擎 (Full-Modal Suite · v1.4.0 新增)
+- **`Auto` 模型全场景自动智能路由**：接入点配置为 `Auto` 时，智能体根据任务性质自动路由底层最优专长模型；
+- **全模态工具矩阵全面集成**：
+  - 🖼️ `generate_image`：文生图/设计稿渲染，自动路由 `agnes-image-2.1-flash`，高清图片即刻本地落盘；
+  - 🎬 `generate_video`：文本生视频与动态画面渲染，自动路由 `agnes-video-2.5-flash`，异步任务与直链自动抓取；
+  - 🧠 `generate_embedding`：文本向量提取，自动路由 `gemini-embedding-2`，返回 3072 维高精向量；
+  - 🎙️ `text_to_speech` & `audio_to_text`：语音合成与识别工具接入，内置优雅诊断兜底；
+- **33 款在线模型强类型支持与能力矩阵推导**：覆盖 Chat、Embedding、Image、Video、ASR 等全部 9 维能力体系；
+- **原生富媒体播放与预览工作台**：聊天气泡与工作台抽屉内置原生视频播放器与音频播放器，支持全屏预览与外部文件定位。
+
+### 5. 📁 数据与存储中枢 (Storage & Data Hub · v1.3.0)
 - **彻底脱离系统 C 盘占用**：支持用户将存储根目录自定义绑定到任意大容量磁盘（如 `D:\ASTeamData\`），杜绝系统盘爆满与路径冲突；
 - **五大标准子目录自动维护**：
   - `workspaces/`：通用免项目工作区默认主目录；
@@ -139,9 +166,11 @@
 ## 🛠️ 技术架构
 
 - **宿主运行时**：Electron 34 + Node.js 22
-- **渲染层**：React 18 + TypeScript + Vite 6 + Tailwind CSS 4
+- **网络通信引擎**：Chromium 原生 `net.fetch`（全面支持 Windows 系统网络代理、IPv6 Happy Eyeballs 并发选路与极速 SSE 流式传输，握手 <1s）
+- **渲染层**：React 18 + TypeScript + Vite 6 + Tailwind CSS 4（严格启用 `tsc --noEmit` 编译安全门禁）
 - **图标系统**：Lucide React
 - **多模态预览**：Mermaid.js 10 + KaTeX + 沙箱化 iFrame
+- **智能工具调用适配器**：多语法容错解析引擎（原生兼容 Markdown 代码块、XML 标签 `<tool:xxx>` 与多重嵌套 JSON）
 - **打包器**：`electron-builder` (NSIS 安装包 & 单文件绿色 Portable)
 - **Office 引擎**：`docx` + `pptxgenjs` (Pure JS 内嵌免依赖)
 - **通信通道**：Electron IPC 安全桥接与上下文隔离 (`contextIsolation: true`)
@@ -167,8 +196,8 @@ npm run build:win
 
 | 文件名 | 类型 | 说明 |
 | :--- | :--- | :--- |
-| **`ASTeam Agent-Portable-1.3.0.exe`** | **绿色单文件便携版** (~114 MB) | **推荐日常分发**：无需安装、无需管理员权限，双击即用，数据物理隔离保存在各自电脑的指定数据中枢盘中 |
-| **`ASTeam Agent-Setup-1.3.0.exe`** | **标准安装包** (~114 MB) | 适用于需要桌面快捷方式、开始菜单与自选安装路径的企业标准化安装 |
+| **`ASTeam Agent-Portable-1.4.0.exe`** | **绿色单文件便携版** (~114 MB) | **推荐日常分发**：无需安装、无需管理员权限，双击即用，数据物理隔离保存在各自电脑的指定数据中枢盘中 |
+| **`ASTeam Agent-Setup-1.4.0.exe`** | **标准安装包** (~114 MB) | 适用于需要桌面快捷方式、开始菜单与自选安装路径的企业标准化安装 |
 | **`win-unpacked\ASTeam Agent.exe`** | **解包绿色目录** (~190 MB) | 本地免安装直接启动测试目录 |
 
 ---
@@ -176,9 +205,9 @@ npm run build:win
 ## 🗺️ 产品演进全景路线图 (Roadmap)
 
 详见 **[`ROADMAP.md`](./ROADMAP.md)**：
-- **v1.3.0（当前版本 · 已全面交付）**：数据存储中枢（自定义目录脱离 C 盘/防冲突）、Memory 长期记忆体系（`.asteam/memory/` 与 `/remember`）、多 LLM 容灾池（524 自动重试）与模型多模态能力自适应路由；
-- **v1.4.0（下一阶段 · 主流级工程体验）**：`.asteamrules` 项目行为准则、全能 `@` 上下文补全（`@file` / `@git` / `@symbol`）、影子快照时光机一键撤销；
-- **v1.5.0（开放生态与高级智能体）**：官方标准 MCP (Model Context Protocol) 客户端集成、实时联网技术检索、状态栏 Token 压缩。
+- **v1.3.0（已交付）**：数据存储中枢（自定义目录脱离 C 盘/防冲突）、Memory 长期记忆体系（`.asteam/memory/` 与 `/remember`）、多 LLM 容灾池（524 自动重试）与模型多模态能力自适应路由；
+- **v1.4.0（当前版本 · 已全面交付）**：`.asteamrules` 项目行为准则、全能 `@` 上下文补全（`@file` / `@git-diff` / `@skill`）、影子快照时光机一键撤销、LLMAPI Auto 全模态驱动引擎（生图/视频/向量/原生视音频播放）；
+- **v1.5.0（下一阶段 · 开放生态与高级智能体）**：官方标准 MCP (Model Context Protocol) 客户端集成、实时联网技术检索、状态栏 Token 压缩。
 
 ---
 

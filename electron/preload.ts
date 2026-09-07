@@ -58,6 +58,20 @@ export interface ElectronAPI {
   saveMemoryContent: (type: 'project' | 'profile' | 'global', content: string, workspacePath: string | null) => Promise<{ success: boolean; message: string }>;
   addMemoryFact: (scope: 'project' | 'global', fact: string, workspacePath: string | null) => Promise<{ success: boolean; targetPath: string; message: string }>;
   parseMemoryCommand: (text: string) => Promise<{ isCommand: boolean; fact?: string }>;
+
+  // Context & File Indexing (v1.4.0)
+  indexWorkspaceFiles: (dirPath: string) => Promise<Array<{ name: string; relPath: string; ext: string }>>;
+  readWorkspaceFile: (workspacePath: string, relPath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  getGitDiffSummary: (repoPath: string) => Promise<{ branch: string; statusText: string; diffText: string }>;
+
+  // Project Rules (v1.4.0)
+  getProjectRules: (workspacePath: string | null) => Promise<{ hasRules: boolean; filePath: string | null; ruleType: string; content: string }>;
+  saveProjectRules: (workspacePath: string, content: string) => Promise<{ success: boolean; filePath: string; message: string }>;
+  getRulePresets: () => Promise<Array<{ id: string; name: string; description: string; template: string }>>;
+
+  // Shadow Checkpoint & Rollback (v1.4.0)
+  listCheckpoints: (workspacePath: string | null, sessionId?: string) => Promise<any[]>;
+  rollbackCheckpoint: (checkpointId: string, workspacePath: string | null) => Promise<{ success: boolean; message: string; restoredFiles: string[]; removedFiles: string[] }>;
 }
 
 const api: ElectronAPI = {
@@ -68,10 +82,13 @@ const api: ElectronAPI = {
 
   selectWorkspaceDirectory: () => ipcRenderer.invoke('workspace:selectDirectory'),
   listWorkspaceFiles: (dirPath: string) => ipcRenderer.invoke('workspace:listFiles', dirPath),
+  indexWorkspaceFiles: (dirPath: string) => ipcRenderer.invoke('workspace:indexFiles', dirPath),
+  readWorkspaceFile: (workspacePath: string, relPath: string) => ipcRenderer.invoke('workspace:readFileContent', { workspacePath, relPath }),
 
   getGitStatus: (repoPath: string) => ipcRenderer.invoke('git:getStatus', repoPath),
   getFileDiff: (repoPath: string, relPath: string) => ipcRenderer.invoke('git:getFileDiff', { repoPath, relPath }),
   discardFileChange: (repoPath: string, relPath: string) => ipcRenderer.invoke('git:discardChange', { repoPath, relPath }),
+  getGitDiffSummary: (repoPath: string) => ipcRenderer.invoke('git:getDiffSummary', repoPath),
 
   getAllSkills: (workspacePath: string | null) => ipcRenderer.invoke('skills:getAll', workspacePath),
   installSkillFromFile: () => ipcRenderer.invoke('skills:installFromFile'),
@@ -112,7 +129,17 @@ const api: ElectronAPI = {
   getMemoryContext: (workspacePath) => ipcRenderer.invoke('memory:getAll', workspacePath),
   saveMemoryContent: (type, content, workspacePath) => ipcRenderer.invoke('memory:saveContent', { type, content, workspacePath }),
   addMemoryFact: (scope, fact, workspacePath) => ipcRenderer.invoke('memory:addFact', { scope, fact, workspacePath }),
-  parseMemoryCommand: (text) => ipcRenderer.invoke('memory:parseCommand', text)
+  parseMemoryCommand: (text) => ipcRenderer.invoke('memory:parseCommand', text),
+
+  // Context & File Indexing (v1.4.0)
+  // Project Rules (v1.4.0)
+  getProjectRules: (workspacePath) => ipcRenderer.invoke('rules:get', workspacePath),
+  saveProjectRules: (workspacePath, content) => ipcRenderer.invoke('rules:save', { workspacePath, content }),
+  getRulePresets: () => ipcRenderer.invoke('rules:getPresets'),
+
+  // Shadow Checkpoint & Rollback (v1.4.0)
+  listCheckpoints: (workspacePath, sessionId) => ipcRenderer.invoke('checkpoint:list', { workspacePath, sessionId }),
+  rollbackCheckpoint: (checkpointId, workspacePath) => ipcRenderer.invoke('checkpoint:rollback', { checkpointId, workspacePath })
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

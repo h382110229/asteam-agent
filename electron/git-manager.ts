@@ -150,3 +150,24 @@ export async function discardFileChange(repoPath: string, relPath: string): Prom
     return false;
   }
 }
+
+export async function getGitDiffSummary(repoPath: string): Promise<{ branch: string; statusText: string; diffText: string }> {
+  try {
+    const status = await getGitStatus(repoPath);
+    if (!status.isGitRepo) {
+      return { branch: '', statusText: '当前工作区不是 Git 仓库', diffText: '' };
+    }
+    const diffRaw = await runGit(repoPath, 'diff HEAD').catch(() => '');
+    const unstagedDiff = diffRaw || await runGit(repoPath, 'diff').catch(() => '');
+    const fileList = status.files.map(f => `  - ${f.path} (${f.status}, +${f.additions}/-${f.deletions})`).join('\n');
+    const statusText = `分支: ${status.branch}\n变更文件 (${status.files.length} 个, +${status.totalAdditions}/-${status.totalDeletions}):\n${fileList || '  (无未提交文件)'}`;
+    return {
+      branch: status.branch,
+      statusText,
+      diffText: (unstagedDiff || '').slice(0, 15000) || '(无未提交差异)'
+    };
+  } catch (err: any) {
+    return { branch: '', statusText: `Git 状态获取失败: ${err.message}`, diffText: '' };
+  }
+}
+

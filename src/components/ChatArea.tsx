@@ -25,12 +25,20 @@ import {
   ChevronDown,
   CheckCircle2,
   Loader2,
-  Globe
+  Globe,
+  Undo2,
+  History,
+  GitCompare,
+  ScrollText,
+  Layers,
+  FolderOpen,
+  Video,
+  Volume2
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
 import { LiveTerminalCard } from './LiveTerminalCard';
-import { ExecutionMode } from '../types/project';
+import { ExecutionMode, CheckpointItem, WorkspaceFileItem, ProjectRulesInfo } from '../types/project';
 import { PreviewData } from './WorkspaceDrawer';
 import { inferModelCapabilities } from '../config/providers';
 
@@ -48,6 +56,7 @@ export interface ChatMessageItem {
   thought?: string;
   steps?: AgentStep[];
   question?: QuestionCardData;
+  checkpoint?: CheckpointItem;
   timestamp: number;
   durationMs?: number;
   estimatedTokens?: number;
@@ -67,8 +76,11 @@ interface ChatAreaProps {
   onOpenPreview?: (data: PreviewData) => void;
   onOpenTerminal?: () => void;
   onOpenSettings?: () => void;
+  onRollbackCheckpoint?: (checkpointId: string) => Promise<boolean>;
+  onOpenTimeline?: () => void;
   activeSessionId?: string;
   terminalOutputs?: Record<string, string>;
+  onOpenRules?: () => void;
 }
 
 const SLASH_COMMANDS = [
@@ -109,7 +121,45 @@ export function extractPreviewableArtifact(content: string, steps?: AgentStep[])
               filePath
             };
           }
+        } else if (filePath.match(/\.(png|jpg|jpeg|webp|gif)$/i)) {
+          return {
+            type: 'image',
+            title: fileName || 'AI 生成图片',
+            content: filePath,
+            filePath
+          };
         }
+      } else if (step.tool === 'generate_image') {
+        const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
+        const imgUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:png|jpg|jpeg|webp|gif)[^\s)]*)/i) : null;
+        const imgUrl = imgUrlMatch ? imgUrlMatch[1] : '';
+        const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 图像生成';
+        return {
+          type: 'image',
+          title: fileName || 'AI 图像生成',
+          content: imgUrl || rawPath,
+          filePath: rawPath
+        };
+      } else if (step.tool === 'generate_video') {
+        const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:预定保存路径:\s*"([^"]+)")/)?.[1]) || '';
+        const vidUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:mp4|webm|mov)[^\s)]*)/i) : null;
+        const vidUrl = vidUrlMatch ? vidUrlMatch[1] : '';
+        const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 视频生成';
+        return {
+          type: 'video',
+          title: fileName || 'AI 视频生成',
+          content: vidUrl || rawPath,
+          filePath: rawPath
+        };
+      } else if (step.tool === 'text_to_speech') {
+        const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
+        const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 语音合成';
+        return {
+          type: 'audio',
+          title: fileName || 'AI 语音合成',
+          content: rawPath,
+          filePath: rawPath
+        };
       }
     }
   }
@@ -227,7 +277,171 @@ export function extractPreviewableArtifact(content: string, steps?: AgentStep[])
     };
   }
 
+  // 8. Markdown 图片引用语法: ![alt](url_or_path)
+  const mdImgMatch = content.match(/!\[(.*?)\]\(((?:https?:\/\/[^\s)]+|data:image\/[^\s)]+|[^\s)]+\.(?:png|jpg|jpeg|webp|gif)))\)/i);
+  if (mdImgMatch) {
+    const title = mdImgMatch[1] || 'AI 生成图片';
+    const src = mdImgMatch[2];
+    return {
+      type: 'image',
+      title,
+      content: src,
+      filePath: src.startsWith('http') ? undefined : src
+    };
+  }
+
+  // 9. Markdown 视频语法: [视频: alt](url.mp4) 或 ![alt](url.mp4)
+  const mdVidMatch = content.match(/(?:!\[(.*?)\]|\[(?:视频|video|播放视频)?[：:]?\s*(.*?)\])\(((?:https?:\/\/[^\s)]+|[^\s)]+)\.(?:mp4|webm|mov))\)/i);
+  if (mdVidMatch) {
+    const title = mdVidMatch[1] || mdVidMatch[2] || 'AI 生成视频';
+    const src = mdVidMatch[3];
+    return {
+      type: 'video',
+      title,
+      content: src,
+      filePath: src.startsWith('http') ? undefined : src
+    };
+  }
+
+  // 10. Markdown 音频语法: [音频: alt](url.mp3) 或 ![alt](url.mp3)
+  const mdAudMatch = content.match(/(?:!\[(.*?)\]|\[(?:音频|audio|播放音频|语音)?[：:]?\s*(.*?)\])\(((?:https?:\/\/[^\s)]+|[^\s)]+)\.(?:mp3|wav|m4a|aac|flac|ogg))\)/i);
+  if (mdAudMatch) {
+    const title = mdAudMatch[1] || mdAudMatch[2] || 'AI 语音合成';
+    const src = mdAudMatch[3];
+    return {
+      type: 'audio',
+      title,
+      content: src,
+      filePath: src.startsWith('http') ? undefined : src
+    };
+  }
+
   return null;
+}
+
+function renderContentWithMedia(content: string, onOpenPreview?: (data: PreviewData) => void) {
+  if (!content) return null;
+  const mediaRegex = /(?:!\[(.*?)\]\(((?:https?:\/\/[^\s)]+|data:image\/[^\s)]+|[^\s)]+\.(?:png|jpg|jpeg|webp|gif|mp4|webm|mov|mp3|wav|m4a|aac|flac|ogg)))\)|\[(?:视频|video|音频|audio|播放音频|语音)?[：:]?\s*(.*?)\]\(((?:https?:\/\/[^\s)]+|[^\s)]+)\.(?:mp4|webm|mov|mp3|wav|m4a|aac|flac|ogg))\))/gi;
+
+  if (!mediaRegex.test(content)) {
+    return (
+      <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
+        {content}
+      </div>
+    );
+  }
+
+  mediaRegex.lastIndex = 0;
+  const elements: React.ReactNode[] = [];
+  let lastIdx = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = mediaRegex.exec(content)) !== null) {
+    if (match.index > lastIdx) {
+      elements.push(
+        <div key={`text-${lastIdx}`} className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
+          {content.slice(lastIdx, match.index)}
+        </div>
+      );
+    }
+
+    const alt = match[1] || match[3] || 'AI 产物';
+    const src = match[2] || match[4] || '';
+    const key = `media-${match.index}`;
+    const lowerSrc = src.toLowerCase();
+
+    const isVideo = lowerSrc.endsWith('.mp4') || lowerSrc.endsWith('.webm') || lowerSrc.endsWith('.mov');
+    const isAudio = lowerSrc.endsWith('.mp3') || lowerSrc.endsWith('.wav') || lowerSrc.endsWith('.m4a') || lowerSrc.endsWith('.aac') || lowerSrc.endsWith('.flac') || lowerSrc.endsWith('.ogg');
+
+    if (isVideo) {
+      elements.push(
+        <div key={key} className="my-3 max-w-lg rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--card)] shadow-md group">
+          <div className="relative overflow-hidden bg-black flex items-center justify-center p-2">
+            <video
+              src={src}
+              controls
+              className="max-h-96 w-full object-contain rounded-lg"
+            />
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 bg-[var(--muted)]/40 border-t border-[var(--border)] text-xs">
+            <span className="font-medium text-[var(--foreground)] truncate max-w-[280px]" title={alt}>
+              🎬 {alt}
+            </span>
+            <div className="flex items-center space-x-2">
+              {onOpenPreview && (
+                <button
+                  type="button"
+                  onClick={() => onOpenPreview({ type: 'video', title: alt, content: src })}
+                  className="text-[var(--primary)] hover:underline cursor-pointer flex items-center space-x-1 font-medium"
+                >
+                  <span>全屏播放</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    } else if (isAudio) {
+      elements.push(
+        <div key={key} className="my-3 max-w-lg rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--card)] shadow-md p-3">
+          <div className="flex items-center space-x-2.5 mb-2">
+            <div className="h-7 w-7 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
+              <Volume2 className="h-4 w-4" />
+            </div>
+            <span className="font-medium text-xs text-[var(--foreground)] truncate max-w-[320px]" title={alt}>
+              🎙️ {alt}
+            </span>
+          </div>
+          <audio src={src} controls className="w-full h-8" />
+        </div>
+      );
+    } else {
+      // Image
+      elements.push(
+        <div key={key} className="my-3 max-w-lg rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--card)] shadow-md group">
+          <div className="relative overflow-hidden bg-black/5 dark:bg-white/5 flex items-center justify-center p-2">
+            <img
+              src={src}
+              alt={alt}
+              className="max-h-96 w-auto object-contain rounded-lg transition-transform group-hover:scale-[1.01] duration-200"
+              loading="lazy"
+              onError={(e) => {
+                (e.target as HTMLElement).style.display = 'none';
+              }}
+            />
+          </div>
+          <div className="flex items-center justify-between px-3 py-2 bg-[var(--muted)]/40 border-t border-[var(--border)] text-xs">
+            <span className="font-medium text-[var(--foreground)] truncate max-w-[280px]" title={alt}>
+              🎨 {alt}
+            </span>
+            <div className="flex items-center space-x-2">
+              {onOpenPreview && (
+                <button
+                  type="button"
+                  onClick={() => onOpenPreview({ type: 'image', title: alt, content: src })}
+                  className="text-[var(--primary)] hover:underline cursor-pointer flex items-center space-x-1 font-medium"
+                >
+                  <span>全屏预览</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    lastIdx = mediaRegex.lastIndex;
+  }
+
+  if (lastIdx < content.length) {
+    elements.push(
+      <div key={`text-${lastIdx}`} className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
+        {content.slice(lastIdx)}
+      </div>
+    );
+  }
+
+  return <div className="space-y-1">{elements}</div>;
 }
 
 export const ChatArea: React.FC<ChatAreaProps> = ({
@@ -244,8 +458,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenPreview,
   onOpenTerminal,
   onOpenSettings,
+  onRollbackCheckpoint,
+  onOpenTimeline,
   activeSessionId,
-  terminalOutputs
+  terminalOutputs,
+  onOpenRules
 }) => {
   const [input, setInput] = useState('');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
@@ -253,60 +470,139 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const [rollingBackId, setRollingBackId] = useState<string | null>(null);
 
-  // @ Skill Mention 状态
+  // @ Unified Context Mention 状态 (@file / @git-diff / @skill)
   const [availableSkills, setAvailableSkills] = useState<any[]>([]);
-  const [showSkillMenu, setShowSkillMenu] = useState(false);
-  const [skillQuery, setSkillQuery] = useState('');
-  const [selectedSkillIndex, setSelectedSkillIndex] = useState(0);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFileItem[]>([]);
+  const [projectRules, setProjectRules] = useState<ProjectRulesInfo | null>(null);
+  const [showMentionMenu, setShowMentionMenu] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionTab, setMentionTab] = useState<'all' | 'files' | 'git' | 'skills'>('all');
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
-    const loadSkills = async () => {
-      if (window.electronAPI?.getAllSkills) {
-        try {
-          const skills = await window.electronAPI.getAllSkills(workspacePath || null);
-          if (isMounted && Array.isArray(skills)) {
-            setAvailableSkills(skills);
-          }
-        } catch (e) {
-          console.warn('Failed to load skills for @ mention:', e);
+    const loadContextData = async () => {
+      if (!window.electronAPI) return;
+      try {
+        const [skills, rules] = await Promise.all([
+          window.electronAPI.getAllSkills(workspacePath || null),
+          window.electronAPI.getProjectRules ? window.electronAPI.getProjectRules(workspacePath || null) : Promise.resolve(null)
+        ]);
+        if (isMounted) {
+          if (Array.isArray(skills)) setAvailableSkills(skills);
+          setProjectRules(rules || null);
         }
+        if (workspacePath && window.electronAPI.indexWorkspaceFiles) {
+          const files = await window.electronAPI.indexWorkspaceFiles(workspacePath);
+          if (isMounted && Array.isArray(files)) {
+            setWorkspaceFiles(files);
+          }
+        } else {
+          if (isMounted) setWorkspaceFiles([]);
+        }
+      } catch (e) {
+        console.warn('Failed to load context mention data:', e);
       }
     };
-    loadSkills();
+    loadContextData();
     return () => {
       isMounted = false;
     };
   }, [workspacePath]);
 
-  const filteredSkills = useMemo(() => {
-    if (!skillQuery) return availableSkills;
-    const q = skillQuery.toLowerCase();
-    return availableSkills.filter(s => {
-      const nameMatch = (s.name || '').toLowerCase().includes(q);
-      const idMatch = (s.id || '').toLowerCase().includes(q);
-      const descMatch = (s.description || '').toLowerCase().includes(q);
-      return nameMatch || idMatch || descMatch;
-    });
-  }, [availableSkills, skillQuery]);
+  interface ContextMentionItem {
+    type: 'file' | 'git' | 'skill';
+    id: string;
+    name: string;
+    detail?: string;
+    badge?: string;
+    insertText: string;
+  }
 
-  const handleSelectSkill = (skill: any) => {
+  const contextMentionItems = useMemo<ContextMentionItem[]>(() => {
+    const items: ContextMentionItem[] = [];
+
+    // 1. Git item
+    if (workspacePath) {
+      items.push({
+        type: 'git',
+        id: 'git-diff',
+        name: '@git-diff (未提交代码变更)',
+        detail: '注入当前工作区分支、修改文件清单及未提交 git diff 差异',
+        badge: 'Git 变更',
+        insertText: '@git-diff '
+      });
+    }
+
+    // 2. File items (capped for responsive filtering)
+    for (const f of workspaceFiles.slice(0, 600)) {
+      items.push({
+        type: 'file',
+        id: f.relPath,
+        name: f.name,
+        detail: f.relPath,
+        badge: f.ext.toUpperCase() || 'FILE',
+        insertText: `@file:${f.relPath} `
+      });
+    }
+
+    // 3. Skill items
+    for (const s of availableSkills) {
+      const isCustom = s.id.startsWith('custom:');
+      const isWorkspace = s.id.startsWith('custom:workspace:');
+      const cleanId = s.id.replace(/^custom:(global|workspace):/, '');
+      items.push({
+        type: 'skill',
+        id: s.id,
+        name: `@${cleanId} (${s.name})`,
+        detail: s.description,
+        badge: isWorkspace ? '项目技能' : isCustom ? '自定义' : '内置技能',
+        insertText: `@${cleanId} `
+      });
+    }
+
+    return items;
+  }, [workspacePath, workspaceFiles, availableSkills]);
+
+  const filteredMentionItems = useMemo(() => {
+    let list = contextMentionItems;
+    if (mentionTab === 'files') {
+      list = list.filter(i => i.type === 'file');
+    } else if (mentionTab === 'git') {
+      list = list.filter(i => i.type === 'git');
+    } else if (mentionTab === 'skills') {
+      list = list.filter(i => i.type === 'skill');
+    }
+
+    if (!mentionQuery) return list.slice(0, 40);
+
+    const q = mentionQuery.toLowerCase();
+    return list.filter(item => {
+      return (
+        item.name.toLowerCase().includes(q) ||
+        (item.detail && item.detail.toLowerCase().includes(q)) ||
+        item.insertText.toLowerCase().includes(q)
+      );
+    }).slice(0, 40);
+  }, [contextMentionItems, mentionTab, mentionQuery]);
+
+  const handleSelectMention = (item: ContextMentionItem) => {
     if (!textareaRef.current) return;
     const textarea = textareaRef.current;
     const cursor = textarea.selectionStart || input.length;
     const textBeforeCursor = input.slice(0, cursor);
     const textAfterCursor = input.slice(cursor);
 
-    const replacedBefore = textBeforeCursor.replace(/(?:^|\s)@([a-zA-Z0-9_\-:]*)$/, (match) => {
+    const replacedBefore = textBeforeCursor.replace(/(?:^|\s)@([a-zA-Z0-9_\-:./\\]*)$/, (match) => {
       const prefix = match.startsWith(' ') ? ' ' : '';
-      const cleanId = skill.id.replace(/^custom:(global|workspace):/, '');
-      return `${prefix}@${cleanId} `;
+      return `${prefix}${item.insertText}`;
     });
 
     const newInput = replacedBefore + textAfterCursor;
     setInput(newInput);
-    setShowSkillMenu(false);
+    setShowMentionMenu(false);
 
     setTimeout(() => {
       textarea.focus();
@@ -383,29 +679,29 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // 优先处理 @ 技能菜单的键盘上下导航、Tab/回车选取与 Esc 退出
-    if (showSkillMenu && filteredSkills.length > 0) {
+    // 优先处理 @ 上下文引用菜单的键盘上下导航、Tab/回车选取与 Esc 退出
+    if (showMentionMenu && filteredMentionItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedSkillIndex(i => (i + 1) % filteredSkills.length);
+        setSelectedMentionIndex(i => (i + 1) % filteredMentionItems.length);
         return;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedSkillIndex(i => (i - 1 + filteredSkills.length) % filteredSkills.length);
+        setSelectedMentionIndex(i => (i - 1 + filteredMentionItems.length) % filteredMentionItems.length);
         return;
       }
       if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
         e.preventDefault();
-        const selected = filteredSkills[selectedSkillIndex];
+        const selected = filteredMentionItems[selectedMentionIndex];
         if (selected) {
-          handleSelectSkill(selected);
+          handleSelectMention(selected);
         }
         return;
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        setShowSkillMenu(false);
+        setShowMentionMenu(false);
         return;
       }
     }
@@ -421,7 +717,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed && attachments.length === 0) return;
 
@@ -443,21 +739,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       onOpenGitDiff?.();
       setInput('');
       setShowSlashMenu(false);
-      setShowSkillMenu(false);
+      setShowMentionMenu(false);
       return;
     }
     if (trimmed === '/preview') {
       onOpenPreview?.({ type: 'html', title: '多模态产物预览', content: '<h3>请选择消息中的 HTML / Mermaid / SVG 进行预览</h3>' });
       setInput('');
       setShowSlashMenu(false);
-      setShowSkillMenu(false);
+      setShowMentionMenu(false);
       return;
     }
     if (trimmed === '/terminal') {
       onOpenTerminal?.();
       setInput('');
       setShowSlashMenu(false);
-      setShowSkillMenu(false);
+      setShowMentionMenu(false);
       return;
     }
 
@@ -475,11 +771,40 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       textToSend = trimmed.replace('/grill-me', '').trim() || '请开启 Grill-me 采访交互模式，针对当前项目逐一向我提问关键决策。';
     }
 
+    // 核心跃升：自动展开 @git-diff / @git 上下文
+    if ((textToSend.includes('@git-diff') || textToSend.includes('@git')) && workspacePath && window.electronAPI?.getGitDiffSummary) {
+      try {
+        const diffSummary = await window.electronAPI.getGitDiffSummary(workspacePath);
+        if (diffSummary && (diffSummary.diffText || diffSummary.statusText)) {
+          textToSend += `\n\n【用户显式引用当前工作区 Git 变更 (@git-diff)】\n${diffSummary.statusText}\n\`\`\`diff\n${diffSummary.diffText}\n\`\`\``;
+        }
+      } catch (e) {
+        console.warn('Failed to fetch git diff summary:', e);
+      }
+    }
+
+    // 核心跃升：自动展开 @file:<relPath> 上下文
+    const fileMatches = Array.from(textToSend.matchAll(/@file:([^\s]+)/g));
+    if (fileMatches.length > 0 && workspacePath && window.electronAPI?.readWorkspaceFile) {
+      for (const match of fileMatches) {
+        const relPath = match[1];
+        try {
+          const fileData = await window.electronAPI.readWorkspaceFile(workspacePath, relPath);
+          if (fileData.success && fileData.content !== undefined) {
+            const ext = relPath.split('.').pop() || '';
+            textToSend += `\n\n【用户显式引用文件: ${relPath}】\n\`\`\`${ext}\n${fileData.content}\n\`\`\``;
+          }
+        } catch (e) {
+          console.warn(`Failed to read referenced file ${relPath}:`, e);
+        }
+      }
+    }
+
     onSendMessage(textToSend, mode, attachments);
     setInput('');
     setAttachments([]);
     setShowSlashMenu(false);
-    setShowSkillMenu(false);
+    setShowMentionMenu(false);
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
     }
@@ -491,19 +816,26 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     e.target.style.height = 'auto';
     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
 
-    // 侦测光标位置前的 @ 技能提及触发词
+    // 侦测光标位置前的 @ 上下文提及触发词
     const cursor = e.target.selectionStart || val.length;
     const textBeforeCursor = val.slice(0, cursor);
-    const atMatch = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\-:]*)$/);
+    const atMatch = textBeforeCursor.match(/(?:^|\s)@([a-zA-Z0-9_\-:./\\]*)$/);
 
     if (atMatch) {
       const query = atMatch[1].toLowerCase();
-      setSkillQuery(query);
-      setShowSkillMenu(true);
-      setSelectedSkillIndex(0);
+      setMentionQuery(query);
+      if (query.startsWith('file:') || query.startsWith('file')) {
+        setMentionTab('files');
+      } else if (query.startsWith('git')) {
+        setMentionTab('git');
+      } else if (query.startsWith('skill')) {
+        setMentionTab('skills');
+      }
+      setShowMentionMenu(true);
+      setSelectedMentionIndex(0);
       setShowSlashMenu(false);
     } else {
-      setShowSkillMenu(false);
+      setShowMentionMenu(false);
       if (val === '/' || (val.startsWith('/') && !val.includes(' '))) {
         setShowSlashMenu(true);
       } else {
@@ -511,6 +843,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       }
     }
   };
+
 
   const handleSelectSlashCommand = (cmd: string) => {
     if (cmd === '/diff') {
@@ -666,10 +999,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
 
             <div className="flex items-center space-x-2 shrink-0">
+              {/* Project Rules Badge - v1.4.0 */}
+              {projectRules?.hasRules && (
+                <div
+                  className="hidden sm:flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[10px] font-medium"
+                  title={`当前项目规约已强制激活: ${projectRules.filePath}`}
+                >
+                  <ScrollText className="h-3 w-3" />
+                  <span>规约已激活 ({projectRules.ruleType === 'asteamrules' ? '.asteamrules' : 'ASTEAM.md'})</span>
+                </div>
+              )}
+
               {/* Progress track */}
               {totalStepsCount > 0 && (
-                <div className="hidden sm:flex items-center space-x-2 mr-1">
-                  <div className="w-16 h-1.5 rounded-full bg-[var(--muted)] overflow-hidden">
+                <div className="flex items-center space-x-2">
+                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--muted)]">
                     <div
                       className="h-full bg-[var(--primary)] transition-all duration-300"
                       style={{ width: `${Math.round((completedStepsCount / Math.max(1, totalStepsCount)) * 100)}%` }}
@@ -888,11 +1232,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 {(() => {
                   const errorMarker = '⚠️ **执行遇到错误**:';
                   if (!msg.content.includes(errorMarker)) {
-                    return (
-                      <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-                        {msg.content}
-                      </div>
-                    );
+                    return renderContentWithMedia(msg.content, onOpenPreview);
                   }
 
                   const parts = msg.content.split(errorMarker);
@@ -901,11 +1241,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
                   return (
                     <div className="space-y-3">
-                      {normalText && (
-                        <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-                          {normalText}
-                        </div>
-                      )}
+                      {normalText && renderContentWithMedia(normalText, onOpenPreview)}
 
                       {/* ASTeam Branded Error Diagnostic Card */}
                       <div className="rounded-xl border border-[var(--error)]/30 bg-[var(--card)] p-4 shadow-sm animate-in fade-in select-text">
@@ -991,18 +1327,33 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/5 p-3 shadow-xs hover:border-[var(--primary)] transition-all">
                       <div className="flex items-center space-x-2.5 min-w-0">
                         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--primary)]/15 text-[var(--primary)]">
-                          <Eye className="h-4 w-4" />
+                          {artifact.type === 'image' ? <ImageIcon className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </div>
                         <div className="min-w-0">
                           <div className="text-xs font-semibold text-[var(--foreground)] truncate">
                             交付物就绪：{artifact.title}
                           </div>
                           <div className="text-[11px] text-[var(--muted-foreground)]">
-                            类型: {artifact.type.toUpperCase()} · 点击即可在独立分栏中查看渲染效果与图表
+                            类型: {artifact.type.toUpperCase()} · 点击即可在工作台独立分栏中查看高保真效果
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-1.5 shrink-0 ml-2">
+                        {artifact.filePath && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.electronAPI?.showItemInFolder) {
+                                window.electronAPI.showItemInFolder(artifact.filePath!);
+                              }
+                            }}
+                            title="在系统文件资源管理器中定位"
+                            className="flex items-center space-x-1 rounded-lg border border-[var(--primary)]/40 bg-white/80 dark:bg-[var(--card)] text-[var(--primary)] hover:bg-[var(--primary)]/10 px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <FolderOpen className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">资源管理器定位</span>
+                          </button>
+                        )}
                         {artifact.type === 'html' && (
                           <button
                             type="button"
@@ -1034,6 +1385,62 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
                   );
                 })()}
+
+                {/* 影子快照与时光机一键回滚 (Checkpoint & 1-Click Rollback - v1.4.0) */}
+                {msg.role === 'assistant' && msg.checkpoint && (
+                  <div className="mt-3 rounded-xl border border-[var(--primary)]/30 bg-[var(--primary)]/5 p-3 shadow-2xs animate-in fade-in select-none">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--primary)]/15 text-[var(--primary)]">
+                          <History className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-semibold text-[var(--foreground)] truncate">
+                              影子快照已生成 ({msg.checkpoint.id})
+                            </span>
+                            <span className="rounded bg-[var(--muted)] px-1.5 py-0.2 text-[9px] font-mono text-[var(--muted-foreground)]">
+                              {new Date(msg.checkpoint.timestamp).toLocaleTimeString('zh-CN', { hour12: false })}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-[var(--muted-foreground)] truncate">
+                            变更记录: {msg.checkpoint.modifiedFiles.length} 个修改, {msg.checkpoint.newFiles.length} 个新建文件
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 shrink-0 ml-2">
+                        {msg.checkpoint.rolledBack ? (
+                          <span className="inline-flex items-center space-x-1 text-emerald-600 dark:text-emerald-400 font-medium text-[11px] bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/25">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>本轮修改已撤销还原</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={rollingBackId === msg.checkpoint.id}
+                            onClick={async () => {
+                              if (!onRollbackCheckpoint) return;
+                              const ok = window.confirm(`确定要撤销本轮 Agent 产生的所有代码修改吗？\n涉及文件：\n${[...msg.checkpoint!.modifiedFiles, ...msg.checkpoint!.newFiles].join('\n')}\n\n系统将秒级还原被修改文件并清理新建文件。`);
+                              if (!ok) return;
+                              setRollingBackId(msg.checkpoint!.id);
+                              try {
+                                await onRollbackCheckpoint(msg.checkpoint!.id);
+                              } finally {
+                                setRollingBackId(null);
+                              }
+                            }}
+                            className="flex items-center space-x-1.5 rounded-lg bg-[var(--card)] hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 px-2.5 py-1 text-xs font-medium transition-all cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
+                            title="1 秒还原工作区至本轮修改前的状态"
+                          >
+                            <Undo2 className="h-3.5 w-3.5" />
+                            <span>{rollingBackId === msg.checkpoint.id ? '正在回滚...' : '⏪ 撤销本轮修改'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Performance & Token Meta for Assistant */}
                 {msg.role === 'assistant' && msg.content && (
@@ -1117,63 +1524,111 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         </div>
       )}
 
-      {/* Skill Mention Autocomplete Popup (@) */}
-      {showSkillMenu && (
-        <div className="absolute bottom-28 left-4 right-4 max-w-lg mx-auto z-40 rounded-xl border border-[var(--border)] bg-[var(--card)]/95 backdrop-blur-md p-1.5 shadow-2xl animate-in slide-in-from-bottom-2 select-none">
-          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border)] mb-1">
-            <div className="flex items-center space-x-1.5 text-[11px] font-semibold text-[var(--foreground)]">
-              <Sparkles className="h-3.5 w-3.5 text-[var(--primary)]" />
-              <span>调用已安装技能 (@Skill)</span>
+      {/* Unified Context Mention Autocomplete Popup (@ Context Hub: @file / @git-diff / @skill - v1.4.0) */}
+      {showMentionMenu && (
+        <div className="absolute bottom-28 left-4 right-4 max-w-xl mx-auto z-40 rounded-xl border border-[var(--border)] bg-[var(--card)]/95 backdrop-blur-md p-2 shadow-2xl animate-in slide-in-from-bottom-2 select-none">
+          <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border)] mb-1.5">
+            <div className="flex items-center space-x-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-[var(--primary)] text-white">
+                <Sparkles className="h-3 w-3" />
+              </span>
+              <span className="text-xs font-semibold text-[var(--foreground)]">
+                全能 @ 上下文引用中枢
+              </span>
             </div>
-            <span className="text-[10px] text-[var(--muted-foreground)]">
-              ↑↓ 切换 · 回车/Tab 选择 · Esc 退出
-            </span>
+            {/* Category Filter Tabs */}
+            <div className="flex items-center space-x-1 bg-[var(--muted)] p-0.5 rounded-lg text-[10px]">
+              <button
+                type="button"
+                onClick={() => setMentionTab('all')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer ${
+                  mentionTab === 'all' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-2xs font-semibold' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                全部 ({contextMentionItems.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMentionTab('files')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer flex items-center space-x-1 ${
+                  mentionTab === 'files' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-2xs font-semibold' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                <FileCode className="h-2.5 w-2.5" />
+                <span>文件 ({workspaceFiles.length})</span>
+              </button>
+              {workspacePath && (
+                <button
+                  type="button"
+                  onClick={() => setMentionTab('git')}
+                  className={`px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer flex items-center space-x-1 ${
+                    mentionTab === 'git' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-2xs font-semibold' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  <GitCompare className="h-2.5 w-2.5" />
+                  <span>Git 变更</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setMentionTab('skills')}
+                className={`px-2 py-0.5 rounded-md font-medium transition-colors cursor-pointer flex items-center space-x-1 ${
+                  mentionTab === 'skills' ? 'bg-[var(--card)] text-[var(--foreground)] shadow-2xs font-semibold' : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                <Zap className="h-2.5 w-2.5" />
+                <span>技能 ({availableSkills.length})</span>
+              </button>
+            </div>
           </div>
 
-          <div className="max-h-56 overflow-y-auto space-y-0.5">
-            {filteredSkills.length === 0 ? (
-              <div className="p-3 text-center text-xs text-[var(--muted-foreground)]">
-                未找到匹配 "{skillQuery}" 的技能，可在设置中安装导入
+          <div className="max-h-60 overflow-y-auto space-y-0.5">
+            {filteredMentionItems.length === 0 ? (
+              <div className="p-4 text-center text-xs text-[var(--muted-foreground)]">
+                未找到匹配 "{mentionQuery}" 的上下文项（支持搜索文件、Git 变更或技能）
               </div>
             ) : (
-              filteredSkills.map((skill, idx) => {
-                const isSelected = idx === selectedSkillIndex;
-                const isCustom = skill.id.startsWith('custom:');
-                const isWorkspace = skill.id.startsWith('custom:workspace:');
-                const cleanId = skill.id.replace(/^custom:(global|workspace):/, '');
-
+              filteredMentionItems.map((item, idx) => {
+                const isSelected = idx === selectedMentionIndex;
                 return (
                   <div
-                    key={skill.id}
-                    onClick={() => handleSelectSkill(skill)}
-                    onMouseEnter={() => setSelectedSkillIndex(idx)}
+                    key={`${item.type}-${item.id}`}
+                    onClick={() => handleSelectMention(item)}
+                    onMouseEnter={() => setSelectedMentionIndex(idx)}
                     className={`flex items-center justify-between rounded-lg px-2.5 py-1.5 cursor-pointer text-xs transition-colors ${
                       isSelected
                         ? 'bg-[var(--primary)]/15 text-[var(--foreground)]'
                         : 'hover:bg-[var(--muted)] text-[var(--muted-foreground)]'
                     }`}
                   >
-                    <div className="flex items-center space-x-2 truncate pr-2">
-                      <span className="font-mono font-bold text-[var(--primary)] text-xs shrink-0">
-                        @{cleanId}
+                    <div className="flex items-center space-x-2 truncate pr-2 min-w-0">
+                      {item.type === 'file' ? (
+                        <FileCode className="h-3.5 w-3.5 text-blue-500 shrink-0" />
+                      ) : item.type === 'git' ? (
+                        <GitCompare className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
+                      )}
+                      <span className="font-mono font-semibold text-[var(--foreground)] text-xs truncate">
+                        {item.name}
                       </span>
-                      <span className="font-medium text-[var(--foreground)] truncate">
-                        {skill.name}
-                      </span>
+                      {item.detail && item.detail !== item.name && (
+                        <span className="text-[11px] text-[var(--muted-foreground)] truncate hidden sm:inline">
+                          · {item.detail}
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center space-x-1.5 shrink-0">
-                      {isWorkspace ? (
-                        <span className="rounded bg-indigo-500/15 text-indigo-500 border border-indigo-500/30 px-1.5 py-0.2 text-[9px] font-bold">
-                          项目
-                        </span>
-                      ) : isCustom ? (
-                        <span className="rounded bg-amber-500/15 text-amber-500 border border-amber-500/30 px-1.5 py-0.2 text-[9px] font-bold">
-                          自定义
-                        </span>
-                      ) : (
-                        <span className="rounded bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30 px-1.5 py-0.2 text-[9px] font-bold">
-                          内置
+                      {item.badge && (
+                        <span className={`rounded px-1.5 py-0.2 text-[9px] font-bold border ${
+                          item.type === 'git'
+                            ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                            : item.type === 'file'
+                            ? 'bg-blue-500/15 text-blue-500 border-blue-500/30 font-mono'
+                            : 'bg-[var(--primary)]/15 text-[var(--primary)] border-[var(--primary)]/30'
+                        }`}>
+                          {item.badge}
                         </span>
                       )}
                     </div>
@@ -1182,8 +1637,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               })
             )}
           </div>
+          <div className="flex items-center justify-between px-2 pt-1 border-t border-[var(--border)]/40 text-[10px] text-[var(--muted-foreground)]">
+            <span>↑↓ 导航 · 回车/Tab 选择上屏 · Esc 退出</span>
+            <span>输入 @file: 搜文件 · @git 搜变更 · @ 搜技能</span>
+          </div>
         </div>
       )}
+
 
       {/* Input Area Bar */}
       <div
@@ -1295,6 +1755,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     <span className="truncate max-w-[160px]" title={workspacePath}>
                       {workspaceName} (Git Diff)
                     </span>
+                  </button>
+
+                  <span className="text-[var(--border)]">•</span>
+                  <button
+                    type="button"
+                    onClick={onOpenRules}
+                    className={`flex items-center space-x-1 font-medium transition-colors cursor-pointer ${
+                      projectRules?.hasRules
+                        ? 'text-emerald-600 dark:text-emerald-400 hover:underline'
+                        : 'text-[var(--muted-foreground)] hover:text-[var(--primary)]'
+                    }`}
+                    title={projectRules?.hasRules ? `项目规约已生效 (${projectRules.filePath})，点击查看/切换` : '该项目未配置行为准则，点击一键生成'}
+                  >
+                    <ScrollText className="h-3 w-3" />
+                    <span>{projectRules?.hasRules ? '📜 规约已生效' : '📜 规约未配置'}</span>
                   </button>
                 </>
               ) : (

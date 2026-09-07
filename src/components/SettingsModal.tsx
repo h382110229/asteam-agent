@@ -712,6 +712,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         reasoning: { label: '深度思考/R1', icon: '🧠' },
                         tools: { label: '函数工具', icon: '🛠️' },
                         image_gen: { label: '图像生成', icon: '🎨' },
+                        video_gen: { label: '视频生成', icon: '🎬' },
+                        audio_asr: { label: '语音识别', icon: '🎙️' },
+                        audio_tts: { label: '语音合成', icon: '🔊' },
+                        embedding: { label: '高精向量', icon: '📐' },
                       };
                       const meta = capLabels[cap] || { label: cap, icon: '🏷️' };
                       return (
@@ -935,7 +939,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                           <div className="md:col-span-3 pt-1 border-t border-[var(--border)]/40 flex flex-wrap items-center gap-1.5">
                             <span className="text-[10px] text-[var(--muted-foreground)]">自适应能力标签:</span>
-                            {(['text', 'vision', 'reasoning', 'tools', 'image_gen'] as const).map(cap => {
+                            {(['text', 'vision', 'reasoning', 'tools', 'image_gen', 'video_gen', 'audio_asr', 'audio_tts', 'embedding'] as const).map(cap => {
                               const activeCaps = fb.capabilities || inferModelCapabilities(fb.model);
                               const isChecked = activeCaps.includes(cap);
                               const capLabels: Record<ModelCapability, { label: string; icon: string }> = {
@@ -944,6 +948,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 reasoning: { label: '深度思考/R1', icon: '🧠' },
                                 tools: { label: '函数工具', icon: '🛠️' },
                                 image_gen: { label: '图像生成', icon: '🎨' },
+                                video_gen: { label: '视频生成', icon: '🎬' },
+                                audio_asr: { label: '语音识别', icon: '🎙️' },
+                                audio_tts: { label: '语音合成', icon: '🔊' },
+                                embedding: { label: '高精向量', icon: '📐' },
                               };
                               const meta = capLabels[cap] || { label: cap, icon: '🏷️' };
                               return (

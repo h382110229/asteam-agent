@@ -1,11 +1,13 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage, shell, net } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
-import { getGitStatus, getFileDiff, discardFileChange } from './git-manager';
+import { getGitStatus, getFileDiff, discardFileChange, getGitDiffSummary } from './git-manager';
 import { skillManager } from './skill-manager';
 import { storageHub } from './storage-hub';
 import { memoryManager } from './memory-manager';
+import { rulesManager } from './rules-manager';
+import { checkpointManager } from './checkpoint-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -147,6 +149,61 @@ function registerShortcuts() {
   });
 }
 
+function indexWorkspaceFiles(rootPath: string, maxFiles = 2000): Array<{ name: string; relPath: string; ext: string }> {
+  if (!rootPath || !fs.existsSync(rootPath)) return [];
+  const results: Array<{ name: string; relPath: string; ext: string }> = [];
+  const ignoredDirs = new Set(['node_modules', '.git', 'dist', 'dist-electron', 'build', 'release', '.asteam', '.vscode', '.idea', 'coverage', '.cache', 'tmp', 'temp']);
+
+  function walk(currentDir: string) {
+    if (results.length >= maxFiles) return;
+    try {
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (results.length >= maxFiles) return;
+        if (entry.name.startsWith('.') && entry.name !== '.env' && entry.name !== '.asteamrules') continue;
+
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          if (!ignoredDirs.has(entry.name)) {
+            walk(fullPath);
+          }
+        } else if (entry.isFile()) {
+          const relPath = path.relative(rootPath, fullPath).replace(/\\/g, '/');
+          const ext = path.extname(entry.name).toLowerCase().replace('.', '');
+          results.push({
+            name: entry.name,
+            relPath,
+            ext
+          });
+        }
+      }
+    } catch {}
+  }
+
+  walk(rootPath);
+  return results;
+}
+
+function readWorkspaceFileSafe(rootPath: string, relPath: string): { success: boolean; content?: string; error?: string } {
+  try {
+    if (!rootPath || !fs.existsSync(rootPath)) return { success: false, error: '工作区不存在' };
+    const fullPath = path.resolve(rootPath, relPath);
+    if (!fullPath.startsWith(path.resolve(rootPath))) {
+      return { success: false, error: '非法越界文件路径' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: '文件不存在' };
+    const stats = fs.statSync(fullPath);
+    if (stats.isDirectory()) return { success: false, error: '目标是目录而非文件' };
+    if (stats.size > 1024 * 1024 * 2) {
+      return { success: false, error: '文件超过 2MB，已被保护性拦截' };
+    }
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    return { success: true, content };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 function setupIPC() {
   // Window control IPC
   ipcMain.on('window:minimize', () => {
@@ -202,6 +259,15 @@ function setupIPC() {
     }
   });
 
+  // Workspace file indexing & reading for @file context
+  ipcMain.handle('workspace:indexFiles', async (_event, dirPath: string) => {
+    return indexWorkspaceFiles(dirPath);
+  });
+
+  ipcMain.handle('workspace:readFileContent', async (_event, { workspacePath, relPath }: { workspacePath: string; relPath: string }) => {
+    return readWorkspaceFileSafe(workspacePath, relPath);
+  });
+
   // App settings IPC
   ipcMain.handle('app:getOpenAtLogin', () => {
     return app.getLoginItemSettings().openAtLogin;
@@ -228,6 +294,10 @@ function setupIPC() {
     return await discardFileChange(repoPath, relPath);
   });
 
+  ipcMain.handle('git:getDiffSummary', async (_event, repoPath: string) => {
+    return await getGitDiffSummary(repoPath);
+  });
+
   // Skills IPC
   ipcMain.handle('skills:getAll', async (_event, workspacePath: string | null) => {
     return skillManager.getAllAvailableSkills(workspacePath);
@@ -250,7 +320,7 @@ function setupIPC() {
 
   ipcMain.handle('skills:installFromUrl', async (_event, url: string) => {
     try {
-      const res = await fetch(url);
+      const res = await net.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const text = await res.text();
       const urlFileName = url.split('/').pop()?.replace(/\.md$/, '') || 'remote_skill';
@@ -311,6 +381,28 @@ function setupIPC() {
 
   ipcMain.handle('memory:parseCommand', async (_event, text: string) => {
     return memoryManager.parseExplicitCommand(text);
+  });
+
+  // Project Rules IPC (.asteamrules / ASTEAM.md) - v1.4.0
+  ipcMain.handle('rules:get', async (_event, workspacePath: string | null) => {
+    return rulesManager.getProjectRules(workspacePath);
+  });
+
+  ipcMain.handle('rules:save', async (_event, { workspacePath, content }: { workspacePath: string; content: string }) => {
+    return rulesManager.saveProjectRules(workspacePath, content);
+  });
+
+  ipcMain.handle('rules:getPresets', async () => {
+    return rulesManager.getPresets();
+  });
+
+  // Shadow Checkpoint & Rollback IPC - v1.4.0
+  ipcMain.handle('checkpoint:list', async (_event, { workspacePath, sessionId }: { workspacePath: string | null; sessionId?: string }) => {
+    return checkpointManager.listCheckpoints(workspacePath, sessionId);
+  });
+
+  ipcMain.handle('checkpoint:rollback', async (_event, { checkpointId, workspacePath }: { checkpointId: string; workspacePath: string | null }) => {
+    return await checkpointManager.rollbackCheckpoint(checkpointId, workspacePath);
   });
 
   // Multimodal Preview Pop-out Window IPC
@@ -483,6 +575,12 @@ function setupIPC() {
         mainWindow?.webContents.send('agent:event', {
           type: 'terminalData',
           payload: data
+        });
+      },
+      onCheckpoint: (checkpoint) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'checkpoint',
+          payload: { sessionId, checkpoint }
         });
       }
     });

@@ -11,9 +11,10 @@ import {
   Sparkles,
   GitBranch,
   FileDiff,
-  Eye
+  Eye,
+  ScrollText
 } from 'lucide-react';
-import { GitStatusSummary } from '../types/project';
+import { GitStatusSummary, ProjectRulesInfo } from '../types/project';
 
 interface TitleBarProps {
   theme: 'light' | 'dark';
@@ -23,6 +24,8 @@ interface TitleBarProps {
   gitStatus?: GitStatusSummary | null;
   onOpenGitDiff?: () => void;
   onOpenDrawer?: () => void;
+  projectRules?: ProjectRulesInfo | null;
+  onOpenRules?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -32,7 +35,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   workspacePath,
   gitStatus,
   onOpenGitDiff,
-  onOpenDrawer
+  onOpenDrawer,
+  projectRules,
+  onOpenRules
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -116,6 +121,27 @@ export const TitleBar: React.FC<TitleBarProps> = ({
             ) : (
               <span className="text-[var(--muted-foreground)]">· 干净</span>
             )}
+          </button>
+        )}
+
+        {/* Project Rules Pill */}
+        {workspacePath && (
+          <button
+            type="button"
+            onClick={onOpenRules}
+            title={projectRules?.hasRules ? `当前项目行为准则已生效: ${projectRules.filePath}` : '该项目未配置行为准则，点击一键生成'}
+            className={`no-drag flex items-center space-x-1.5 rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors shadow-2xs cursor-pointer ${
+              projectRules?.hasRules
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:border-emerald-500'
+                : 'border-dashed border-[var(--border)] bg-[var(--muted)]/40 text-[var(--muted-foreground)] hover:border-[var(--primary)] hover:text-[var(--primary)]'
+            }`}
+          >
+            <ScrollText className="h-3 w-3" />
+            <span>
+              {projectRules?.hasRules
+                ? `规约生效中 (${projectRules.ruleType === 'asteamrules' ? '.asteamrules' : projectRules.ruleType === 'asteam_md' ? 'ASTEAM.md' : '.asteam/rules'})`
+                : '+ 规约未配置'}
+            </span>
           </button>
         )}
       </div>
