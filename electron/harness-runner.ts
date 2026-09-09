@@ -672,8 +672,45 @@ ${finalImageUrl ? `- 在线预览 URL: ${finalImageUrl}` : ''}
       fs.mkdirSync(targetDir, { recursive: true });
     }
 
-    const videoUrl = resultData.url || resultData.video_url || resultData.output_url || '';
+    let videoUrl = resultData.url || resultData.video_url || resultData.output_url || resultData.metadata?.url || '';
     const taskId = resultData.id || resultData.task_id || resultData.video_id || '';
+
+    // 若当前未直接拿到 videoUrl，且存在 taskId 与 usedProvider，则进行后台自动轮询（LLMAPI 网关已上线 GET /v1/videos/{taskId}）
+    if (!videoUrl && taskId && usedProvider) {
+      let base = usedProvider.baseUrl.replace(/\/+$/, '');
+      if (base.endsWith('/chat/completions')) {
+        base = base.replace(/\/chat\/completions$/, '');
+      }
+      const pollUrl = `${base}/videos/${taskId}`;
+      const pollHeaders: Record<string, string> = {};
+      if (usedProvider.apiKey) {
+        pollHeaders['Authorization'] = `Bearer ${usedProvider.apiKey}`;
+      }
+
+      console.log(`[WorkspaceTools] Starting polling for video task ${taskId} at ${pollUrl}...`);
+      const maxPollAttempts = 30; // 30 * 4s = 120s
+      for (let attempt = 1; attempt <= maxPollAttempts; attempt++) {
+        await new Promise(r => setTimeout(r, 4000));
+        try {
+          const pollRes = await safeFetch(pollUrl, { headers: pollHeaders });
+          if (pollRes.ok) {
+            const pollJson = await pollRes.json();
+            const candidate = pollJson.metadata?.url || pollJson.url || pollJson.video_url;
+            console.log(`[WorkspaceTools] Poll #${attempt} for ${taskId}: status=${pollJson.status}, progress=${pollJson.progress}%`);
+            if (candidate || pollJson.status === 'completed') {
+              videoUrl = candidate;
+              break;
+            }
+            if (pollJson.status === 'failed') {
+              console.warn(`[WorkspaceTools] Video task ${taskId} reported failure:`, pollJson);
+              break;
+            }
+          }
+        } catch (pollErr: any) {
+          console.warn(`[WorkspaceTools] Poll #${attempt} error:`, pollErr.message);
+        }
+      }
+    }
 
     if (videoUrl) {
       try {
@@ -711,9 +748,9 @@ ${finalImageUrl ? `- 在线预览 URL: ${finalImageUrl}` : ''}
 - 调度模型: ${usedProvider?.model || options.model || 'agnes-video-2.5-flash'}
 - 时长与规格: ${options.seconds || '5'}s / ${options.size || '720P'} (${options.ratio || '16:9'})
 - 画面描述: "${options.prompt}"
-- 当前状态: 异步队列排队中 (网关未直接回传视频二进制流)
+- 当前状态: 异步队列渲染超时（120 秒内尚未完成，任务仍在上游队列处理中）
 
-【重要指示】视频生成任务已在网关队列中创建（任务 ID: "${taskId}"）。由于当前服务商网关采用异步队列渲染且未直接提供视频下载直链，本地磁盘尚未落盘真实 .mp4 文件。请向用户如实客观汇报任务 ID 与异步排队状态，【绝对严禁】在回复中臆造或输出任何形式的视频播放器卡片或假链接！`;
+【重要指示】视频生成任务已在网关队列中创建（任务 ID: "${taskId}"）。由于当前服务商网关排队渲染超时，本地磁盘尚未落盘真实 .mp4 文件。请向用户如实客观汇报任务 ID 与超时状态，【严禁】臆造假链接！`;
     }
   }
 
