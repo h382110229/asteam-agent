@@ -672,10 +672,6 @@ ${finalImageUrl ? `- 在线预览 URL: ${finalImageUrl}` : ''}
       fs.mkdirSync(targetDir, { recursive: true });
     }
 
-    try {
-      this.onBeforeWrite?.(targetPath);
-    } catch {}
-
     const videoUrl = resultData.url || resultData.video_url || resultData.output_url || '';
     const taskId = resultData.id || resultData.task_id || resultData.video_id || '';
 
@@ -684,6 +680,9 @@ ${finalImageUrl ? `- 在线预览 URL: ${finalImageUrl}` : ''}
         const downloadRes = await safeFetch(videoUrl);
         if (downloadRes.ok) {
           const arrayBuf = await downloadRes.arrayBuffer();
+          try {
+            this.onBeforeWrite?.(targetPath);
+          } catch {}
           fs.writeFileSync(targetPath, Buffer.from(arrayBuf));
         }
       } catch (dlErr) {
@@ -691,18 +690,31 @@ ${finalImageUrl ? `- 在线预览 URL: ${finalImageUrl}` : ''}
       }
     }
 
-    const fileSize = fs.existsSync(targetPath) ? fs.statSync(targetPath).size : 0;
+    const fileExists = fs.existsSync(targetPath) && fs.statSync(targetPath).size > 0;
+    const fileSize = fileExists ? fs.statSync(targetPath).size : 0;
     const relToWorkspace = this.workspacePath ? path.relative(this.workspacePath, targetPath).replace(/\\/g, '/') : targetPath;
 
-    return `[AI 视频生成任务已提交成功]
+    if (fileExists) {
+      return `[AI 视频生成成功并已落盘]
 - 任务 ID: "${taskId}"
 - 调度模型: ${usedProvider?.model || options.model || 'agnes-video-2.5-flash'}
-- 预定保存路径: "${targetPath}" (相对路径: "${relToWorkspace}")
+- 本地保存路径: "${targetPath}" (相对路径: "${relToWorkspace}")
+- 本地文件大小: ${fileSize} 字节
 - 时长与规格: ${options.seconds || '5'}s / ${options.size || '720P'} (${options.ratio || '16:9'})
 - 画面描述: "${options.prompt}"
-${videoUrl ? `- 视频直链地址: ${videoUrl}\n- 本地文件大小: ${fileSize} 字节` : '- 状态: 后台队列渲染中 (异步任务)'}
+- 视频直链地址: ${videoUrl}
 
-【重要指示】视频生成任务已成功提交。请向用户汇报生成状态、任务 ID 与保存路径。若已获取直链，请在 Markdown 中展示：[视频播放: ${options.prompt.slice(0, 20)}](${videoUrl || relToWorkspace})。`;
+【重要指示】视频已成功生成并下载至本地！请向用户汇报已完成，并在回复的 Markdown 中展示视频播放卡片：[视频播放: ${options.prompt.slice(0, 20)}](${relToWorkspace})。`;
+    } else {
+      return `[AI 视频生成任务已提交至后台队列]
+- 任务 ID: "${taskId}"
+- 调度模型: ${usedProvider?.model || options.model || 'agnes-video-2.5-flash'}
+- 时长与规格: ${options.seconds || '5'}s / ${options.size || '720P'} (${options.ratio || '16:9'})
+- 画面描述: "${options.prompt}"
+- 当前状态: 异步队列排队中 (网关未直接回传视频二进制流)
+
+【重要指示】视频生成任务已在网关队列中创建（任务 ID: "${taskId}"）。由于当前服务商网关采用异步队列渲染且未直接提供视频下载直链，本地磁盘尚未落盘真实 .mp4 文件。请向用户如实客观汇报任务 ID 与异步排队状态，【绝对严禁】在回复中臆造或输出任何形式的视频播放器卡片或假链接！`;
+    }
   }
 
   async textToSpeech(options: {
@@ -1602,11 +1614,19 @@ export function extractToolCall(response: string): { toolName: string; toolArgs:
     return { toolName, toolArgs };
   }
 
-  // 1.5 XML tool tag: <tool:name> ... </tool:name> (with or without <tool_call>)
-  const toolTagMatch = response.match(/<tool:([a-z_]+)>([\s\S]*?)<\/tool:\1>/i);
+  // 1.5 XML tool tag: <tool:name> ... </tool:name> or </tool> or </tool_call> (with or without <tool_call>)
+  const toolTagMatch = response.match(/<tool:([a-z_]+)>([\s\S]*?)(?:<\/(?:tool:\1|tool|tool_call)>|$)/i);
   if (toolTagMatch) {
     const toolName = toolTagMatch[1].trim().toLowerCase();
     const toolArgs = parseToolArgs(toolTagMatch[2].trim());
+    return { toolName, toolArgs };
+  }
+
+  // 1.6 XML tool tag with attribute: <tool name="xxx"> ... </tool>
+  const toolAttrMatch = response.match(/<tool\s+(?:name|call)=["']?([a-z_]+)["']?>([\s\S]*?)(?:<\/tool>|<\/tool_call>|$)/i);
+  if (toolAttrMatch) {
+    const toolName = toolAttrMatch[1].trim().toLowerCase();
+    const toolArgs = parseToolArgs(toolAttrMatch[2].trim());
     return { toolName, toolArgs };
   }
 
@@ -1615,11 +1635,19 @@ export function extractToolCall(response: string): { toolName: string; toolArgs:
   if (toolCallMatch) {
     const inner = toolCallMatch[1].trim();
 
-    // 2.0 Check <tool:name> inside <tool_call>
-    const innerToolTag = inner.match(/<tool:([a-z_]+)>([\s\S]*?)<\/tool:\1>/i);
+    // 2.0 Check <tool:name> inside <tool_call> (supports </tool:name>, </tool>, or unclosed before </tool_call>)
+    const innerToolTag = inner.match(/<tool:([a-z_]+)>([\s\S]*?)(?:<\/(?:tool:\1|tool)>|$)/i);
     if (innerToolTag) {
       const toolName = innerToolTag[1].trim().toLowerCase();
       const toolArgs = parseToolArgs(innerToolTag[2].trim());
+      return { toolName, toolArgs };
+    }
+
+    // 2.0.1 Check <tool name="xxx"> inside <tool_call>
+    const innerToolAttr = inner.match(/<tool\s+(?:name|call)=["']?([a-z_]+)["']?>([\s\S]*?)(?:<\/tool>|$)/i);
+    if (innerToolAttr) {
+      const toolName = innerToolAttr[1].trim().toLowerCase();
+      const toolArgs = parseToolArgs(innerToolAttr[2].trim());
       return { toolName, toolArgs };
     }
 

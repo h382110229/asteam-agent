@@ -586,7 +586,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-2xs animate-in fade-in duration-150 select-none">
+    <div className="fixed inset-x-0 top-10 bottom-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs animate-in fade-in duration-150">
       <div
         style={{ width: isFullScreen ? '100%' : `${drawerWidth}px` }}
         className={`relative flex h-full flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-2xl animate-in slide-in-from-right duration-150 transition-[width] ${
@@ -613,13 +613,13 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         )}
 
         {/* Top Header with Tab Switcher */}
-        <div className="flex h-12 items-center justify-between border-b border-[var(--border)] px-4 bg-[var(--background)]/80">
+        <div className="no-drag flex h-12 items-center justify-between border-b border-[var(--border)] px-4 bg-[var(--background)]/80 select-none">
           <div className="flex items-center space-x-1">
             {/* Tabs */}
             <button
               type="button"
               onClick={() => handleTabSwitch('preview')}
-              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'preview'
                   ? 'bg-[var(--primary)] text-white shadow-xs'
                   : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
@@ -635,7 +635,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             <button
               type="button"
               onClick={() => handleTabSwitch('artifacts')}
-              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'artifacts'
                   ? 'bg-[var(--primary)] text-white shadow-xs'
                   : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
@@ -655,7 +655,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             <button
               type="button"
               onClick={() => handleTabSwitch('diff')}
-              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'diff'
                   ? 'bg-[var(--primary)] text-white shadow-xs'
                   : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
@@ -673,7 +673,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             <button
               type="button"
               onClick={() => handleTabSwitch('timeline')}
-              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'timeline'
                   ? 'bg-[var(--primary)] text-white shadow-xs'
                   : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
@@ -693,7 +693,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             <button
               type="button"
               onClick={() => handleTabSwitch('terminal')}
-              className={`flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
                 currentTab === 'terminal'
                   ? 'bg-[var(--primary)] text-white shadow-xs'
                   : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'

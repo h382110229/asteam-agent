@@ -321,12 +321,23 @@ export function extractPreviewableArtifact(content: string, steps?: AgentStep[])
 
 function renderContentWithMedia(content: string, onOpenPreview?: (data: PreviewData) => void) {
   if (!content) return null;
+
+  // 过滤清洗掉模型输出流中泄漏的原始工具调用标签 (例如 <tool_call>...</tool_call> 或 <tool:xxx>...</tool>)
+  let cleanContent = content
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/<tool:[a-z_]+>[\s\S]*?<\/(?:tool:[a-z_]+|tool)>/gi, '')
+    .replace(/<tool\s+(?:name|call)=["']?[a-z_]+["']?>[\s\S]*?<\/tool>/gi, '')
+    .replace(/```(?:json:)?tool:[a-z_]+\s*[\s\S]*?```/gi, '')
+    .trim();
+
+  if (!cleanContent) return null;
+
   const mediaRegex = /(?:!\[(.*?)\]\(((?:https?:\/\/[^\s)]+|data:image\/[^\s)]+|[^\s)]+\.(?:png|jpg|jpeg|webp|gif|mp4|webm|mov|mp3|wav|m4a|aac|flac|ogg)))\)|\[(?:视频|video|音频|audio|播放音频|语音)?[：:]?\s*(.*?)\]\(((?:https?:\/\/[^\s)]+|[^\s)]+)\.(?:mp4|webm|mov|mp3|wav|m4a|aac|flac|ogg))\))/gi;
 
-  if (!mediaRegex.test(content)) {
+  if (!mediaRegex.test(cleanContent)) {
     return (
       <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-        {content}
+        {cleanContent}
       </div>
     );
   }
@@ -336,11 +347,11 @@ function renderContentWithMedia(content: string, onOpenPreview?: (data: PreviewD
   let lastIdx = 0;
   let match: RegExpExecArray | null;
 
-  while ((match = mediaRegex.exec(content)) !== null) {
+  while ((match = mediaRegex.exec(cleanContent)) !== null) {
     if (match.index > lastIdx) {
       elements.push(
         <div key={`text-${lastIdx}`} className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-          {content.slice(lastIdx, match.index)}
+          {cleanContent.slice(lastIdx, match.index)}
         </div>
       );
     }
@@ -1435,6 +1446,18 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           >
                             <Undo2 className="h-3.5 w-3.5" />
                             <span>{rollingBackId === msg.checkpoint.id ? '正在回滚...' : '⏪ 撤销本轮修改'}</span>
+                          </button>
+                        )}
+
+                        {onOpenTimeline && (
+                          <button
+                            type="button"
+                            onClick={onOpenTimeline}
+                            className="flex items-center space-x-1 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] px-2 py-1 text-xs font-medium transition-all cursor-pointer shadow-2xs"
+                            title="打开右侧工作台查看时光机完整快照库"
+                          >
+                            <History className="h-3.5 w-3.5" />
+                            <span>时光机</span>
                           </button>
                         )}
                       </div>
