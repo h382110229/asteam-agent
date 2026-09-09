@@ -44,9 +44,10 @@ export interface AgentConfig {
   workspacePath?: string | null;
   enabledMcpTools?: string[];
   enabledSkills?: string[];
-  executionMode?: 'auto_edit' | 'plan_only' | 'safe_approval';
+  executionMode?: 'auto_edit' | 'plan_only' | 'safe_approval' | 'swarm';
   fallbackProviders?: FallbackProviderItem[];
   capabilities?: string[];
+  customMcpConfig?: string;
 }
 
 export interface ChatMessage {
@@ -89,6 +90,7 @@ export interface AgentEventCallbacks {
   onQuestion?: (data: InteractiveQuestionData) => void;
   onTerminalData?: (data: TerminalDataEvent) => void;
   onCheckpoint?: (checkpoint: any) => void;
+  onSwarmState?: (state: any) => void;
 }
 
 interface ActiveExecution {
@@ -192,7 +194,7 @@ export function getSystemDesktopDir(): string {
 }
 
 // 1. Workspace Native Tools
-class WorkspaceTools {
+export class WorkspaceTools {
   constructor(
     private workspacePath: string,
     private isHostMode: boolean = false,
@@ -1379,7 +1381,7 @@ async function executeSingleProviderCall(
   return fullText;
 }
 
-async function callLLMStream(
+export async function callLLMStream(
   config: AgentConfig,
   messages: ChatMessage[],
   abortSignal: AbortSignal,
@@ -1505,7 +1507,7 @@ async function callLLMStream(
 }
 
 // Robust JSON and Tool Args Extractor (handles Windows paths, unescaped newlines/quotes)
-function parseToolArgs(raw: string): any {
+export function parseToolArgs(raw: string): any {
   if (!raw || !raw.trim()) return {};
   const trimmed = raw.trim();
 
@@ -1770,6 +1772,29 @@ export async function runHarnessAgent(
         callbacks.onCheckpoint?.(currentCkpt);
       }
     }, config);
+
+    // 蜂群多智能体协同流水线调度 (Multi-Agent Swarm Orchestration)
+    if (config.executionMode === 'swarm') {
+      const { SwarmOrchestrator } = await import('./swarm-orchestrator');
+      const orchestrator = new SwarmOrchestrator(
+        sessionId,
+        config,
+        history,
+        callbacks,
+        abortController.signal,
+        effectiveWorkspace,
+        hasWorkspace
+      );
+      const swarmSummary = await orchestrator.executePipeline();
+
+      const turnCkpt = checkpointManager.finishTurnCheckpoint(sessionId);
+      if (turnCkpt && (turnCkpt.modifiedFiles.length > 0 || turnCkpt.newFiles.length > 0)) {
+        callbacks.onCheckpoint?.(turnCkpt);
+      }
+
+      callbacks.onDone(swarmSummary);
+      return;
+    }
 
     const initialPlanSteps: AgentStep[] = [
       { id: 'step-1', title: isHostMode ? '分析宿主任务与操作意图' : '分析工作区与任务意图', status: 'running' },

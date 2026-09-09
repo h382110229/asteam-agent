@@ -34,15 +34,17 @@ import {
   FolderOpen,
   Video,
   Volume2,
-  Gauge
+  Gauge,
+  Users
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
 import { LiveTerminalCard } from './LiveTerminalCard';
-import { ExecutionMode, CheckpointItem, WorkspaceFileItem, ProjectRulesInfo } from '../types/project';
+import { ExecutionMode, CheckpointItem, WorkspaceFileItem, ProjectRulesInfo, SwarmState } from '../types/project';
 import { PreviewData } from './WorkspaceDrawer';
 import { inferModelCapabilities } from '../config/providers';
 import { ConfirmModal } from './ConfirmModal';
+import { SwarmDashboard } from './SwarmDashboard';
 
 export interface FileAttachment {
   name: string;
@@ -59,6 +61,7 @@ export interface ChatMessageItem {
   steps?: AgentStep[];
   question?: QuestionCardData;
   checkpoint?: CheckpointItem;
+  swarmState?: SwarmState;
   timestamp: number;
   durationMs?: number;
   estimatedTokens?: number;
@@ -87,6 +90,7 @@ interface ChatAreaProps {
 }
 
 const SLASH_COMMANDS = [
+  { cmd: '/swarm', title: '多智能体协同蜂群 (Swarm)', desc: '启动 Architect + Coder + Tester + Reviewer 4 角色分工协同研发' },
   { cmd: '/compact', title: '智能浓缩长会话 (Compact)', desc: '提炼历史会话核心事实与代码产物，释放 Token 窗口与降低延迟' },
   { cmd: '/remember', title: '长期记忆沉淀 (Remember)', desc: '将当前架构约定或偏好终生持久化至项目/全局 Memory Bank' },
   { cmd: '/plan', title: '深度任务规划 (Plan)', desc: '分析需求并生成分步执行计划，不进行破坏性修改' },
@@ -821,7 +825,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     let mode = executionMode;
     let textToSend = trimmed;
 
-    if (trimmed.startsWith('/plan')) {
+    if (trimmed.startsWith('/swarm')) {
+      mode = 'swarm';
+      textToSend = trimmed.replace('/swarm', '').trim() || '启动多智能体协同蜂群，由 Architect、Coder、Tester 与 Reviewer 分工协同完成当前目标。';
+    } else if (trimmed.startsWith('/plan')) {
       mode = 'plan_only';
       textToSend = trimmed.replace('/plan', '').trim() || '请为当前工作区或需求制定详细的任务架构与实施规划。';
     } else if (trimmed.startsWith('/review')) {
@@ -1271,8 +1278,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </details>
                 )}
 
+                {/* Swarm Multi-Agent Collaboration Dashboard */}
+                {msg.swarmState && (
+                  <SwarmDashboard
+                    swarmState={msg.swarmState}
+                    isRunning={isRunning && msg.id === messages[messages.length - 1]?.id}
+                  />
+                )}
+
                 {/* deepseek-harness Planning & Execution Trajectory Tree */}
-                {msg.steps && msg.steps.length > 0 && (
+                {msg.steps && msg.steps.length > 0 && !msg.swarmState && (
                   <AgentTrajectory
                     steps={msg.steps}
                     sessionId={activeSessionId}
@@ -1802,6 +1817,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   title="只读规划模式：仅输出步骤设计方案，不修改本地文件"
                 >
                   只读规划 (Plan)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExecutionMode('swarm')}
+                  className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${
+                    executionMode === 'swarm'
+                      ? 'bg-teal-600 text-white shadow-2xs dark:bg-teal-500'
+                      : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                  title="多智能体协同蜂群模式：Architect + Coder + Tester + Reviewer 4 角色并发分工协同"
+                >
+                  <Users className="h-3 w-3" />
+                  <span>蜂群协同 (Swarm)</span>
                 </button>
               </div>
 

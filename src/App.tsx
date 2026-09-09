@@ -304,6 +304,10 @@ export const App: React.FC = () => {
           if (payload.checkpoint) {
             lastMsg.checkpoint = payload.checkpoint;
           }
+        } else if (type === 'swarmState') {
+          if (payload.state) {
+            lastMsg.swarmState = payload.state;
+          }
         } else if (type === 'done') {
           // 若上游网关或模型将全部输出归入 reasoning_content (thought)，导致正文 content 为空，自动提拔为正文
           if (!lastMsg.content?.trim() && lastMsg.thought?.trim()) {

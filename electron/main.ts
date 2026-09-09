@@ -603,6 +603,12 @@ function setupIPC() {
           type: 'checkpoint',
           payload: { sessionId, checkpoint }
         });
+      },
+      onSwarmState: (state) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'swarmState',
+          payload: { sessionId, state }
+        });
       }
     });
   });
