@@ -88,6 +88,16 @@ export interface ElectronAPI {
   }>>;
   reloadMcpServers: (customMcpConfig: string, workspacePath: string | null) => Promise<any[]>;
   testMcpServer: (name: string, config: any, workspacePath: string | null) => Promise<{ success: boolean; tools?: any[]; error?: string }>;
+
+  // Autonomous Scheduler & Runner (v1.6.0)
+  getScheduledTasks: (workspacePath?: string | null) => Promise<any[]>;
+  saveScheduledTask: (taskData: any) => Promise<any>;
+  deleteScheduledTask: (taskId: string) => Promise<boolean>;
+  toggleScheduledTask: (taskId: string, enabled: boolean) => Promise<any>;
+  runScheduledTaskNow: (taskId: string, workspacePath?: string) => Promise<any>;
+  getInspectionReports: (workspacePath: string | null) => Promise<any[]>;
+  readInspectionReport: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  onSchedulerEvent: (callback: (data: any) => void) => () => void;
 }
 
 declare global {

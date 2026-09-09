@@ -157,6 +157,11 @@ export const App: React.FC = () => {
     setIsDrawerOpen(true);
   }, []);
 
+  const handleOpenScheduler = useCallback(() => {
+    setDrawerTab('scheduler');
+    setIsDrawerOpen(true);
+  }, []);
+
   const refreshGitStatus = useCallback(async () => {
     if (!currentWorkspacePath || !window.electronAPI) {
       setGitStatus(null);
@@ -749,6 +754,7 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           terminalOutputs={terminalOutputs}
           onOpenRules={handleOpenRules}
           onCompactSession={() => handleCompactSession(activeSessionId)}
+          onOpenScheduler={handleOpenScheduler}
         />
       </div>
 

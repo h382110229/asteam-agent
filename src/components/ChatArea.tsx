@@ -87,10 +87,12 @@ interface ChatAreaProps {
   terminalOutputs?: Record<string, string>;
   onOpenRules?: () => void;
   onCompactSession?: () => void;
+  onOpenScheduler?: () => void;
 }
 
 const SLASH_COMMANDS = [
   { cmd: '/swarm', title: '多智能体协同蜂群 (Swarm)', desc: '启动 Architect + Coder + Tester + Reviewer 4 角色分工协同研发' },
+  { cmd: '/schedule', title: '后台自主巡检调度器 (Scheduler)', desc: '打开代码库自动化体检、依赖安全扫描与长程任务调度看板' },
   { cmd: '/compact', title: '智能浓缩长会话 (Compact)', desc: '提炼历史会话核心事实与代码产物，释放 Token 窗口与降低延迟' },
   { cmd: '/remember', title: '长期记忆沉淀 (Remember)', desc: '将当前架构约定或偏好终生持久化至项目/全局 Memory Bank' },
   { cmd: '/plan', title: '深度任务规划 (Plan)', desc: '分析需求并生成分步执行计划，不进行破坏性修改' },
@@ -495,7 +497,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   activeSessionId,
   terminalOutputs,
   onOpenRules,
-  onCompactSession
+  onCompactSession,
+  onOpenScheduler
 }) => {
   const [input, setInput] = useState('');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
@@ -816,6 +819,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }
     if (trimmed === '/terminal') {
       onOpenTerminal?.();
+      setInput('');
+      setShowSlashMenu(false);
+      setShowMentionMenu(false);
+      return;
+    }
+    if (trimmed === '/schedule') {
+      onOpenScheduler?.();
       setInput('');
       setShowSlashMenu(false);
       setShowMentionMenu(false);

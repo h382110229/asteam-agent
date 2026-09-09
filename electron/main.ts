@@ -9,6 +9,7 @@ import { memoryManager } from './memory-manager';
 import { rulesManager } from './rules-manager';
 import { checkpointManager } from './checkpoint-manager';
 import { mcpManager } from './mcp-manager';
+import { schedulerManager } from './scheduler-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -624,6 +625,35 @@ function setupIPC() {
   ipcMain.handle('agent:sendTerminalInput', (_event, { sessionId, input }: { sessionId: string; input: string }) => {
     return submitTerminalInput(sessionId, input);
   });
+
+  // Autonomous Scheduler IPC (v1.6.0)
+  ipcMain.handle('scheduler:getTasks', async (_event, workspacePath?: string | null) => {
+    return schedulerManager.getTasks(workspacePath);
+  });
+
+  ipcMain.handle('scheduler:saveTask', async (_event, taskData) => {
+    return schedulerManager.saveTask(taskData);
+  });
+
+  ipcMain.handle('scheduler:deleteTask', async (_event, taskId: string) => {
+    return schedulerManager.deleteTask(taskId);
+  });
+
+  ipcMain.handle('scheduler:toggleTask', async (_event, { taskId, enabled }: { taskId: string; enabled: boolean }) => {
+    return schedulerManager.toggleTask(taskId, enabled);
+  });
+
+  ipcMain.handle('scheduler:runNow', async (_event, { taskId, workspacePath }: { taskId: string; workspacePath?: string }) => {
+    return await schedulerManager.runNow(taskId, workspacePath);
+  });
+
+  ipcMain.handle('scheduler:getReports', async (_event, workspacePath: string | null) => {
+    return schedulerManager.getReports(workspacePath);
+  });
+
+  ipcMain.handle('scheduler:readReport', async (_event, filePath: string) => {
+    return schedulerManager.readReport(filePath);
+  });
 }
 
 // App lifecycle
@@ -645,6 +675,11 @@ if (!gotTheLock) {
     registerShortcuts();
     setupIPC();
 
+    schedulerManager.start();
+    schedulerManager.onEvent((payload) => {
+      mainWindow?.webContents.send('scheduler:event', payload);
+    });
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createWindow();
@@ -659,6 +694,7 @@ if (!gotTheLock) {
   });
 
   app.on('will-quit', () => {
+    schedulerManager.stop();
     globalShortcut.unregisterAll();
   });
 }

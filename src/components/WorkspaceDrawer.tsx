@@ -31,7 +31,8 @@ import {
   AlertCircle,
   Image as ImageIcon,
   Video,
-  Volume2
+  Volume2,
+  CalendarClock
 } from 'lucide-react';
 import { GitStatusSummary, GitFileStatus, CheckpointItem } from '../types/project';
 import { ChatMessageItem, extractPreviewableArtifact } from './ChatArea';
@@ -40,8 +41,9 @@ import { MermaidPreview } from './preview/MermaidPreview';
 import { SvgPreview } from './preview/SvgPreview';
 import { LiveTerminalCard } from './LiveTerminalCard';
 import { ConfirmModal } from './ConfirmModal';
+import { SchedulerTab } from './SchedulerTab';
 
-export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal';
+export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal' | 'scheduler';
 
 export interface PreviewData {
   type: 'html' | 'mermaid' | 'svg' | 'image' | 'video' | 'audio';
@@ -759,6 +761,19 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             >
               <Terminal className="h-3.5 w-3.5" />
               <span>控制台大屏</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleTabSwitch('scheduler')}
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                currentTab === 'scheduler'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+              }`}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              <span>自主巡检</span>
             </button>
           </div>
 
@@ -1482,6 +1497,26 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               title="ASTeam 全局交互式控制台"
               liveOutput={terminalOutput}
               isExpandable={false}
+            />
+          </div>
+        )}
+
+        {/* Tab 6: Background Autonomous Scheduler & Runner */}
+        {currentTab === 'scheduler' && (
+          <div className="flex-1 overflow-hidden">
+            <SchedulerTab
+              workspacePath={workspacePath}
+              onPreviewReport={(title, content, filePath) => {
+                if (onSelectPreview) {
+                  onSelectPreview({
+                    type: 'html',
+                    title,
+                    content,
+                    filePath
+                  });
+                  handleTabSwitch('preview');
+                }
+              }}
             />
           </div>
         )}

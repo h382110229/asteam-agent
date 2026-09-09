@@ -77,6 +77,16 @@ export interface ElectronAPI {
   getMcpServersStatus: () => Promise<any[]>;
   reloadMcpServers: (customMcpConfig: string, workspacePath: string | null) => Promise<any[]>;
   testMcpServer: (name: string, config: any, workspacePath: string | null) => Promise<{ success: boolean; tools?: any[]; error?: string }>;
+
+  // Autonomous Scheduler & Runner (v1.6.0)
+  getScheduledTasks: (workspacePath?: string | null) => Promise<any[]>;
+  saveScheduledTask: (taskData: any) => Promise<any>;
+  deleteScheduledTask: (taskId: string) => Promise<boolean>;
+  toggleScheduledTask: (taskId: string, enabled: boolean) => Promise<any>;
+  runScheduledTaskNow: (taskId: string, workspacePath?: string) => Promise<any>;
+  getInspectionReports: (workspacePath: string | null) => Promise<any[]>;
+  readInspectionReport: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  onSchedulerEvent: (callback: (data: any) => void) => () => void;
 }
 
 const api: ElectronAPI = {
@@ -149,7 +159,23 @@ const api: ElectronAPI = {
   // MCP Management (v1.5.0)
   getMcpServersStatus: () => ipcRenderer.invoke('mcp:getServersStatus'),
   reloadMcpServers: (customMcpConfig, workspacePath) => ipcRenderer.invoke('mcp:reloadServers', { customMcpConfig, workspacePath }),
-  testMcpServer: (name, config, workspacePath) => ipcRenderer.invoke('mcp:testServer', { name, config, workspacePath })
+  testMcpServer: (name, config, workspacePath) => ipcRenderer.invoke('mcp:testServer', { name, config, workspacePath }),
+
+  // Autonomous Scheduler & Runner (v1.6.0)
+  getScheduledTasks: (workspacePath) => ipcRenderer.invoke('scheduler:getTasks', workspacePath),
+  saveScheduledTask: (taskData) => ipcRenderer.invoke('scheduler:saveTask', taskData),
+  deleteScheduledTask: (taskId) => ipcRenderer.invoke('scheduler:deleteTask', taskId),
+  toggleScheduledTask: (taskId, enabled) => ipcRenderer.invoke('scheduler:toggleTask', { taskId, enabled }),
+  runScheduledTaskNow: (taskId, workspacePath) => ipcRenderer.invoke('scheduler:runNow', { taskId, workspacePath }),
+  getInspectionReports: (workspacePath) => ipcRenderer.invoke('scheduler:getReports', workspacePath),
+  readInspectionReport: (filePath) => ipcRenderer.invoke('scheduler:readReport', filePath),
+  onSchedulerEvent: (callback) => {
+    const subscription = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('scheduler:event', subscription);
+    return () => {
+      ipcRenderer.removeListener('scheduler:event', subscription);
+    };
+  }
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);
