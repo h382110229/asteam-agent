@@ -33,7 +33,8 @@ import {
   Layers,
   FolderOpen,
   Video,
-  Volume2
+  Volume2,
+  Gauge
 } from 'lucide-react';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
@@ -82,9 +83,12 @@ interface ChatAreaProps {
   activeSessionId?: string;
   terminalOutputs?: Record<string, string>;
   onOpenRules?: () => void;
+  onCompactSession?: () => void;
 }
 
 const SLASH_COMMANDS = [
+  { cmd: '/compact', title: '智能浓缩长会话 (Compact)', desc: '提炼历史会话核心事实与代码产物，释放 Token 窗口与降低延迟' },
+  { cmd: '/remember', title: '长期记忆沉淀 (Remember)', desc: '将当前架构约定或偏好终生持久化至项目/全局 Memory Bank' },
   { cmd: '/plan', title: '深度任务规划 (Plan)', desc: '分析需求并生成分步执行计划，不进行破坏性修改' },
   { cmd: '/preview', title: '多模态产物实时预览', desc: '在右侧工作台开启网页/架构图/SVG实时预览' },
   { cmd: '/diff', title: '查看 Git 变更 Diff', desc: '唤起右侧 Git 代码变更对比抽屉' },
@@ -486,7 +490,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenTimeline,
   activeSessionId,
   terminalOutputs,
-  onOpenRules
+  onOpenRules,
+  onCompactSession
 }) => {
   const [input, setInput] = useState('');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
@@ -499,6 +504,34 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     isOpen: boolean;
     checkpoint: CheckpointItem | null;
   }>({ isOpen: false, checkpoint: null });
+
+  // Token & Context Window Monitor calculation (v1.5.0)
+  const totalEstimatedTokens = useMemo(() => {
+    return messages.reduce((acc, m) => {
+      const contentTokens = Math.round((m.content?.length || 0) * 0.75);
+      const thoughtTokens = Math.round((m.thought?.length || 0) * 0.5);
+      return acc + contentTokens + thoughtTokens;
+    }, 0);
+  }, [messages]);
+
+  const contextLimit = 128000;
+  const usagePercent = Math.min(100, Math.round((totalEstimatedTokens / contextLimit) * 100));
+
+  const formatTokenCount = (tokens: number) => {
+    if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
+    if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
+    return `${tokens}`;
+  };
+
+  const tokenBadgeClass =
+    usagePercent > 75
+      ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+      : usagePercent > 50
+      ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30'
+      : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30';
+
+  const progressBarColorClass =
+    usagePercent > 75 ? 'bg-rose-500' : usagePercent > 50 ? 'bg-amber-500' : 'bg-emerald-500';
 
   // @ Unified Context Mention 状态 (@file / @git-diff / @skill)
   const [availableSkills, setAvailableSkills] = useState<any[]>([]);
@@ -1826,7 +1859,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               </span>
             ) : (
               <span className="hidden sm:inline-block text-[10px]">
-                输入 <code>/remember</code> 沉淀记忆 · 输入 <code>@</code> 引用技能 · 支持拖拽/粘贴附件 · Enter 发送
+                输入 <code>/compact</code> 浓缩上下文 · 输入 <code>/remember</code> 沉淀记忆 · 输入 <code>@</code> 引用技能 · 支持拖拽/粘贴附件 · Enter 发送
               </span>
             )}
           </div>
@@ -1914,6 +1947,70 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <Send className="h-3.5 w-3.5" />
               </button>
             )}
+          </div>
+        </div>
+
+        {/* 底部 Token 水位与上下文监控看板 (v1.5.0) */}
+        <div className="flex items-center justify-between px-4 py-1.5 border-t border-[var(--border)] bg-[var(--background)]/90 text-[10px] text-[var(--muted-foreground)] select-none shrink-0">
+          {/* Left: Model & Provider & Workspace */}
+          <div className="flex items-center space-x-2">
+            <span className="flex items-center space-x-1 font-mono font-medium text-[var(--foreground)]">
+              <Cpu className="h-3 w-3 text-[var(--primary)]" />
+              <span>{currentModel || 'Auto'}</span>
+            </span>
+            <span className="text-[var(--border)]">|</span>
+            <span className="truncate max-w-[130px]" title={`模型服务商: ${providerName}`}>
+              {providerName || 'LLMAPI'}
+            </span>
+            {workspacePath && (
+              <>
+                <span className="text-[var(--border)]">|</span>
+                <span className="truncate max-w-[150px] text-[var(--muted-foreground)]" title={workspacePath}>
+                  📁 {workspacePath.split(/[\\/]/).pop()}
+                </span>
+              </>
+            )}
+          </div>
+
+          {/* Right: Token Monitor & /compact trigger */}
+          <div className="flex items-center space-x-3">
+            <div
+              className="flex items-center space-x-1.5 cursor-help"
+              title={`会话预估总消耗: ~${totalEstimatedTokens.toLocaleString()} Tokens\n模型上下文窗口上限: ${contextLimit.toLocaleString()} Tokens\n当前水位占比: ${usagePercent}%`}
+            >
+              <Gauge className="h-3 w-3 text-[var(--muted-foreground)]" />
+              <span>上下文:</span>
+              <span className="font-mono font-medium text-[var(--foreground)]">
+                {formatTokenCount(totalEstimatedTokens)} / {formatTokenCount(contextLimit)}
+              </span>
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold ${tokenBadgeClass}`}>
+                {usagePercent}%
+              </span>
+              {/* Slim progress bar */}
+              <div className="w-14 h-1.5 bg-[var(--border)] rounded-full overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-300 ${progressBarColorClass}`}
+                  style={{ width: `${Math.min(100, Math.max(2, usagePercent))}%` }}
+                />
+              </div>
+            </div>
+
+            <span className="text-[var(--border)]">|</span>
+
+            {/* Quick /compact Action Button */}
+            <button
+              type="button"
+              onClick={onCompactSession}
+              title="智能浓缩会话前序交互，提炼核心事实与关键产物，释放 Token 窗口空间"
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded transition-all cursor-pointer ${
+                usagePercent > 70
+                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25 font-semibold animate-pulse'
+                  : 'hover:bg-[var(--border)] text-[var(--foreground)] hover:text-[var(--primary)]'
+              }`}
+            >
+              <Sparkles className="h-2.5 w-2.5 text-amber-500" />
+              <span>{usagePercent > 70 ? '⚠️ 立即浓缩 (/compact)' : '浓缩 (/compact)'}</span>
+            </button>
           </div>
         </div>
       </div>
