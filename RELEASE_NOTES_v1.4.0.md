@@ -67,7 +67,11 @@
 | **1** | 便携版打开黑屏或报错：<br>`useCallback is not defined` | `WorkspaceDrawer.tsx` 中遗漏导入 `useCallback`；原打包脚本仅执行 `vite build`，Vite 在部分 JSX 分支未作严苛符号检查导致脏代码溜入发布包 | 1. 补齐组件导入并修复所有类型警告；<br>2. 在 `package.json` 的 `build:renderer` 中引入 **`tsc --noEmit && vite build` 强卡点门禁**，任何符号或语法异常直接阻断打包构建 |
 | **2** | 规约入口感知缺失：<br>顶部工具栏看不到规约生效中 | 规约徽章原先仅在长任务执行动态看板中显示，且测试项目根目录未初始化 `.asteamrules` 文件 | 1. 在 `TitleBar` 顶栏增加常驻胶囊（已配置显示绿色高亮，未配置显示虚线引导）；<br>2. 新建 `ProjectRulesModal` 弹窗，支持 3 套预设一键写入落盘；<br>3. 初始化标准 `.asteamrules` 文件 |
 | **3** | 请求模型报错：<br>`fetch failed (UND_ERR_CONNECT_TIMEOUT)` | Node.js 全局 `fetch` (undici) 直连 Cloudflare CDN 时优先尝试 IPv6 产生 10 秒超时，且无法自动继承 Windows 系统网络代理 | 将主进程所有向外部 LLM 接口发起的网络请求全面切换为 **Chromium 原生 `net.fetch`**，自动继承系统代理与 Happy Eyeballs 双栈极速并发，握手缩短至 **<1秒** |
-| **4** | 视频生成工具调用未执行：<br>文本泄漏为 XML 标签 `<tool:generate_video>` | `Auto` 大脑输出了 XML 变体格式 `<tool_call><tool:generate_video>{...}</tool:generate_video></tool_call>`，原正则仅支持 Markdown 代码块 | 升级 `extractToolCall` 匹配引擎，兼容 XML 标签、标准 JSON 与 Markdown 代码块等全部变体；解析后无缝触发 `generateVideo` 下载与播放 |
+| **4** | 视频生成工具调用未执行：<br>文本泄漏为 XML 标签 `<tool:generate_video>` | `Auto` 大脑输出了 XML 变体格式 `<tool_call><tool:generate_video>{...}</tool:generate_video></tool_call>`，原正则仅支持 Markdown 代码块 | 升级 `extractToolCall` 匹配引擎，兼容 XML 闭合标签 `</tool>` 与 `</tool:name>` 等全部变体；前端过滤原始标签，无缝触发工具执行 |
+| **5** | 工作台抽屉 Tab 切换无法点击：<br>鼠标点击被误判为拖拽窗口 | TitleBar 顶栏设置了 `-webkit-app-region: drag` 覆盖顶部 40px，右侧抽屉全屏覆盖导致 Tab 按钮进入拖拽感应区被操作系统拦截 | 抽屉容器下移至 `top-10` (40px) 顶栏下方，且为 Tab 容器及每个按钮显式增加 `no-drag` 样式，消除点击拦截 |
+| **6** | 视频生成任务仅返回 task_id：<br>缺少下载直链且货架展示假预览 | 服务商网关原先仅开放 `POST /v1/videos` 任务提交，缺少查询路由；前端在未落盘时误将排队任务推送为货架制品 | 1. 推动网关侧上线 `GET /v1/videos/{task_id}` 查询接口；<br>2. 客户端增加后台自动轮询协程（4 秒轮询，最长 120 秒）；<br>3. 任务完成后自动拉取真实 `.mp4` 文件写入本地磁盘并更新货架 |
+| **7** | 原生 `window.confirm` 弹窗风格脱节：<br>弹出 Win32 经典白底消息框 | 撤销修改、还原快照与放弃变更处直接调用了原生浏览器 confirm 方法，与现代 UI 体系冲突 | 全新开发 `ConfirmModal.tsx` 现代弹窗组件（毛玻璃遮罩、圆角阴影、受影响文件变动清单可视化胶囊、Esc 响应），全局统一替换 |
+| **8** | Agent 出现代码修改文本幻觉：<br>未找到文件却声称修改完成 | 当 `view_file` 失败时部分模型会跳过 `write_file` 并直接在总结中臆造修改成功 | 1. 在底层 System Prompt 中注入防幻觉铁律，严禁未写入时虚假汇报；<br>2. `CheckpointManager` 严格按实际落盘变动数结算，避免空快照触发 |
 
 ---
 
