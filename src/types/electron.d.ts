@@ -70,6 +70,24 @@ export interface ElectronAPI {
   // Shadow Checkpoint & Rollback (v1.4.0)
   listCheckpoints: (workspacePath: string | null, sessionId?: string) => Promise<any[]>;
   rollbackCheckpoint: (checkpointId: string, workspacePath: string | null) => Promise<{ success: boolean; message: string; restoredFiles: string[]; removedFiles: string[] }>;
+
+  // MCP Management (v1.5.0)
+  getMcpServersStatus: () => Promise<Array<{
+    name: string;
+    status: 'connected' | 'connecting' | 'error' | 'disconnected';
+    transportType: 'stdio' | 'sse';
+    tools: Array<{
+      serverName: string;
+      name: string;
+      fullName: string;
+      description: string;
+      parameters: Record<string, any>;
+    }>;
+    error?: string;
+    lastConnectedAt?: number;
+  }>>;
+  reloadMcpServers: (customMcpConfig: string, workspacePath: string | null) => Promise<any[]>;
+  testMcpServer: (name: string, config: any, workspacePath: string | null) => Promise<{ success: boolean; tools?: any[]; error?: string }>;
 }
 
 declare global {

@@ -8,6 +8,7 @@ import { storageHub } from './storage-hub';
 import { memoryManager } from './memory-manager';
 import { rulesManager } from './rules-manager';
 import { checkpointManager } from './checkpoint-manager';
+import { mcpManager } from './mcp-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -403,6 +404,19 @@ function setupIPC() {
 
   ipcMain.handle('checkpoint:rollback', async (_event, { checkpointId, workspacePath }: { checkpointId: string; workspacePath: string | null }) => {
     return await checkpointManager.rollbackCheckpoint(checkpointId, workspacePath);
+  });
+
+  // Model Context Protocol (MCP) IPC - v1.5.0
+  ipcMain.handle('mcp:getServersStatus', async () => {
+    return mcpManager.getServersStatus();
+  });
+
+  ipcMain.handle('mcp:reloadServers', async (_event, { customMcpConfig, workspacePath }: { customMcpConfig: string; workspacePath: string | null }) => {
+    return await mcpManager.reloadServers(customMcpConfig, workspacePath);
+  });
+
+  ipcMain.handle('mcp:testServer', async (_event, { name, config, workspacePath }: { name: string; config: any; workspacePath: string | null }) => {
+    return await mcpManager.testServer(name, config, workspacePath);
   });
 
   // Multimodal Preview Pop-out Window IPC

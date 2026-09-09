@@ -37,7 +37,12 @@ import {
   ArrowRightLeft,
   ShieldAlert,
   Save,
-  Check
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Play,
+  Zap,
+  Activity
 } from 'lucide-react';
 import {
   PROVIDER_PRESETS,
@@ -120,6 +125,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [skillInstallMsg, setSkillInstallMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // MCP Servers State (v1.5.0)
+  const [mcpServersStatus, setMcpServersStatus] = useState<any[]>([]);
+  const [isReloadingMcp, setIsReloadingMcp] = useState(false);
+  const [mcpFeedbackMsg, setMcpFeedbackMsg] = useState<{ success: boolean; text: string } | null>(null);
+  const [expandedMcpServer, setExpandedMcpServer] = useState<string | null>(null);
+  const [testingMcpServer, setTestingMcpServer] = useState<string | null>(null);
+
   const refreshSkills = async () => {
     if (window.electronAPI) {
       try {
@@ -154,11 +166,99 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const refreshMcpStatus = async () => {
+    if (window.electronAPI?.getMcpServersStatus) {
+      try {
+        const statuses = await window.electronAPI.getMcpServersStatus();
+        setMcpServersStatus(statuses || []);
+      } catch (err: any) {
+        console.error('Failed to get MCP status:', err);
+      }
+    }
+  };
+
+  const handleReloadMcpServers = async () => {
+    setIsReloadingMcp(true);
+    setMcpFeedbackMsg(null);
+    try {
+      if (window.electronAPI?.reloadMcpServers) {
+        const result = await window.electronAPI.reloadMcpServers(form.customMcpConfig, workspacePath || null);
+        setMcpServersStatus(result || []);
+        const connectedCount = (result || []).filter((s: any) => s.status === 'connected').length;
+        setMcpFeedbackMsg({
+          success: true,
+          text: `MCP 服务已同步：配置了 ${result?.length || 0} 个服务，成功激活 ${connectedCount} 个。`
+        });
+      }
+    } catch (err: any) {
+      setMcpFeedbackMsg({
+        success: false,
+        text: `重载失败: ${err.message}`
+      });
+    } finally {
+      setIsReloadingMcp(false);
+    }
+  };
+
+  const handleTestSingleServer = async (serverName: string, config: any) => {
+    setTestingMcpServer(serverName);
+    try {
+      if (window.electronAPI?.testMcpServer) {
+        const res = await window.electronAPI.testMcpServer(serverName, config, workspacePath || null);
+        if (res.success) {
+          alert(`✅ [${serverName}] 连接测试成功！\n探测到 ${res.tools?.length || 0} 个可用工具:\n${(res.tools || []).map((t: any) => `• ${t.name}: ${t.description}`).join('\n')}`);
+          refreshMcpStatus();
+        } else {
+          alert(`❌ [${serverName}] 连接测试失败:\n${res.error || '未知异常'}`);
+        }
+      }
+    } catch (e: any) {
+      alert(`❌ 测试异常: ${e.message}`);
+    } finally {
+      setTestingMcpServer(null);
+    }
+  };
+
+  const insertMcpTemplate = (templateType: 'sqlite' | 'github' | 'sse') => {
+    let base: any = {};
+    try {
+      base = JSON.parse(form.customMcpConfig || '{"mcpServers":{}}');
+    } catch {
+      base = { mcpServers: {} };
+    }
+    if (!base.mcpServers) base.mcpServers = {};
+
+    if (templateType === 'sqlite') {
+      base.mcpServers['sqlite'] = {
+        command: 'uvx',
+        args: ['mcp-server-sqlite', '--db-path', './data.db']
+      };
+    } else if (templateType === 'github') {
+      base.mcpServers['github'] = {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        env: {
+          GITHUB_PERSONAL_ACCESS_TOKEN: 'your_github_token_here'
+        }
+      };
+    } else if (templateType === 'sse') {
+      base.mcpServers['remote_service'] = {
+        url: 'http://localhost:8000/sse'
+      };
+    }
+
+    setForm(prev => ({
+      ...prev,
+      customMcpConfig: JSON.stringify(base, null, 2)
+    }));
+  };
+
   useEffect(() => {
     if (isOpen) {
       refreshSkills();
       refreshStorageStats();
       refreshMemory();
+      refreshMcpStatus();
     }
   }, [isOpen, workspacePath]);
 
@@ -511,6 +611,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSave = () => {
     onSave(form);
+    if (window.electronAPI?.reloadMcpServers) {
+      window.electronAPI.reloadMcpServers(form.customMcpConfig, workspacePath || null).catch(() => {});
+    }
     onClose();
   };
 
@@ -1381,22 +1484,240 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* 3. Custom MCP Servers JSON Config */}
-              <div className="space-y-1.5 pt-2 border-t border-[var(--border)]">
+              {/* 3. Custom MCP Servers Management (v1.5.0) */}
+              <div className="space-y-3 pt-3 border-t border-[var(--border)]">
                 <div className="flex items-center justify-between">
-                  <label className="font-semibold text-[var(--foreground)] flex items-center space-x-1.5">
-                    <Code2 className="h-3.5 w-3.5 text-[var(--primary)]" />
-                    <span>自定义外部 MCP 服务器配置 (mcpServers)</span>
-                  </label>
-                  <span className="text-[10px] text-[var(--muted-foreground)]">兼容 Claude Desktop 规范</span>
+                  <div>
+                    <label className="font-semibold text-[var(--foreground)] flex items-center space-x-1.5">
+                      <Code2 className="h-3.5 w-3.5 text-[var(--primary)]" />
+                      <span>外部标准 MCP 服务器配置 (mcpServers)</span>
+                    </label>
+                    <p className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+                      基于 Anthropic 官方标准 <code>@modelcontextprotocol/sdk</code> · 原生支持 Stdio (子进程) 与 SSE (远程网络)
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={handleReloadMcpServers}
+                      disabled={isReloadingMcp}
+                      className="flex items-center space-x-1 px-2.5 py-1 text-[11px] font-medium bg-[var(--primary)] text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50 shadow-sm"
+                    >
+                      <RefreshCw className={`h-3 w-3 ${isReloadingMcp ? 'animate-spin' : ''}`} />
+                      <span>{isReloadingMcp ? '正在探活...' : '重载并同步连接'}</span>
+                    </button>
+                  </div>
                 </div>
-                <textarea
-                  rows={3}
-                  value={form.customMcpConfig}
-                  onChange={e => setForm(prev => ({ ...prev, customMcpConfig: e.target.value }))}
-                  placeholder={`{\n  "mcpServers": {}\n}`}
-                  className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] p-2.5 text-[11px] font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
-                />
+
+                {/* Templates Quick Insert */}
+                <div className="flex items-center justify-between bg-[var(--background)]/60 rounded-md px-2.5 py-1.5 border border-[var(--border)] text-[10px]">
+                  <span className="text-[var(--muted-foreground)] flex items-center space-x-1">
+                    <Zap className="h-3 w-3 text-amber-500" />
+                    <span>快速插入常用模版:</span>
+                  </span>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      type="button"
+                      onClick={() => insertMcpTemplate('sqlite')}
+                      className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                    >
+                      + SQLite (uvx)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMcpTemplate('github')}
+                      className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                    >
+                      + GitHub (npx)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => insertMcpTemplate('sse')}
+                      className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                    >
+                      + Remote SSE
+                    </button>
+                  </div>
+                </div>
+
+                {/* JSON Editor with Syntax Validation */}
+                <div className="space-y-1">
+                  <div className="relative">
+                    <textarea
+                      rows={6}
+                      value={form.customMcpConfig}
+                      onChange={e => setForm(prev => ({ ...prev, customMcpConfig: e.target.value }))}
+                      placeholder={`{\n  "mcpServers": {\n    "sqlite": {\n      "command": "uvx",\n      "args": ["mcp-server-sqlite", "--db-path", "./data.db"]\n    }\n  }\n}`}
+                      className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] p-2.5 text-[11px] font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                    />
+                  </div>
+                  {/* Validation hint */}
+                  {(() => {
+                    try {
+                      JSON.parse(form.customMcpConfig || '{}');
+                      return (
+                        <div className="flex items-center space-x-1 text-[10px] text-emerald-600">
+                          <CheckCircle2 className="h-3 w-3" />
+                          <span>JSON 语法合法 · 随时可点击【重载并同步连接】测试探活</span>
+                        </div>
+                      );
+                    } catch (e: any) {
+                      return (
+                        <div className="flex items-center space-x-1 text-[10px] text-rose-500">
+                          <AlertCircle className="h-3 w-3" />
+                          <span>JSON 语法有误: {e.message}</span>
+                        </div>
+                      );
+                    }
+                  })()}
+                </div>
+
+                {/* Feedback Banner */}
+                {mcpFeedbackMsg && (
+                  <div
+                    className={`rounded-lg p-2.5 text-[11px] flex items-center space-x-2 ${
+                      mcpFeedbackMsg.success
+                        ? 'bg-emerald-500/10 text-emerald-700 border border-emerald-500/20'
+                        : 'bg-rose-500/10 text-rose-700 border border-rose-500/20'
+                    }`}
+                  >
+                    {mcpFeedbackMsg.success ? (
+                      <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    ) : (
+                      <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                    )}
+                    <span>{mcpFeedbackMsg.text}</span>
+                  </div>
+                )}
+
+                {/* MCP Live Status & Discovered Tools Board */}
+                <div className="space-y-2 pt-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-[var(--foreground)] flex items-center space-x-1.5">
+                      <Activity className="h-3.5 w-3.5 text-[var(--primary)]" />
+                      <span>MCP 服务探活看板与发现工具</span>
+                    </span>
+                    <span className="text-[10px] text-[var(--muted-foreground)]">
+                      已注册 {mcpServersStatus.length} 个服务 · 激活{' '}
+                      {mcpServersStatus.filter(s => s.status === 'connected').length} 个
+                    </span>
+                  </div>
+
+                  {mcpServersStatus.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-[var(--border)] p-4 text-center text-[11px] text-[var(--muted-foreground)] bg-[var(--background)]/40">
+                      当前尚未检测到活动的外部 MCP 服务。请在上方输入合法配置并点击【重载并同步连接】。
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {mcpServersStatus.map(server => {
+                        const isExpanded = expandedMcpServer === server.name;
+                        const isTesting = testingMcpServer === server.name;
+                        return (
+                          <div
+                            key={server.name}
+                            className="rounded-lg border border-[var(--border)] bg-[var(--card)] overflow-hidden transition-all shadow-xs"
+                          >
+                            <div className="flex items-center justify-between p-2.5 bg-[var(--background)]/50">
+                              <div className="flex items-center space-x-2">
+                                <span
+                                  className={`h-2 w-2 rounded-full ${
+                                    server.status === 'connected'
+                                      ? 'bg-emerald-500'
+                                      : server.status === 'connecting'
+                                      ? 'bg-amber-500 animate-pulse'
+                                      : server.status === 'error'
+                                      ? 'bg-rose-500'
+                                      : 'bg-gray-400'
+                                  }`}
+                                />
+                                <span className="font-medium text-[12px] text-[var(--foreground)]">
+                                  {server.name}
+                                </span>
+                                <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-[var(--border)] text-[var(--muted-foreground)]">
+                                  {server.transportType}
+                                </span>
+                                <span className="text-[11px] text-[var(--muted-foreground)]">
+                                  {server.status === 'connected' && `• 已激活 ${server.tools.length} 个工具`}
+                                  {server.status === 'connecting' && '• 正在建立连接...'}
+                                  {server.status === 'error' && '• 连接异常'}
+                                  {server.status === 'disconnected' && '• 已停用'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center space-x-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    let cfg: any = {};
+                                    try {
+                                      const parsed = JSON.parse(form.customMcpConfig);
+                                      cfg = parsed.mcpServers?.[server.name] || {};
+                                    } catch {}
+                                    handleTestSingleServer(server.name, cfg);
+                                  }}
+                                  disabled={isTesting}
+                                  className="px-2 py-0.5 text-[10px] font-medium rounded border border-[var(--border)] hover:bg-[var(--border)] text-[var(--foreground)] transition-colors"
+                                >
+                                  {isTesting ? '测试中...' : '测试连接'}
+                                </button>
+                                {server.tools.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setExpandedMcpServer(isExpanded ? null : server.name)}
+                                    className="flex items-center space-x-0.5 px-2 py-0.5 text-[10px] font-medium rounded bg-[var(--border)] text-[var(--foreground)] hover:opacity-80 transition-opacity"
+                                  >
+                                    <span>{server.tools.length} 个工具</span>
+                                    {isExpanded ? (
+                                      <ChevronDown className="h-3 w-3" />
+                                    ) : (
+                                      <ChevronRight className="h-3 w-3" />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Error details if any */}
+                            {server.status === 'error' && server.error && (
+                              <div className="p-2.5 bg-rose-500/10 border-t border-rose-500/20 text-[10px] text-rose-700 font-mono">
+                                <strong>错误详情:</strong> {server.error}
+                              </div>
+                            )}
+
+                            {/* Discovered Tools List Drawer */}
+                            {isExpanded && server.tools.length > 0 && (
+                              <div className="p-2.5 border-t border-[var(--border)] space-y-2 bg-[var(--card)]">
+                                <div className="text-[10px] font-medium text-[var(--muted-foreground)]">
+                                  该服务向 Agent 注册的所有可用工具清单：
+                                </div>
+                                <div className="grid grid-cols-1 gap-1.5">
+                                  {server.tools.map((tool: any) => (
+                                    <div
+                                      key={tool.fullName}
+                                      className="rounded border border-[var(--border)] p-2 bg-[var(--background)]/30 text-[11px] space-y-1"
+                                    >
+                                      <div className="flex items-center justify-between">
+                                        <code className="text-[var(--primary)] font-semibold font-mono">
+                                          {tool.fullName}
+                                        </code>
+                                        <span className="text-[9px] text-[var(--muted-foreground)]">
+                                          原生名称: {tool.name}
+                                        </span>
+                                      </div>
+                                      <p className="text-[10px] text-[var(--muted-foreground)]">
+                                        {tool.description}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -72,6 +72,11 @@ export interface ElectronAPI {
   // Shadow Checkpoint & Rollback (v1.4.0)
   listCheckpoints: (workspacePath: string | null, sessionId?: string) => Promise<any[]>;
   rollbackCheckpoint: (checkpointId: string, workspacePath: string | null) => Promise<{ success: boolean; message: string; restoredFiles: string[]; removedFiles: string[] }>;
+
+  // MCP Management (v1.5.0)
+  getMcpServersStatus: () => Promise<any[]>;
+  reloadMcpServers: (customMcpConfig: string, workspacePath: string | null) => Promise<any[]>;
+  testMcpServer: (name: string, config: any, workspacePath: string | null) => Promise<{ success: boolean; tools?: any[]; error?: string }>;
 }
 
 const api: ElectronAPI = {
@@ -139,7 +144,12 @@ const api: ElectronAPI = {
 
   // Shadow Checkpoint & Rollback (v1.4.0)
   listCheckpoints: (workspacePath, sessionId) => ipcRenderer.invoke('checkpoint:list', { workspacePath, sessionId }),
-  rollbackCheckpoint: (checkpointId, workspacePath) => ipcRenderer.invoke('checkpoint:rollback', { checkpointId, workspacePath })
+  rollbackCheckpoint: (checkpointId, workspacePath) => ipcRenderer.invoke('checkpoint:rollback', { checkpointId, workspacePath }),
+
+  // MCP Management (v1.5.0)
+  getMcpServersStatus: () => ipcRenderer.invoke('mcp:getServersStatus'),
+  reloadMcpServers: (customMcpConfig, workspacePath) => ipcRenderer.invoke('mcp:reloadServers', { customMcpConfig, workspacePath }),
+  testMcpServer: (name, config, workspacePath) => ipcRenderer.invoke('mcp:testServer', { name, config, workspacePath })
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

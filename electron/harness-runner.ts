@@ -1779,6 +1779,14 @@ export async function runHarnessAgent(
     ];
     callbacks.onPlan(initialPlanSteps);
 
+    if (config.customMcpConfig) {
+      try {
+        await mcpManager.reloadServers(config.customMcpConfig, config.workspacePath || null);
+      } catch (err: any) {
+        console.warn('[Harness] MCP servers reload failed:', err.message);
+      }
+    }
+
     const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector']);
 
     // 动态侦测并强制激活用户在输入中通过 @ 显式提及的技能

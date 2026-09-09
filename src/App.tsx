@@ -571,6 +571,7 @@ export const App: React.FC = () => {
       stream: settings.streamResponse !== false,
       workspacePath: currentWorkspacePath,
       enabledMcpTools: settings.enabledMcpTools,
+      customMcpConfig: settings.customMcpConfig,
       enabledSkills: settings.enabledSkills,
       executionMode: mode,
       fallbackProviders: settings.fallbackProviders

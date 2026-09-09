@@ -1,6 +1,6 @@
 {
   "name": "asteam-agent",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "ASTeam Agent - Intelligent Windows Desktop Client powered by deepseek-harness",
   "author": "ASTeam",
   "main": "dist-electron/main.cjs",
@@ -15,6 +15,7 @@
     "preview": "electron ."
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "clsx": "^2.1.1",
     "docx": "^9.7.1",
     "lucide-react": "^0.475.0",
