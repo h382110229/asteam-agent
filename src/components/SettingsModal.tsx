@@ -42,7 +42,10 @@ import {
   ChevronRight,
   Play,
   Zap,
-  Activity
+  Activity,
+  Boxes,
+  Store,
+  Search
 } from 'lucide-react';
 import {
   PROVIDER_PRESETS,
@@ -52,6 +55,13 @@ import {
   inferModelCapabilities,
   ModelCapability
 } from '../config/providers';
+import {
+  MCP_PRESETS,
+  isPresetInstalled,
+  getPresetValues,
+  applyPresetToConfig
+} from '../config/mcpPresets';
+import { McpPresetCard } from './McpPresetCard';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -125,12 +135,32 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   });
   const [skillInstallMsg, setSkillInstallMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // MCP Servers State (v1.5.0)
+  // MCP Servers State (v1.5.0 / v1.6.0)
   const [mcpServersStatus, setMcpServersStatus] = useState<any[]>([]);
   const [isReloadingMcp, setIsReloadingMcp] = useState(false);
   const [mcpFeedbackMsg, setMcpFeedbackMsg] = useState<{ success: boolean; text: string } | null>(null);
   const [expandedMcpServer, setExpandedMcpServer] = useState<string | null>(null);
   const [testingMcpServer, setTestingMcpServer] = useState<string | null>(null);
+  const [mcpViewMode, setMcpViewMode] = useState<'market' | 'json'>('market');
+  const [mcpCategoryFilter, setMcpCategoryFilter] = useState<'all' | 'database' | 'filesystem' | 'devtools' | 'automation'>('all');
+  const [mcpSearchQuery, setMcpSearchQuery] = useState('');
+
+  const handleTogglePreset = (presetId: string, enabled: boolean) => {
+    const preset = MCP_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+    const currentValues = getPresetValues(form.customMcpConfig, presetId);
+    const newConfig = applyPresetToConfig(form.customMcpConfig, presetId, enabled, currentValues);
+    setForm(prev => ({ ...prev, customMcpConfig: newConfig }));
+  };
+
+  const handleChangePresetField = (presetId: string, key: string, value: any) => {
+    const preset = MCP_PRESETS.find(p => p.id === presetId);
+    if (!preset) return;
+    const currentValues = getPresetValues(form.customMcpConfig, presetId);
+    const updatedValues = { ...currentValues, [key]: value };
+    const newConfig = applyPresetToConfig(form.customMcpConfig, presetId, true, updatedValues);
+    setForm(prev => ({ ...prev, customMcpConfig: newConfig }));
+  };
 
   const refreshSkills = async () => {
     if (window.electronAPI) {
@@ -1490,13 +1520,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
-              {/* 3. Custom MCP Servers Management (v1.5.0) */}
+              {/* 3. Custom MCP Servers Management & Preset Ecosystem (v1.5.0 / v1.6.0) */}
               <div className="space-y-3 pt-3 border-t border-[var(--border)]">
                 <div className="flex items-center justify-between">
                   <div>
                     <label className="font-semibold text-[var(--foreground)] flex items-center space-x-1.5">
-                      <Code2 className="h-3.5 w-3.5 text-[var(--primary)]" />
-                      <span>外部标准 MCP 服务器配置 (mcpServers)</span>
+                      <Boxes className="h-4 w-4 text-[var(--primary)]" />
+                      <span>外部标准 MCP 服务器与预置生态市场</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20 font-mono">
+                        v1.6.0 Swarm
+                      </span>
                     </label>
                     <p className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
                       基于 Anthropic 官方标准 <code>@modelcontextprotocol/sdk</code> · 原生支持 Stdio (子进程) 与 SSE (远程网络)
@@ -1515,68 +1548,194 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
 
-                {/* Templates Quick Insert */}
-                <div className="flex items-center justify-between bg-[var(--background)]/60 rounded-md px-2.5 py-1.5 border border-[var(--border)] text-[10px]">
-                  <span className="text-[var(--muted-foreground)] flex items-center space-x-1">
-                    <Zap className="h-3 w-3 text-amber-500" />
-                    <span>快速插入常用模版:</span>
-                  </span>
-                  <div className="flex items-center space-x-1.5">
+                {/* Dual Mode Switcher Tab */}
+                <div className="flex items-center justify-between bg-[var(--background)]/80 p-1 rounded-lg border border-[var(--border)]">
+                  <div className="flex items-center space-x-1">
                     <button
                       type="button"
-                      onClick={() => insertMcpTemplate('sqlite')}
-                      className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                      onClick={() => setMcpViewMode('market')}
+                      className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        mcpViewMode === 'market'
+                          ? 'bg-[var(--card)] text-[var(--primary)] shadow-xs border border-[var(--border)] font-semibold'
+                          : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                      }`}
                     >
-                      + SQLite (uvx)
+                      <Store className="h-3.5 w-3.5" />
+                      <span>预置生态市场 (可视化一键装配)</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => insertMcpTemplate('github')}
-                      className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                      onClick={() => setMcpViewMode('json')}
+                      className={`flex items-center space-x-1.5 px-3 py-1 rounded-md text-[11px] font-medium transition-all ${
+                        mcpViewMode === 'json'
+                          ? 'bg-[var(--card)] text-[var(--primary)] shadow-xs border border-[var(--border)] font-semibold'
+                          : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                      }`}
                     >
-                      + GitHub (npx)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => insertMcpTemplate('sse')}
-                      className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
-                    >
-                      + Remote SSE
+                      <Code2 className="h-3.5 w-3.5" />
+                      <span>原始 JSON 高级配置</span>
                     </button>
                   </div>
+
+                  <span className="text-[10px] text-[var(--muted-foreground)] pr-2">
+                    双向无损同步
+                  </span>
                 </div>
 
-                {/* JSON Editor with Syntax Validation */}
-                <div className="space-y-1">
-                  <div className="relative">
-                    <textarea
-                      rows={6}
-                      value={form.customMcpConfig}
-                      onChange={e => setForm(prev => ({ ...prev, customMcpConfig: e.target.value }))}
-                      placeholder={`{\n  "mcpServers": {\n    "sqlite": {\n      "command": "uvx",\n      "args": ["mcp-server-sqlite", "--db-path", "./data.db"]\n    }\n  }\n}`}
-                      className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] p-2.5 text-[11px] font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
-                    />
+                {/* Market View Mode */}
+                {mcpViewMode === 'market' && (
+                  <div className="space-y-3">
+                    {/* Category filter & Search bar */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      {/* Search */}
+                      <div className="relative flex-1 min-w-[180px]">
+                        <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--muted-foreground)]" />
+                        <input
+                          type="text"
+                          value={mcpSearchQuery}
+                          onChange={(e) => setMcpSearchQuery(e.target.value)}
+                          placeholder="搜索 MCP 预置插件或包名..."
+                          className="w-full pl-8 pr-2.5 py-1 text-[11px] rounded-md border border-[var(--input)] bg-[var(--card)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:border-[var(--primary)] focus:outline-none"
+                        />
+                      </div>
+
+                      {/* Category Pills */}
+                      <div className="flex items-center space-x-1 text-[11px] overflow-x-auto">
+                        {[
+                          { id: 'all', label: '全部' },
+                          { id: 'filesystem', label: '文件系统' },
+                          { id: 'database', label: '数据库' },
+                          { id: 'devtools', label: '研发协作' },
+                          { id: 'automation', label: '浏览器自动化' }
+                        ].map(cat => (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setMcpCategoryFilter(cat.id as any)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                              mcpCategoryFilter === cat.id
+                                ? 'bg-[var(--primary)] text-white'
+                                : 'bg-[var(--background)] hover:bg-[var(--border)] text-[var(--muted-foreground)]'
+                            }`}
+                          >
+                            {cat.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Presets Grid */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                      {MCP_PRESETS
+                        .filter(p => {
+                          if (mcpCategoryFilter !== 'all' && p.category !== mcpCategoryFilter) return false;
+                          if (mcpSearchQuery.trim()) {
+                            const q = mcpSearchQuery.toLowerCase();
+                            return (
+                              p.name.toLowerCase().includes(q) ||
+                              p.description.toLowerCase().includes(q) ||
+                              p.packageName.toLowerCase().includes(q) ||
+                              p.tags.some(t => t.toLowerCase().includes(q))
+                            );
+                          }
+                          return true;
+                        })
+                        .map(preset => {
+                          const isInstalled = isPresetInstalled(form.customMcpConfig, preset.id);
+                          const fieldValues = getPresetValues(form.customMcpConfig, preset.id);
+                          const liveServer = mcpServersStatus.find(s => s.name === preset.id);
+
+                          return (
+                            <McpPresetCard
+                              key={preset.id}
+                              preset={preset}
+                              isInstalled={isInstalled}
+                              fieldValues={fieldValues}
+                              onToggle={(enabled) => handleTogglePreset(preset.id, enabled)}
+                              onChangeField={(key, val) => handleChangePresetField(preset.id, key, val)}
+                              onTestConnection={(config) => handleTestSingleServer(preset.id, config)}
+                              isTesting={testingMcpServer === preset.id}
+                              liveStatus={liveServer ? liveServer.status : (isInstalled ? 'disconnected' : undefined)}
+                              liveToolsCount={liveServer?.tools?.length}
+                              liveError={liveServer?.error}
+                            />
+                          );
+                        })}
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-[var(--muted-foreground)] bg-[var(--background)]/40 p-2 rounded-md border border-[var(--border)]">
+                      <span>💡 提示：开启预置服务后可直接点击「测试该服务」进行即时探活，也可点击右上角「重载并同步连接」将全量配置载入 Agent 运行时。</span>
+                    </div>
                   </div>
-                  {/* Validation hint */}
-                  {(() => {
-                    try {
-                      JSON.parse(form.customMcpConfig || '{}');
-                      return (
-                        <div className="flex items-center space-x-1 text-[10px] text-emerald-600">
-                          <CheckCircle2 className="h-3 w-3" />
-                          <span>JSON 语法合法 · 随时可点击【重载并同步连接】测试探活</span>
-                        </div>
-                      );
-                    } catch (e: any) {
-                      return (
-                        <div className="flex items-center space-x-1 text-[10px] text-rose-500">
-                          <AlertCircle className="h-3 w-3" />
-                          <span>JSON 语法有误: {e.message}</span>
-                        </div>
-                      );
-                    }
-                  })()}
-                </div>
+                )}
+
+                {/* Raw JSON View Mode */}
+                {mcpViewMode === 'json' && (
+                  <div className="space-y-2">
+                    {/* Templates Quick Insert */}
+                    <div className="flex items-center justify-between bg-[var(--background)]/60 rounded-md px-2.5 py-1.5 border border-[var(--border)] text-[10px]">
+                      <span className="text-[var(--muted-foreground)] flex items-center space-x-1">
+                        <Zap className="h-3 w-3 text-amber-500" />
+                        <span>快速插入常用模版:</span>
+                      </span>
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          type="button"
+                          onClick={() => insertMcpTemplate('sqlite')}
+                          className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                        >
+                          + SQLite (uvx)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertMcpTemplate('github')}
+                          className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                        >
+                          + GitHub (npx)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => insertMcpTemplate('sse')}
+                          className="px-2 py-0.5 bg-[var(--card)] hover:bg-[var(--border)] border border-[var(--border)] rounded text-[var(--foreground)] transition-colors"
+                        >
+                          + Remote SSE
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* JSON Editor with Syntax Validation */}
+                    <div className="space-y-1">
+                      <div className="relative">
+                        <textarea
+                          rows={7}
+                          value={form.customMcpConfig}
+                          onChange={e => setForm(prev => ({ ...prev, customMcpConfig: e.target.value }))}
+                          placeholder={`{\n  "mcpServers": {\n    "sqlite": {\n      "command": "uvx",\n      "args": ["mcp-server-sqlite", "--db-path", "./data.db"]\n    }\n  }\n}`}
+                          className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] p-2.5 text-[11px] font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                        />
+                      </div>
+                      {/* Validation hint */}
+                      {(() => {
+                        try {
+                          JSON.parse(form.customMcpConfig || '{}');
+                          return (
+                            <div className="flex items-center space-x-1 text-[10px] text-emerald-600">
+                              <CheckCircle2 className="h-3 w-3" />
+                              <span>JSON 语法合法 · 随时可点击【重载并同步连接】测试探活</span>
+                            </div>
+                          );
+                        } catch (e: any) {
+                          return (
+                            <div className="flex items-center space-x-1 text-[10px] text-rose-500">
+                              <AlertCircle className="h-3 w-3" />
+                              <span>JSON 语法有误: {e.message}</span>
+                            </div>
+                          );
+                        }
+                      })()}
+                    </div>
+                  </div>
+                )}
 
                 {/* Feedback Banner */}
                 {mcpFeedbackMsg && (
