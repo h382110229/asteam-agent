@@ -1787,7 +1787,7 @@ export async function runHarnessAgent(
       }
     }
 
-    const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector']);
+    const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_search', 'web_fetch', 'git_operations', 'system_inspector']);
 
     // 动态侦测并强制激活用户在输入中通过 @ 显式提及的技能
     const userMentionedSkills: string[] = [];

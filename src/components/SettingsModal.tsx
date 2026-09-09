@@ -71,7 +71,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [activeTab, setActiveTab] = useState<'provider' | 'storage' | 'memory' | 'mcp_skills' | 'desktop'>('provider');
   const [form, setForm] = useState<AppSettings>({
     ...settings,
-    enabledMcpTools: settings.enabledMcpTools || ['web_fetch', 'git_operations', 'system_inspector'],
+    enabledMcpTools: settings.enabledMcpTools || ['web_search', 'web_fetch', 'git_operations', 'system_inspector'],
     enabledSkills: settings.enabledSkills || [
       'doc_generator',
       'ppt_outline_maker',
@@ -1436,10 +1436,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="space-y-2">
                   {[
                     {
+                      id: 'web_search',
+                      name: '实时联网技术检索 (Web Search)',
+                      desc: '自主检索全球官方技术文档、最新库变更、开源仓库与代码报错解决方案（内置高可用双通道检索）',
+                      icon: <Globe className="h-4 w-4 text-emerald-500" />
+                    },
+                    {
                       id: 'web_fetch',
-                      name: '网页正文抓取 (Web Fetch)',
-                      desc: '实时抓取在线技术文档或网页内容，自动去除广告并解析为清洁 Markdown',
-                      icon: <Globe className="h-4 w-4 text-blue-500" />
+                      name: '网页文档结构化抓取 (Web Fetch & Doc Markdown)',
+                      desc: '实时抓取在线技术文档或网页内容，自动提炼正文并转为结构化 Markdown（保留代码块与标题）',
+                      icon: <FileText className="h-4 w-4 text-blue-500" />
                     },
                     {
                       id: 'git_operations',

@@ -6,6 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { getGitStatus, getFileDiff } from './git-manager';
+import { searchWeb, fetchWebPage } from './web-search';
 
 export interface McpToolDefinition {
   name: string;
@@ -77,36 +78,28 @@ class McpManager {
   }
 
   private registerBuiltinTools() {
-    // 1. web_fetch
+    // 0. web_search (v1.5.0)
+    this.builtinTools.set('web_search', {
+      name: 'web_search',
+      description: '联网技术检索：根据关键词检索官方技术文档、最新库变更、开源仓库或报错解决方案',
+      parameters: {
+        query: { type: 'string', description: '检索关键词或报错文本（例如 "electron 34 net.fetch", "react 19 useActionState"）' },
+        maxResults: { type: 'number', description: '可选，返回条数，默认为 6' }
+      },
+      handler: async (args) => {
+        return await searchWeb(args.query, { maxResults: args.maxResults });
+      }
+    });
+
+    // 1. web_fetch (Enhanced in v1.5.0)
     this.builtinTools.set('web_fetch', {
       name: 'web_fetch',
-      description: '抓取指定网页或在线文档的内容并提取正文文本',
+      description: '抓取指定网页或在线技术文档的正文内容，并自动转换为结构化 Markdown（保留标题、代码块与链接）',
       parameters: {
         url: { type: 'string', description: '要抓取的网页 HTTP/HTTPS 完整 URL' }
       },
       handler: async (args) => {
-        const url = args.url;
-        if (!url || typeof url !== 'string') {
-          throw new Error('Missing parameter: url');
-        }
-        try {
-          const res = await fetch(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ASTeamAgent/1.5' }
-          });
-          if (!res.ok) {
-            return `[HTTP ${res.status}] 无法获取页面内容: ${res.statusText}`;
-          }
-          const html = await res.text();
-          const text = html
-            .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-            .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          return text.slice(0, 8000) + (text.length > 8000 ? '\n\n[...正文内容已截断...]' : '');
-        } catch (err: any) {
-          return `抓取失败: ${err.message}`;
-        }
+        return await fetchWebPage(args.url);
       }
     });
 
@@ -390,7 +383,7 @@ class McpManager {
   /**
    * Get combined prompts for enabled builtin tools and active external MCP tools
    */
-  getEnabledToolPrompts(enabledToolIds: string[] = ['web_fetch', 'git_operations', 'system_inspector']): string {
+  getEnabledToolPrompts(enabledToolIds: string[] = ['web_search', 'web_fetch', 'git_operations', 'system_inspector']): string {
     const list: string[] = [];
 
     // 1. Builtin tools
