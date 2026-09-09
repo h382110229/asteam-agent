@@ -41,6 +41,7 @@ import { LiveTerminalCard } from './LiveTerminalCard';
 import { ExecutionMode, CheckpointItem, WorkspaceFileItem, ProjectRulesInfo } from '../types/project';
 import { PreviewData } from './WorkspaceDrawer';
 import { inferModelCapabilities } from '../config/providers';
+import { ConfirmModal } from './ConfirmModal';
 
 export interface FileAttachment {
   name: string;
@@ -494,6 +495,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const [rollingBackId, setRollingBackId] = useState<string | null>(null);
+  const [confirmModalState, setConfirmModalState] = useState<{
+    isOpen: boolean;
+    checkpoint: CheckpointItem | null;
+  }>({ isOpen: false, checkpoint: null });
 
   // @ Unified Context Mention 状态 (@file / @git-diff / @skill)
   const [availableSkills, setAvailableSkills] = useState<any[]>([]);
@@ -1442,16 +1447,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           <button
                             type="button"
                             disabled={rollingBackId === msg.checkpoint.id}
-                            onClick={async () => {
+                            onClick={() => {
                               if (!onRollbackCheckpoint) return;
-                              const ok = window.confirm(`确定要撤销本轮 Agent 产生的所有代码修改吗？\n涉及文件：\n${[...msg.checkpoint!.modifiedFiles, ...msg.checkpoint!.newFiles].join('\n')}\n\n系统将秒级还原被修改文件并清理新建文件。`);
-                              if (!ok) return;
-                              setRollingBackId(msg.checkpoint!.id);
-                              try {
-                                await onRollbackCheckpoint(msg.checkpoint!.id);
-                              } finally {
-                                setRollingBackId(null);
-                              }
+                              setConfirmModalState({
+                                isOpen: true,
+                                checkpoint: msg.checkpoint!
+                              });
                             }}
                             className="flex items-center space-x-1.5 rounded-lg bg-[var(--card)] hover:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 px-2.5 py-1 text-xs font-medium transition-all cursor-pointer shadow-2xs active:scale-95 disabled:opacity-50"
                             title="1 秒还原工作区至本轮修改前的状态"
@@ -1916,6 +1917,34 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 优雅现代确认弹窗 (替换原生系统 win32 confirm 弹窗) */}
+      <ConfirmModal
+        isOpen={confirmModalState.isOpen}
+        onClose={() => setConfirmModalState({ isOpen: false, checkpoint: null })}
+        onConfirm={async () => {
+          if (!confirmModalState.checkpoint || !onRollbackCheckpoint) return;
+          const ckptId = confirmModalState.checkpoint.id;
+          setRollingBackId(ckptId);
+          setConfirmModalState({ isOpen: false, checkpoint: null });
+          try {
+            await onRollbackCheckpoint(ckptId);
+          } finally {
+            setRollingBackId(null);
+          }
+        }}
+        title="确认撤销本轮修改"
+        description="确定要撤销本轮 Agent 产生的所有代码修改吗？系统将根据影子快照在 1 秒内原子级还原被修改文件并自动清理新建文件。"
+        files={{
+          modified: confirmModalState.checkpoint?.modifiedFiles,
+          added: confirmModalState.checkpoint?.newFiles
+        }}
+        confirmText="立即撤销回滚"
+        cancelText="暂不撤销"
+        isDanger={true}
+        isLoading={rollingBackId !== null}
+        iconType="rollback"
+      />
     </main>
   );
 };

@@ -39,6 +39,7 @@ import { HtmlPreview } from './preview/HtmlPreview';
 import { MermaidPreview } from './preview/MermaidPreview';
 import { SvgPreview } from './preview/SvgPreview';
 import { LiveTerminalCard } from './LiveTerminalCard';
+import { ConfirmModal } from './ConfirmModal';
 
 export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal';
 
@@ -99,6 +100,23 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const [rollingBackCheckpointId, setRollingBackCheckpointId] = useState<string | null>(null);
   const [rollbackSuccessMsg, setRollbackSuccessMsg] = useState<string | null>(null);
 
+  // Modern Confirmation Modal state
+  const [drawerConfirmModal, setDrawerConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    onConfirm: () => Promise<void> | void;
+    files?: { modified?: string[]; added?: string[] };
+    confirmText?: string;
+    isDanger?: boolean;
+    iconType?: 'rollback' | 'warning' | 'danger';
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onConfirm: () => {}
+  });
+
   const refreshCheckpoints = useCallback(async () => {
     if (!window.electronAPI?.listCheckpoints) return;
     setLoadingCheckpoints(true);
@@ -120,26 +138,39 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     }
   }, [isOpen, refreshCheckpoints]);
 
-  const handleRollback = async (ckptId: string) => {
-    const ok = window.confirm(`确定要将工作区还原至快照 (${ckptId}) 时的状态吗？此操作将覆盖还原快照点中被修改的文件。`);
-    if (!ok) return;
-
-    setRollingBackCheckpointId(ckptId);
-    try {
-      if (onRollbackCheckpoint) {
-        await onRollbackCheckpoint(ckptId);
-      } else if (window.electronAPI?.rollbackCheckpoint) {
-        const res = await window.electronAPI.rollbackCheckpoint(ckptId, workspacePath);
-        if (res.success) {
-          setRollbackSuccessMsg(res.message);
-          setTimeout(() => setRollbackSuccessMsg(null), 3000);
-          onRefreshGit();
+  const handleRollback = (ckptId: string) => {
+    const ckpt = checkpoints.find(c => c.id === ckptId);
+    setDrawerConfirmModal({
+      isOpen: true,
+      title: `确认还原至快照 (${ckptId})`,
+      description: '确定要将工作区还原至此历史快照状态吗？此操作将自动覆盖快照点中被修改的文件，并清理新建文件。',
+      files: {
+        modified: ckpt?.modifiedFiles,
+        added: ckpt?.newFiles
+      },
+      confirmText: '确认还原至此状态',
+      isDanger: true,
+      iconType: 'rollback',
+      onConfirm: async () => {
+        setRollingBackCheckpointId(ckptId);
+        setDrawerConfirmModal(prev => ({ ...prev, isOpen: false }));
+        try {
+          if (onRollbackCheckpoint) {
+            await onRollbackCheckpoint(ckptId);
+          } else if (window.electronAPI?.rollbackCheckpoint) {
+            const res = await window.electronAPI.rollbackCheckpoint(ckptId, workspacePath);
+            if (res.success) {
+              setRollbackSuccessMsg(res.message);
+              setTimeout(() => setRollbackSuccessMsg(null), 3000);
+              onRefreshGit();
+            }
+          }
+          refreshCheckpoints();
+        } finally {
+          setRollingBackCheckpointId(null);
         }
       }
-      refreshCheckpoints();
-    } finally {
-      setRollingBackCheckpointId(null);
-    }
+    });
   };
 
   // Draggable Drawer Width states
@@ -358,71 +389,83 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               });
             }
           } else if (step.tool === 'generate_image') {
-            const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
+            const rawPath = (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || step.args?.filePath || step.args?.path || '';
             const imgUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:png|jpg|jpeg|webp|gif)[^\s)]*)/i) : null;
             const imgUrl = imgUrlMatch ? imgUrlMatch[1] : '';
-            const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : (step.args?.prompt ? `${step.args.prompt.slice(0, 15)}.png` : 'AI图片.png');
-            const key = `image:${rawPath || imgUrl || fileName}`;
-            if (!seenKeys.has(key)) {
-              seenKeys.add(key);
-              items.push({
-                id: `step-${mIdx}-${sIdx}`,
-                type: 'image',
-                title: fileName,
-                content: imgUrl || rawPath,
-                filePath: rawPath,
-                timestamp: msg.timestamp,
-                previewData: {
+            const isSuccess = step.result && (step.result.includes('保存本地路径') || step.result.includes('生成成功') || imgUrl);
+            if (isSuccess || imgUrl) {
+              const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : (step.args?.prompt ? `${step.args.prompt.slice(0, 15)}.png` : 'AI图片.png');
+              const key = `image:${rawPath || imgUrl || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
                   type: 'image',
                   title: fileName,
                   content: imgUrl || rawPath,
-                  filePath: rawPath
-                }
-              });
+                  filePath: rawPath,
+                  timestamp: msg.timestamp,
+                  previewData: {
+                    type: 'image',
+                    title: fileName,
+                    content: imgUrl || rawPath,
+                    filePath: rawPath
+                  }
+                });
+              }
             }
           } else if (step.tool === 'generate_video') {
-            const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:预定保存路径:\s*"([^"]+)")/)?.[1]) || '';
             const vidUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:mp4|webm|mov)[^\s)]*)/i) : null;
             const vidUrl = vidUrlMatch ? vidUrlMatch[1] : '';
-            const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : (step.args?.prompt ? `${step.args.prompt.slice(0, 15)}.mp4` : 'AI视频.mp4');
-            const key = `video:${rawPath || vidUrl || fileName}`;
-            if (!seenKeys.has(key)) {
-              seenKeys.add(key);
-              items.push({
-                id: `step-${mIdx}-${sIdx}`,
-                type: 'video',
-                title: fileName,
-                content: vidUrl || rawPath,
-                filePath: rawPath,
-                timestamp: msg.timestamp,
-                previewData: {
+            const isDropped = step.result && (step.result.includes('视频生成成功并已落盘') || step.result.includes('本地保存路径:'));
+            const isQueued = step.result && (step.result.includes('异步队列') || step.result.includes('后台队列') || step.result.includes('排队中'));
+            
+            // 严格拦截：仅当视频真实落盘或具有直链，且非排队中时才加入交付制品货架
+            if ((vidUrl || isDropped) && !isQueued) {
+              const rawPath = (step.result && step.result.match(/(?:本地保存路径:\s*"([^"]+)")/)?.[1]) || step.args?.filePath || step.args?.path || '';
+              const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : (step.args?.prompt ? `${step.args.prompt.slice(0, 15)}.mp4` : 'AI视频.mp4');
+              const key = `video:${rawPath || vidUrl || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
                   type: 'video',
                   title: fileName,
                   content: vidUrl || rawPath,
-                  filePath: rawPath
-                }
-              });
+                  filePath: rawPath,
+                  timestamp: msg.timestamp,
+                  previewData: {
+                    type: 'video',
+                    title: fileName,
+                    content: vidUrl || rawPath,
+                    filePath: rawPath
+                  }
+                });
+              }
             }
           } else if (step.tool === 'text_to_speech') {
-            const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
-            const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI语音.mp3';
-            const key = `audio:${rawPath || fileName}`;
-            if (!seenKeys.has(key)) {
-              seenKeys.add(key);
-              items.push({
-                id: `step-${mIdx}-${sIdx}`,
-                type: 'audio',
-                title: fileName,
-                content: rawPath,
-                filePath: rawPath,
-                timestamp: msg.timestamp,
-                previewData: {
+            const isSuccess = step.result && (step.result.includes('保存本地路径') || step.result.includes('TTS 语音合成成功'));
+            if (isSuccess) {
+              const rawPath = (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || step.args?.filePath || step.args?.path || '';
+              const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI语音.mp3';
+              const key = `audio:${rawPath || fileName}`;
+              if (!seenKeys.has(key)) {
+                seenKeys.add(key);
+                items.push({
+                  id: `step-${mIdx}-${sIdx}`,
                   type: 'audio',
                   title: fileName,
                   content: rawPath,
-                  filePath: rawPath
-                }
-              });
+                  filePath: rawPath,
+                  timestamp: msg.timestamp,
+                  previewData: {
+                    type: 'audio',
+                    title: fileName,
+                    content: rawPath,
+                    filePath: rawPath
+                  }
+                });
+              }
             }
           }
         }
@@ -564,17 +607,28 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     onTabChange?.(tab);
   };
 
-  const handleDiscard = async (relPath: string) => {
+  const handleDiscard = (relPath: string) => {
     if (!workspacePath || !window.electronAPI) return;
-    const ok = window.confirm(`确定要放弃对 "${relPath}" 的本地修改吗？此操作不可恢复。`);
-    if (!ok) return;
-
-    const res = await window.electronAPI.discardFileChange(workspacePath, relPath);
-    if (res) {
-      setDiscardSuccess(relPath);
-      setTimeout(() => setDiscardSuccess(null), 2000);
-      onRefreshGit();
-    }
+    setDrawerConfirmModal({
+      isOpen: true,
+      title: '确认放弃本地修改',
+      description: `确定要放弃对 "${relPath}" 的本地代码修改吗？此操作将直接还原为 Git 暂存区或上一次提交状态，且不可恢复。`,
+      files: {
+        modified: [relPath]
+      },
+      confirmText: '放弃修改',
+      isDanger: true,
+      iconType: 'warning',
+      onConfirm: async () => {
+        setDrawerConfirmModal(prev => ({ ...prev, isOpen: false }));
+        const res = await window.electronAPI!.discardFileChange(workspacePath, relPath);
+        if (res) {
+          setDiscardSuccess(relPath);
+          setTimeout(() => setDiscardSuccess(null), 2000);
+          onRefreshGit();
+        }
+      }
+    });
   };
 
   const getStatusIcon = (status: GitFileStatus['status']) => {
@@ -1432,6 +1486,20 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           </div>
         )}
       </div>
+
+      {/* 现代优雅确认弹窗 (替换原生系统 confirm 弹窗) */}
+      <ConfirmModal
+        isOpen={drawerConfirmModal.isOpen}
+        onClose={() => setDrawerConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={drawerConfirmModal.onConfirm}
+        title={drawerConfirmModal.title}
+        description={drawerConfirmModal.description}
+        files={drawerConfirmModal.files}
+        confirmText={drawerConfirmModal.confirmText || '确认执行'}
+        isDanger={drawerConfirmModal.isDanger ?? true}
+        iconType={drawerConfirmModal.iconType || 'rollback'}
+        isLoading={rollingBackCheckpointId !== null}
+      />
     </div>
   );
 };

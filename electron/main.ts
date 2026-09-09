@@ -486,8 +486,15 @@ function setupIPC() {
 
   ipcMain.handle('shell:showItemInFolder', async (_event, filePath: string) => {
     try {
-      if (filePath && fs.existsSync(filePath)) {
+      if (!filePath) return false;
+      if (fs.existsSync(filePath)) {
         shell.showItemInFolder(filePath);
+        return true;
+      }
+      // 若具体文件尚未落盘但其父目录存在，则优雅回退打开所在目录
+      const parentDir = path.dirname(filePath);
+      if (fs.existsSync(parentDir)) {
+        await shell.openPath(parentDir);
         return true;
       }
       return false;
