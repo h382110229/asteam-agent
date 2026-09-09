@@ -202,7 +202,7 @@ class McpManager {
       const client = new Client(
         {
           name: 'asteam-agent',
-          version: '1.5.0'
+          version: '1.6.0'
         },
         {
           capabilities: {}
@@ -320,7 +320,7 @@ class McpManager {
       }
 
       testClient = new Client(
-        { name: 'asteam-agent-tester', version: '1.5.0' },
+        { name: 'asteam-agent-tester', version: '1.6.0' },
         { capabilities: {} }
       );
 
