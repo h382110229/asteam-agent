@@ -130,36 +130,48 @@ export function extractPreviewableArtifact(content: string, steps?: AgentStep[])
           };
         }
       } else if (step.tool === 'generate_image') {
-        const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
         const imgUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:png|jpg|jpeg|webp|gif)[^\s)]*)/i) : null;
         const imgUrl = imgUrlMatch ? imgUrlMatch[1] : '';
-        const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 图像生成';
-        return {
-          type: 'image',
-          title: fileName || 'AI 图像生成',
-          content: imgUrl || rawPath,
-          filePath: rawPath
-        };
+        const isSuccess = step.result && (step.result.includes('保存本地路径') || step.result.includes('生成成功') || imgUrl);
+        if (isSuccess || imgUrl) {
+          const rawPath = (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || step.args?.filePath || step.args?.path || '';
+          const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 图像生成';
+          return {
+            type: 'image',
+            title: fileName || 'AI 图像生成',
+            content: imgUrl || rawPath,
+            filePath: rawPath
+          };
+        }
       } else if (step.tool === 'generate_video') {
-        const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:预定保存路径:\s*"([^"]+)")/)?.[1]) || '';
         const vidUrlMatch = step.result ? step.result.match(/(https?:\/\/[^\s)]+\.(?:mp4|webm|mov)[^\s)]*)/i) : null;
         const vidUrl = vidUrlMatch ? vidUrlMatch[1] : '';
-        const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 视频生成';
-        return {
-          type: 'video',
-          title: fileName || 'AI 视频生成',
-          content: vidUrl || rawPath,
-          filePath: rawPath
-        };
+        const isDropped = step.result && (step.result.includes('视频生成成功并已落盘') || step.result.includes('本地保存路径:'));
+        const isQueued = step.result && (step.result.includes('异步队列') || step.result.includes('后台队列') || step.result.includes('排队中'));
+        
+        // 仅当视频真正落地落盘或拥有可直链播放的地址，且非排队中时才作为交付物
+        if ((vidUrl || isDropped) && !isQueued) {
+          const rawPath = (step.result && step.result.match(/(?:本地保存路径:\s*"([^"]+)")/)?.[1]) || step.args?.filePath || step.args?.path || '';
+          const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 视频生成';
+          return {
+            type: 'video',
+            title: fileName || 'AI 视频生成',
+            content: vidUrl || rawPath,
+            filePath: rawPath
+          };
+        }
       } else if (step.tool === 'text_to_speech') {
-        const rawPath = step.args?.filePath || step.args?.path || (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || '';
-        const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 语音合成';
-        return {
-          type: 'audio',
-          title: fileName || 'AI 语音合成',
-          content: rawPath,
-          filePath: rawPath
-        };
+        const isSuccess = step.result && (step.result.includes('保存本地路径') || step.result.includes('TTS 语音合成成功'));
+        if (isSuccess) {
+          const rawPath = (step.result && step.result.match(/(?:保存本地路径:\s*"([^"]+)")/)?.[1]) || step.args?.filePath || step.args?.path || '';
+          const fileName = rawPath ? rawPath.split(/[\\/]/).pop() || '' : 'AI 语音合成';
+          return {
+            type: 'audio',
+            title: fileName || 'AI 语音合成',
+            content: rawPath,
+            filePath: rawPath
+          };
+        }
       }
     }
   }

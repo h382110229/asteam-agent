@@ -484,13 +484,17 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
   const handleRevealArtifact = async (filePath?: string) => {
     if (filePath && window.electronAPI?.showItemInFolder) {
-      await window.electronAPI.showItemInFolder(filePath);
+      const isAbs = filePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(filePath);
+      const fullPath = (isAbs || !workspacePath) ? filePath : `${workspacePath.replace(/[\\/]+$/, '')}/${filePath.replace(/^[\\/]+/, '')}`;
+      await window.electronAPI.showItemInFolder(fullPath);
     }
   };
 
   const handleOpenArtifactPath = async (filePath?: string) => {
     if (filePath && window.electronAPI?.openPath) {
-      await window.electronAPI.openPath(filePath);
+      const isAbs = filePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(filePath);
+      const fullPath = (isAbs || !workspacePath) ? filePath : `${workspacePath.replace(/[\\/]+$/, '')}/${filePath.replace(/^[\\/]+/, '')}`;
+      await window.electronAPI.openPath(fullPath);
     }
   };
 
@@ -1372,24 +1376,38 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     </div>
 
                     {/* Files affected */}
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       {item.modifiedFiles.length > 0 && (
                         <div className="flex items-center space-x-1.5 flex-wrap gap-1 text-[11px]">
-                          <span className="text-[10px] text-amber-500 font-medium">修改文件:</span>
+                          <span className="text-[10px] text-amber-500 font-medium shrink-0">修改文件:</span>
                           {item.modifiedFiles.map(f => (
-                            <span key={f} className="rounded bg-[var(--muted)]/80 px-1.5 py-0.5 font-mono text-[10px] text-[var(--foreground)] border border-[var(--border)]">
-                              {f}
-                            </span>
+                            <button
+                              key={f}
+                              type="button"
+                              onClick={() => handleRevealArtifact(f)}
+                              title="点击在系统文件资源管理器中定位"
+                              className="group inline-flex items-center space-x-1 rounded bg-[var(--muted)]/80 hover:bg-[var(--primary)]/15 px-1.5 py-0.5 font-mono text-[10px] text-[var(--foreground)] border border-[var(--border)] hover:border-[var(--primary)]/40 transition-colors cursor-pointer"
+                            >
+                              <span>{f}</span>
+                              <FolderOpen className="h-2.5 w-2.5 opacity-60 group-hover:opacity-100 group-hover:text-[var(--primary)]" />
+                            </button>
                           ))}
                         </div>
                       )}
                       {item.newFiles.length > 0 && (
                         <div className="flex items-center space-x-1.5 flex-wrap gap-1 text-[11px]">
-                          <span className="text-[10px] text-emerald-500 font-medium">新增文件:</span>
+                          <span className="text-[10px] text-emerald-500 font-medium shrink-0">新增文件:</span>
                           {item.newFiles.map(f => (
-                            <span key={f} className="rounded bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                              +{f}
-                            </span>
+                            <button
+                              key={f}
+                              type="button"
+                              onClick={() => handleRevealArtifact(f)}
+                              title="点击在系统文件资源管理器中定位"
+                              className="group inline-flex items-center space-x-1 rounded bg-emerald-500/10 hover:bg-emerald-500/20 px-1.5 py-0.5 font-mono text-[10px] text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:border-emerald-500/40 transition-colors cursor-pointer"
+                            >
+                              <span>+{f}</span>
+                              <FolderOpen className="h-2.5 w-2.5 opacity-60 group-hover:opacity-100" />
+                            </button>
                           ))}
                         </div>
                       )}
