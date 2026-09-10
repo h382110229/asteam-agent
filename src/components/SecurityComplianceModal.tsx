@@ -94,7 +94,17 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
     setRunningComplianceAudit(true);
     setComplianceToast('正在启动企业资产安全与合规审计引擎...');
     try {
-      const rep = await api.runScheduledTaskNow('task-compliance', workspacePath || undefined);
+      let targetTaskId = 'task-preset-compliance';
+      if (api.getScheduledTasks) {
+        try {
+          const allTasks = await api.getScheduledTasks(workspacePath || null);
+          const compTask = allTasks?.find((t: any) => t.type === 'enterprise_compliance' || t.id === 'task-preset-compliance');
+          if (compTask) {
+            targetTaskId = compTask.id;
+          }
+        } catch {}
+      }
+      const rep = await api.runScheduledTaskNow(targetTaskId, workspacePath || undefined);
       if (rep) {
         setComplianceToast(`合规审计完成！得分: ${rep.score} 分 (${rep.status.toUpperCase()})`);
         await loadComplianceReports();

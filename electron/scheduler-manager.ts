@@ -289,9 +289,25 @@ export class SchedulerManager {
   }
 
   public async runNow(taskId: string, overrideWorkspace?: string): Promise<InspectionReport> {
-    const task = this.tasks.find(t => t.id === taskId);
+    let task = this.tasks.find(t => t.id === taskId);
+    if (!task && (taskId.includes('compliance') || taskId === 'task-compliance')) {
+      task = this.tasks.find(t => t.type === 'enterprise_compliance');
+    }
     if (!task) {
-      throw new Error(`找不到指定的定时任务: ${taskId}`);
+      if (taskId.includes('compliance')) {
+        task = {
+          id: 'task-preset-compliance',
+          name: '企业代码资产出境合规与依赖安全审计',
+          type: 'enterprise_compliance',
+          schedule: 'daily_9am',
+          enabled: true,
+          prompt: '全面扫描工作区 .asteamrules 规约执行度、API Key 与私网 IP 泄露防护状态、跨工作区知识图谱倒排索引完整度，输出专业企业审计合规报告。'
+        };
+        this.tasks.push(task);
+        this.saveTasksToDisk();
+      } else {
+        throw new Error(`找不到指定的定时任务: ${taskId}`);
+      }
     }
     if (overrideWorkspace) {
       task.workspacePath = overrideWorkspace;
