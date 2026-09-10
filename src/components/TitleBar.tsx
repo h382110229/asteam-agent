@@ -26,6 +26,7 @@ interface TitleBarProps {
   gitStatus?: GitStatusSummary | null;
   onOpenGitDiff?: () => void;
   onOpenDrawer?: () => void;
+  isDrawerOpen?: boolean;
   projectRules?: ProjectRulesInfo | null;
   onOpenRules?: () => void;
   onOpenEnterpriseHub?: () => void;
@@ -40,6 +41,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   gitStatus,
   onOpenGitDiff,
   onOpenDrawer,
+  isDrawerOpen = false,
   projectRules,
   onOpenRules,
   onOpenEnterpriseHub,
@@ -164,15 +166,19 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
         </button>
 
-        {/* Workspace Workbench Drawer Button */}
+        {/* Workspace Workbench Panel Toggle Button */}
         <button
           type="button"
           onClick={onOpenDrawer}
-          title="打开右侧工作台 (多模态预览 / Git Diff / 交互控制台)"
-          className="flex h-7 items-center space-x-1 rounded px-2 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] transition-colors cursor-pointer text-xs"
+          title={isDrawerOpen ? '收起右侧工作台面板' : '展开右侧工作台 (多模态预览 / Git Diff / 蜂群协同)'}
+          className={`flex h-7 items-center space-x-1.5 rounded-lg px-2.5 transition-all cursor-pointer text-xs font-medium ${
+            isDrawerOpen
+              ? 'bg-[var(--primary)] text-white shadow-xs'
+              : 'text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)]'
+          }`}
         >
-          <Eye className="h-3.5 w-3.5 text-[var(--primary)]" />
-          <span className="hidden sm:inline font-medium">工作台</span>
+          <Eye className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">工作台</span>
         </button>
 
         {/* Enterprise Hub Button (v1.7.0) */}

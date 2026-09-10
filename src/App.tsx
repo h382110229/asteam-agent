@@ -719,15 +719,16 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         workspacePath={currentWorkspacePath}
         gitStatus={gitStatus}
         onOpenGitDiff={handleOpenGitDiff}
-        onOpenDrawer={() => setIsDrawerOpen(true)}
+        onOpenDrawer={() => setIsDrawerOpen(prev => !prev)}
+        isDrawerOpen={isDrawerOpen}
         projectRules={projectRules}
         onOpenRules={handleOpenRules}
         onOpenEnterpriseHub={() => setIsEnterpriseHubOpen(true)}
         onOpenSecurityCompliance={() => setIsSecurityComplianceOpen(true)}
       />
 
-      {/* 2. Main Workspace Layout */}
-      <div className="flex flex-1 overflow-hidden">
+      {/* 2. Main Workspace Layout (Sidebar + Center Chat + Right Split-Pane Workbench) */}
+      <div className="flex flex-1 overflow-hidden relative">
         {/* Left Sidebar (Projects Tree with Nested Sessions) */}
         <Sidebar
           projects={projects}
@@ -769,6 +770,28 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           onOpenScheduler={handleOpenScheduler}
           onOpenSwarm={handleOpenSwarm}
         />
+
+        {/* Right Split-Pane Workbench (Zero-overlay, side-by-side with ChatArea) */}
+        <WorkspaceDrawer
+          isOpen={isDrawerOpen}
+          onClose={() => setIsDrawerOpen(false)}
+          activeTab={drawerTab}
+          onTabChange={setDrawerTab}
+          previewData={previewData}
+          workspacePath={currentWorkspacePath}
+          gitStatus={gitStatus}
+          onRefreshGit={refreshGitStatus}
+          onRollbackCheckpoint={handleRollbackCheckpoint}
+          activeSessionId={activeSessionId}
+          terminalOutput={terminalOutputs[activeSessionId] || ''}
+          messages={activeMessages}
+          latestSwarmState={activeMessages.slice().reverse().find(m => m.swarmState)?.swarmState || null}
+          isRunning={isRunning}
+          onSelectPreview={(data) => {
+            setPreviewData(data);
+            setDrawerTab('preview');
+          }}
+        />
       </div>
 
       {/* 3. Settings Modal (Includes MCP & Skills configuration) */}
@@ -800,28 +823,6 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         isOpen={isSecurityComplianceOpen}
         onClose={() => setIsSecurityComplianceOpen(false)}
         workspacePath={currentWorkspacePath}
-      />
-
-      {/* 4. Workspace Workbench Drawer (Live Preview + Artifacts Shelf + Git Diff + Live Terminal + Timeline) */}
-      <WorkspaceDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        activeTab={drawerTab}
-        onTabChange={setDrawerTab}
-        previewData={previewData}
-        workspacePath={currentWorkspacePath}
-        gitStatus={gitStatus}
-        onRefreshGit={refreshGitStatus}
-        onRollbackCheckpoint={handleRollbackCheckpoint}
-        activeSessionId={activeSessionId}
-        terminalOutput={terminalOutputs[activeSessionId] || ''}
-        messages={activeMessages}
-        latestSwarmState={activeMessages.slice().reverse().find(m => m.swarmState)?.swarmState || null}
-        isRunning={isRunning}
-        onSelectPreview={(data) => {
-          setPreviewData(data);
-          setDrawerTab('preview');
-        }}
       />
     </div>
   );

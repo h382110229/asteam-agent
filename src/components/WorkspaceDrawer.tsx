@@ -33,7 +33,8 @@ import {
   Video,
   Volume2,
   CalendarClock,
-  Users
+  Users,
+  PanelRightClose
 } from 'lucide-react';
 import { GitStatusSummary, GitFileStatus, CheckpointItem, SwarmState } from '../types/project';
 import { ChatMessageItem, extractPreviewableArtifact } from './ChatArea';
@@ -191,22 +192,46 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     });
   };
 
-  // Draggable Drawer Width states
+  // Draggable Drawer Width states (并排分栏模式宽度自适应，默认 480px，支持拖拽)
   const [drawerWidth, setDrawerWidth] = useState<number>(() => {
     try {
       const saved = localStorage.getItem('asteam_workbench_width');
       if (saved) {
         const parsed = parseInt(saved, 10);
-        if (!isNaN(parsed) && parsed >= 460 && parsed <= window.innerWidth - 200) {
+        if (!isNaN(parsed) && parsed >= 380 && parsed <= window.innerWidth - 400) {
           return parsed;
         }
       }
     } catch {}
-    return Math.max(680, Math.min(1000, Math.round(window.innerWidth * 0.55)));
+    return Math.max(460, Math.min(600, Math.round(window.innerWidth * 0.4)));
   });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(0);
+
+  // 窄屏侦测状态 (小于 960px 自动回退为无遮挡收纳/抽屉交互)
+  const [isNarrowScreen, setIsNarrowScreen] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 960 : false
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsNarrowScreen(window.innerWidth < 960);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // 支持键盘 Esc 快捷收起面板
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -220,8 +245,8 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
     const handleMouseMove = (e: MouseEvent) => {
       const delta = dragStartXRef.current - e.clientX;
-      const minW = 460;
-      const maxW = Math.max(minW, window.innerWidth - 240);
+      const minW = 380;
+      const maxW = Math.max(minW, window.innerWidth - 450);
       const newWidth = Math.min(maxW, Math.max(minW, dragStartWidthRef.current + delta));
       setDrawerWidth(newWidth);
     };
@@ -242,7 +267,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   }, [isDragging, drawerWidth]);
 
   const handleResetWidth = () => {
-    const defaultW = Math.max(680, Math.min(1000, Math.round(window.innerWidth * 0.55)));
+    const defaultW = Math.max(460, Math.min(600, Math.round(window.innerWidth * 0.4)));
     setDrawerWidth(defaultW);
     try {
       localStorage.setItem('asteam_workbench_width', defaultW.toString());
@@ -661,198 +686,211 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     }
   };
 
-  return (
-    <div className="fixed inset-x-0 top-10 bottom-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs animate-in fade-in duration-150">
-      <div
-        style={{ width: isFullScreen ? '100%' : `${drawerWidth}px` }}
-        className={`relative flex h-full flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-2xl animate-in slide-in-from-right duration-150 transition-[width] ${
-          isDragging ? 'transition-none select-none' : ''
-        }`}
-      >
-        {/* Left Resizer Drag Handle (双击复位，按住自由拉伸) */}
-        {!isFullScreen && (
-          <div
-            onMouseDown={handleMouseDown}
-            onDoubleClick={handleResetWidth}
-            title="按住鼠标拖拽调整工作台宽度，双击快速恢复默认"
-            className="absolute -left-1.5 top-0 bottom-0 w-3 cursor-col-resize z-40 group flex items-center justify-center select-none"
-          >
-            <div className={`w-1 h-12 rounded-full transition-all ${
-              isDragging ? 'bg-[var(--primary)] h-20 shadow-md' : 'bg-[var(--border)] group-hover:bg-[var(--primary)] group-hover:h-16'
-            }`} />
-          </div>
-        )}
+  if (!isOpen) return null;
 
-        {/* Dragging Overlay (防止拖拽时光标进入 iframe 导致断触) */}
-        {isDragging && (
-          <div className="absolute inset-0 z-50 cursor-col-resize" />
-        )}
-
-        {/* Top Header with Tab Switcher */}
-        <div className="no-drag flex h-12 items-center justify-between border-b border-[var(--border)] px-4 bg-[var(--background)]/80 select-none">
-          <div className="flex items-center space-x-1">
-            {/* Tabs */}
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('preview')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'preview'
-                  ? 'bg-[var(--primary)] text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              <span>多模态产物预览</span>
-              {previewData && (
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('artifacts')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'artifacts'
-                  ? 'bg-[var(--primary)] text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <Package className="h-3.5 w-3.5" />
-              <span>交付制品货架</span>
-              {artifacts.length > 0 && (
-                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
-                  currentTab === 'artifacts' ? 'bg-white/25 text-white' : 'bg-[var(--primary)]/15 text-[var(--primary)]'
-                }`}>
-                  {artifacts.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('diff')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'diff'
-                  ? 'bg-[var(--primary)] text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <GitBranch className="h-3.5 w-3.5" />
-              <span>Git 变更审阅</span>
-              {gitStatus && gitStatus.files.length > 0 && (
-                <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] text-amber-400 font-mono">
-                  {gitStatus.files.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('timeline')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'timeline'
-                  ? 'bg-[var(--primary)] text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <History className="h-3.5 w-3.5" />
-              <span>时光机 (快照)</span>
-              {checkpoints.length > 0 && (
-                <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
-                  currentTab === 'timeline' ? 'bg-white/25 text-white' : 'bg-[var(--primary)]/15 text-[var(--primary)]'
-                }`}>
-                  {checkpoints.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('terminal')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'terminal'
-                  ? 'bg-[var(--primary)] text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <Terminal className="h-3.5 w-3.5" />
-              <span>控制台大屏</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('scheduler')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'scheduler'
-                  ? 'bg-teal-600 text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <CalendarClock className="h-3.5 w-3.5" />
-              <span>自主巡检</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleTabSwitch('swarm')}
-              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                currentTab === 'swarm'
-                  ? 'bg-teal-600 text-white shadow-xs'
-                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
-              }`}
-            >
-              <Users className="h-3.5 w-3.5" />
-              <span>蜂群协同</span>
-              {computedSwarmState && (
-                <span className="flex h-2 w-2 relative ml-0.5">
-                  {isRunning && (
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
-                  )}
-                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isRunning ? 'bg-teal-500' : 'bg-emerald-500'}`}></span>
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Right Action Icons */}
-          <div className="flex items-center space-x-1">
-            {/* Pop-out button if previewData exists */}
-            {currentTab === 'preview' && previewData && window.electronAPI?.popoutPreview && (
-              <button
-                type="button"
-                onClick={() => {
-                  window.electronAPI.popoutPreview({
-                    type: previewData.type,
-                    title: previewData.title,
-                    content: previewData.content
-                  });
-                }}
-                title="弹出为独立系统子窗口 (支持多屏协同)"
-                className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setIsFullScreen(!isFullScreen)}
-              title={isFullScreen ? '恢复常规宽度' : '全屏展开工作台'}
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
-            >
-              {isFullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
-
-            <button
-              type="button"
-              onClick={onClose}
-              title="关闭工作台 (Esc)"
-              className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
+  const panelContent = (
+    <div
+      style={{ width: isFullScreen ? '100%' : `${drawerWidth}px` }}
+      className={`relative flex h-full flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] select-text overflow-hidden ${
+        isFullScreen ? 'w-full' : ''
+      } ${
+        isNarrowScreen ? 'shadow-2xl animate-in slide-in-from-right duration-150' : 'shadow-xs'
+      } ${isDragging ? 'transition-none select-none' : 'transition-[width]'}`}
+      onClick={e => e.stopPropagation()}
+    >
+      {/* Left Resizer Drag Handle (双击复位，按住自由拉伸) */}
+      {!isFullScreen && (
+        <div
+          onMouseDown={handleMouseDown}
+          onDoubleClick={handleResetWidth}
+          title="按住鼠标拖拽调整工作台宽度，双击快速恢复默认 (480px)"
+          className="absolute -left-1 top-0 bottom-0 w-2.5 cursor-col-resize z-40 group flex items-center justify-center select-none"
+        >
+          <div className={`w-0.5 h-12 rounded-full transition-all ${
+            isDragging ? 'bg-[var(--primary)] h-24 w-1 shadow-md' : 'bg-[var(--border)] group-hover:bg-[var(--primary)] group-hover:h-16'
+          }`} />
         </div>
+      )}
+
+      {/* Dragging Overlay (防止拖拽时光标进入 iframe 导致断触) */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 cursor-col-resize select-none" />
+      )}
+
+      {/* Top Header with Tab Switcher */}
+      <div className="no-drag flex h-11 items-center justify-between border-b border-[var(--border)] px-3 bg-[var(--background)]/90 select-none">
+        <div className="flex items-center space-x-1 overflow-x-auto no-scrollbar py-1 shrink min-w-0 mr-2">
+          {/* Tabs */}
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('preview')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'preview'
+                ? 'bg-[var(--primary)] text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            <span>产物预览</span>
+            {previewData && (
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('artifacts')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'artifacts'
+                ? 'bg-[var(--primary)] text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <Package className="h-3.5 w-3.5" />
+            <span>制品货架</span>
+            {artifacts.length > 0 && (
+              <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                currentTab === 'artifacts' ? 'bg-white/25 text-white' : 'bg-[var(--primary)]/15 text-[var(--primary)]'
+              }`}>
+                {artifacts.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('diff')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'diff'
+                ? 'bg-[var(--primary)] text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <GitBranch className="h-3.5 w-3.5" />
+            <span>Git 变更</span>
+            {gitStatus && gitStatus.files.length > 0 && (
+              <span className="rounded-full bg-amber-500/20 px-1.5 py-0.2 text-[10px] text-amber-400 font-mono">
+                {gitStatus.files.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('timeline')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'timeline'
+                ? 'bg-[var(--primary)] text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <History className="h-3.5 w-3.5" />
+            <span>时光机</span>
+            {checkpoints.length > 0 && (
+              <span className={`rounded-full px-1.5 py-0.2 text-[10px] font-mono ${
+                currentTab === 'timeline' ? 'bg-white/25 text-white' : 'bg-[var(--primary)]/15 text-[var(--primary)]'
+              }`}>
+                {checkpoints.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('terminal')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'terminal'
+                ? 'bg-[var(--primary)] text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <Terminal className="h-3.5 w-3.5" />
+            <span>控制台</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('scheduler')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'scheduler'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <CalendarClock className="h-3.5 w-3.5" />
+            <span>自主巡检</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabSwitch('swarm')}
+            className={`no-drag flex shrink-0 items-center space-x-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-all cursor-pointer ${
+              currentTab === 'swarm'
+                ? 'bg-teal-600 text-white shadow-xs'
+                : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+            }`}
+          >
+            <Users className="h-3.5 w-3.5" />
+            <span>蜂群协同</span>
+            {computedSwarmState && (
+              <span className="flex h-2 w-2 relative ml-0.5">
+                {isRunning && (
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                )}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isRunning ? 'bg-teal-500' : 'bg-emerald-500'}`}></span>
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Right Action Icons */}
+        <div className="flex items-center space-x-0.5 shrink-0">
+          {/* Pop-out button if previewData exists */}
+          {currentTab === 'preview' && previewData && window.electronAPI?.popoutPreview && (
+            <button
+              type="button"
+              onClick={() => {
+                window.electronAPI.popoutPreview({
+                  type: previewData.type,
+                  title: previewData.title,
+                  content: previewData.content
+                });
+              }}
+              title="弹出为独立系统子窗口 (支持多屏协同)"
+              className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+            >
+              <ExternalLink className="h-4 w-4" />
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIsFullScreen(!isFullScreen)}
+            title={isFullScreen ? '恢复分栏宽度' : '全屏展开工作台'}
+            className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+          >
+            {isFullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            title="收起右侧工作台面板 (Esc)"
+            className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+          >
+            <PanelRightClose className="h-4 w-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            title="关闭工作台 (Esc)"
+            className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
 
         {/* Tab 1: Live Preview */}
         {currentTab === 'preview' && (
@@ -1564,10 +1602,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             <SwarmTab swarmState={computedSwarmState} isRunning={isRunning} />
           </div>
         )}
-      </div>
 
-      {/* 现代优雅确认弹窗 (替换原生系统 confirm 弹窗) */}
-      <ConfirmModal
+        {/* 现代优雅确认弹窗 (替换原生系统 confirm 弹窗) */}
+        <ConfirmModal
         isOpen={drawerConfirmModal.isOpen}
         onClose={() => setDrawerConfirmModal(prev => ({ ...prev, isOpen: false }))}
         onConfirm={drawerConfirmModal.onConfirm}
@@ -1580,5 +1617,33 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         isLoading={rollingBackCheckpointId !== null}
       />
     </div>
+  );
+
+  // 全屏视图模式
+  if (isFullScreen) {
+    return (
+      <div className="fixed inset-0 top-10 z-50 flex bg-[var(--background)]">
+        {panelContent}
+      </div>
+    );
+  }
+
+  // 窄屏模式 (<960px): 作为抽屉浮层遮罩显示，但点击左侧主界面蒙层立即触发 onClose 切回主界面
+  if (isNarrowScreen) {
+    return (
+      <div
+        className="fixed inset-x-0 top-10 bottom-0 z-50 flex justify-end bg-black/40 backdrop-blur-2xs animate-in fade-in duration-150"
+        onClick={onClose}
+      >
+        {panelContent}
+      </div>
+    );
+  }
+
+  // 默认正常桌面模式：右侧同级并排分栏（Split Pane / Flex Row），中间对话流与右侧面板零遮挡、零重叠、各行其道
+  return (
+    <aside className="relative flex h-full shrink-0 flex-col select-text z-20 overflow-hidden">
+      {panelContent}
+    </aside>
   );
 };

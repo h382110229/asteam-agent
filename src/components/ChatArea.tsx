@@ -1045,7 +1045,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const workspaceName = workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : null;
 
   return (
-    <main className="flex h-full flex-1 flex-col bg-[var(--background)] overflow-hidden relative">
+    <main className="flex h-full flex-1 min-w-0 flex-col bg-[var(--background)] overflow-hidden relative">
       {/* Hidden file input */}
       <input
         type="file"
@@ -1124,6 +1124,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 >
                   <span>{isTopStepsDropdownOpen ? '收起步骤' : '检视步骤'}</span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${isTopStepsDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+
+              {/* View in Right Workbench Button */}
+              {onOpenSwarm && (
+                <button
+                  type="button"
+                  onClick={onOpenSwarm}
+                  className="flex items-center space-x-1 rounded-md bg-teal-500/10 hover:bg-teal-500/20 text-teal-700 dark:text-teal-300 border border-teal-500/20 px-2 py-1 text-xs font-medium transition-colors cursor-pointer"
+                  title="在右侧并排分栏固定查看蜂群泳道与进度"
+                >
+                  <Users className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+                  <span className="hidden sm:inline">右侧协同大屏</span>
                 </button>
               )}
 
