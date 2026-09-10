@@ -88,6 +88,7 @@ interface ChatAreaProps {
   onOpenRules?: () => void;
   onCompactSession?: () => void;
   onOpenScheduler?: () => void;
+  onOpenSwarm?: () => void;
 }
 
 const SLASH_COMMANDS = [
@@ -498,7 +499,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   terminalOutputs,
   onOpenRules,
   onCompactSession,
-  onOpenScheduler
+  onOpenScheduler,
+  onOpenSwarm
 }) => {
   const [input, setInput] = useState('');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
@@ -1302,6 +1304,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <SwarmDashboard
                     swarmState={msg.swarmState}
                     isRunning={isRunning && msg.id === messages[messages.length - 1]?.id}
+                    onOpenRightTab={onOpenSwarm}
                   />
                 )}
 

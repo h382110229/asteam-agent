@@ -169,7 +169,7 @@ export interface WorkspaceFileItem {
   ext: string;
 }
 
-export type ScheduledTaskType = 'health_check' | 'security_scan' | 'test_runner' | 'autonomous_task';
+export type ScheduledTaskType = 'health_check' | 'security_scan' | 'test_runner' | 'autonomous_task' | 'enterprise_compliance';
 
 export type ScheduledTaskSchedule =
   | 'every_30m'
@@ -210,6 +210,8 @@ export interface InspectionReport {
   summary: string;
   filePath: string;
   fileName: string;
+  htmlReportPath?: string;
+  pdfReportPath?: string;
   metrics: {
     totalItemsChecked?: number;
     issuesFound?: number;

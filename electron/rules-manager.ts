@@ -159,6 +159,17 @@ ${rules.content}
   public getPresets(): RulePresetTemplate[] {
     return RULE_PRESETS;
   }
+
+  /**
+   * 获取当前工作区生效的项目规约列表
+   */
+  public getActiveRules(workspacePath: string | null): { source: string; content: string }[] {
+    const info = this.getProjectRules(workspacePath);
+    if (info.hasRules && info.content) {
+      return [{ source: info.ruleType, content: info.content }];
+    }
+    return [];
+  }
 }
 
 export const rulesManager = new RulesManager();

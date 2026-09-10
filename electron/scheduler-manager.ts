@@ -775,9 +775,31 @@ ${testOutput.slice(0, 3000)}
         const stat = fs.statSync(fullPath);
 
         let type: ScheduledTaskType = 'health_check';
-        if (file.includes('security')) type = 'security_scan';
+        if (file.includes('compliance')) type = 'enterprise_compliance';
+        else if (file.includes('security')) type = 'security_scan';
         else if (file.includes('test')) type = 'test_runner';
         else if (file.includes('autonomous')) type = 'autonomous_task';
+
+        // Check for companion HTML report
+        const htmlFileName = file.replace(/\.md$/, '.html');
+        const htmlFilePath = path.join(reportsDir, htmlFileName);
+        const hasHtml = fs.existsSync(htmlFilePath);
+
+        // Try reading header for accurate score and status
+        let score = 100;
+        let status: 'pass' | 'warning' | 'fail' = 'pass';
+        let summary = `体检报告: ${file} (${Math.round(stat.size / 1024)} KB)`;
+        try {
+          const sample = fs.readFileSync(fullPath, 'utf-8').slice(0, 1500);
+          const scoreMatch = sample.match(/(?:得分|结果)[：:]\s*`?(\d+)/);
+          if (scoreMatch) score = parseInt(scoreMatch[1], 10);
+          if (sample.includes('✅ 合规达标') || sample.includes('✅ 全部通过')) status = 'pass';
+          else if (sample.includes('⚠️')) status = 'warning';
+          else if (sample.includes('❌') || sample.includes('严重隐患')) status = 'fail';
+
+          const summaryMatch = sample.match(/(?:企业安全合规综合评分|体检得分)[^\n]+/);
+          if (summaryMatch) summary = summaryMatch[0].replace(/[#>`*]/g, '').trim();
+        } catch {}
 
         reports.push({
           id: file,
@@ -786,11 +808,12 @@ ${testOutput.slice(0, 3000)}
           type,
           workspacePath: effectiveWorkspace,
           timestamp: stat.mtimeMs,
-          status: 'pass',
-          score: 100,
-          summary: `体检报告: ${file} (${Math.round(stat.size / 1024)} KB)`,
+          status,
+          score,
+          summary,
           filePath: fullPath,
           fileName: file,
+          htmlReportPath: hasHtml ? htmlFilePath : undefined,
           metrics: {}
         });
       }
@@ -937,12 +960,23 @@ ${testOutput.slice(0, 3000)}
     }
 
     // 3. 项目工程行为准则规约遵循度
-    const rules = rulesManager.getActiveRules(workspace);
-    if (rules.length === 0) {
+    let activeRules: { source: string; content: string }[] = [];
+    try {
+      if (typeof rulesManager.getActiveRules === 'function') {
+        activeRules = rulesManager.getActiveRules(workspace);
+      } else {
+        const info = rulesManager.getProjectRules(workspace);
+        if (info.hasRules && info.content) {
+          activeRules = [{ source: info.ruleType, content: info.content }];
+        }
+      }
+    } catch {}
+
+    if (activeRules.length === 0) {
       violations.push('当前工作区未检测到 .asteamrules 或 ASTEAM.md 架构行为准则定义，建议初始化规约');
       score -= 10;
     } else {
-      compliancePasses.push(`已挂载生效 ${rules.length} 份团队级工程规约规范 (${rules.map(r => r.source).join(', ')})`);
+      compliancePasses.push(`已挂载生效 ${activeRules.length} 份团队级工程规约规范 (${activeRules.map(r => r.source).join(', ')})`);
     }
 
     // 4. 跨工作区知识图谱连接度

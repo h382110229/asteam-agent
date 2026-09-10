@@ -32,9 +32,10 @@ import {
   Image as ImageIcon,
   Video,
   Volume2,
-  CalendarClock
+  CalendarClock,
+  Users
 } from 'lucide-react';
-import { GitStatusSummary, GitFileStatus, CheckpointItem } from '../types/project';
+import { GitStatusSummary, GitFileStatus, CheckpointItem, SwarmState } from '../types/project';
 import { ChatMessageItem, extractPreviewableArtifact } from './ChatArea';
 import { HtmlPreview } from './preview/HtmlPreview';
 import { MermaidPreview } from './preview/MermaidPreview';
@@ -42,8 +43,9 @@ import { SvgPreview } from './preview/SvgPreview';
 import { LiveTerminalCard } from './LiveTerminalCard';
 import { ConfirmModal } from './ConfirmModal';
 import { SchedulerTab } from './SchedulerTab';
+import { SwarmTab } from './SwarmTab';
 
-export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal' | 'scheduler';
+export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal' | 'scheduler' | 'swarm';
 
 export interface PreviewData {
   type: 'html' | 'mermaid' | 'svg' | 'image' | 'video' | 'audio';
@@ -76,6 +78,8 @@ interface WorkspaceDrawerProps {
   terminalOutput?: string;
   messages?: ChatMessageItem[];
   onSelectPreview?: (data: PreviewData) => void;
+  latestSwarmState?: SwarmState | null;
+  isRunning?: boolean;
 }
 
 export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
@@ -91,10 +95,22 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   activeSessionId = 'global',
   terminalOutput = '',
   messages = [],
-  onSelectPreview
+  onSelectPreview,
+  latestSwarmState,
+  isRunning = false
 }) => {
   const [currentTab, setCurrentTab] = useState<WorkspaceDrawerTab>(activeTab);
   const [isFullScreen, setIsFullScreen] = useState(false);
+
+  const computedSwarmState = useMemo(() => {
+    if (latestSwarmState) return latestSwarmState;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].swarmState) {
+        return messages[i].swarmState;
+      }
+    }
+    return null;
+  }, [latestSwarmState, messages]);
 
   // Checkpoints Timeline State (v1.4.0)
   const [checkpoints, setCheckpoints] = useState<CheckpointItem[]>([]);
@@ -774,6 +790,27 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             >
               <CalendarClock className="h-3.5 w-3.5" />
               <span>自主巡检</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleTabSwitch('swarm')}
+              className={`no-drag flex items-center space-x-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
+                currentTab === 'swarm'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)]'
+              }`}
+            >
+              <Users className="h-3.5 w-3.5" />
+              <span>蜂群协同</span>
+              {computedSwarmState && (
+                <span className="flex h-2 w-2 relative ml-0.5">
+                  {isRunning && (
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                  )}
+                  <span className={`relative inline-flex rounded-full h-2 w-2 ${isRunning ? 'bg-teal-500' : 'bg-emerald-500'}`}></span>
+                </span>
+              )}
             </button>
           </div>
 
@@ -1518,6 +1555,13 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                 }
               }}
             />
+          </div>
+        )}
+
+        {/* Tab 7: Multi-Agent Swarm & Elastic Worker Pool (v1.7.0) */}
+        {currentTab === 'swarm' && (
+          <div className="flex-1 overflow-hidden">
+            <SwarmTab swarmState={computedSwarmState} isRunning={isRunning} />
           </div>
         )}
       </div>

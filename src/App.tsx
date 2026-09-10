@@ -164,6 +164,11 @@ export const App: React.FC = () => {
     setIsDrawerOpen(true);
   }, []);
 
+  const handleOpenSwarm = useCallback(() => {
+    setDrawerTab('swarm');
+    setIsDrawerOpen(true);
+  }, []);
+
   const refreshGitStatus = useCallback(async () => {
     if (!currentWorkspacePath || !window.electronAPI) {
       setGitStatus(null);
@@ -315,6 +320,8 @@ export const App: React.FC = () => {
         } else if (type === 'swarmState') {
           if (payload.state) {
             lastMsg.swarmState = payload.state;
+            setDrawerTab('swarm');
+            setIsDrawerOpen(true);
           }
         } else if (type === 'done') {
           // 若上游网关或模型将全部输出归入 reasoning_content (thought)，导致正文 content 为空，自动提拔为正文
@@ -760,6 +767,7 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           onOpenRules={handleOpenRules}
           onCompactSession={() => handleCompactSession(activeSessionId)}
           onOpenScheduler={handleOpenScheduler}
+          onOpenSwarm={handleOpenSwarm}
         />
       </div>
 
@@ -808,6 +816,8 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         activeSessionId={activeSessionId}
         terminalOutput={terminalOutputs[activeSessionId] || ''}
         messages={activeMessages}
+        latestSwarmState={activeMessages.slice().reverse().find(m => m.swarmState)?.swarmState || null}
+        isRunning={isRunning}
         onSelectPreview={(data) => {
           setPreviewData(data);
           setDrawerTab('preview');

@@ -62,6 +62,7 @@ import {
   applyPresetToConfig
 } from '../config/mcpPresets';
 import { McpPresetCard } from './McpPresetCard';
+import { ConfirmModal } from './ConfirmModal';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -96,6 +97,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [showApiKey, setShowApiKey] = useState(false);
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle');
   const [testMessage, setTestMessage] = useState('');
+  const [deleteSkillTarget, setDeleteSkillTarget] = useState<string | null>(null);
 
   // Fallback providers test status map
   const [fallbackTestState, setFallbackTestState] = useState<Record<string, { status: 'idle' | 'testing' | 'success' | 'failed'; message: string }>>({});
@@ -639,9 +641,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleDeleteSkill = async (e: React.MouseEvent, skillId: string) => {
+  const handleDeleteSkill = (e: React.MouseEvent, skillId: string) => {
     e.stopPropagation();
-    if (!window.confirm('确定要删除此自定义技能吗？') || !window.electronAPI) return;
+    setDeleteSkillTarget(skillId);
+  };
+
+  const executeDeleteSkill = async () => {
+    if (!deleteSkillTarget || !window.electronAPI) return;
+    const skillId = deleteSkillTarget;
+    setDeleteSkillTarget(null);
     try {
       await window.electronAPI.deleteSkill(skillId);
       await refreshSkills();
@@ -2266,6 +2274,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* 自定义技能删除确认弹窗 */}
+      <ConfirmModal
+        isOpen={!!deleteSkillTarget}
+        onClose={() => setDeleteSkillTarget(null)}
+        onConfirm={executeDeleteSkill}
+        title="确定删除此自定义技能？"
+        subtitle="此操作将永久移除该技能配置与本地指令定义"
+        description={`您正在准备删除自定义技能「${deleteSkillTarget || ''}」。删除后，该技能将无法在对话中通过 @技能 唤出。`}
+        confirmText="确认删除"
+        cancelText="取消"
+        isDanger={true}
+        iconType="trash"
+        zIndexClass="z-[70]"
+        tipText="提示：如果需要，您可以随时通过设置面板重新创建或导入该技能。"
+      />
     </div>
   );
 };

@@ -17,6 +17,7 @@ import {
   Search,
   X
 } from 'lucide-react';
+import { ConfirmModal } from './ConfirmModal';
 
 interface EnterpriseHubModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export const EnterpriseHubModal: React.FC<EnterpriseHubModalProps> = ({ isOpen, 
   const [hubState, setHubState] = useState<any>({ extensions: [] });
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<{ success: boolean; msg: string } | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<{ id: string; name: string } | null>(null);
 
   // Import form state
   const [sourceType, setSourceType] = useState<'zip' | 'git' | 'npm'>('zip');
@@ -98,8 +100,14 @@ export const EnterpriseHubModal: React.FC<EnterpriseHubModalProps> = ({ isOpen, 
     }
   };
 
-  const handleUninstall = async (id: string, name: string) => {
-    if (!confirm(`确定卸载企业私有扩展「${name}」？此操作将移除本地离线缓存。`)) return;
+  const handleUninstall = (id: string, name: string) => {
+    setUninstallTarget({ id, name });
+  };
+
+  const executeUninstall = async () => {
+    if (!uninstallTarget) return;
+    const { id, name } = uninstallTarget;
+    setUninstallTarget(null);
     try {
       await (window as any).electronAPI.uninstallEnterpriseExtension(id);
       setFeedback({ success: true, msg: `已成功卸载「${name}」` });
@@ -443,6 +451,22 @@ export const EnterpriseHubModal: React.FC<EnterpriseHubModalProps> = ({ isOpen, 
           )}
         </div>
       </div>
+
+      {/* 现代优雅企业扩展卸载确认弹窗 (替代原生系统 win32 confirm 弹窗) */}
+      <ConfirmModal
+        isOpen={!!uninstallTarget}
+        onClose={() => setUninstallTarget(null)}
+        onConfirm={executeUninstall}
+        title="确定卸载该企业私有扩展？"
+        subtitle="此操作将永久移除本地离线缓存及运行时关联"
+        description={`您正在准备卸载企业私有扩展「${uninstallTarget?.name || ''}」。卸载后，该扩展提供的工具与技能将从当前 MCP 及技能运行时中注销。`}
+        confirmText="确认卸载"
+        cancelText="取消"
+        isDanger={true}
+        iconType="trash"
+        zIndexClass="z-[70]"
+        tipText="提示：如需再次使用，可随时通过私有 Git、npm 或本地 ZIP 重新导入。"
+      />
     </div>
   );
 };

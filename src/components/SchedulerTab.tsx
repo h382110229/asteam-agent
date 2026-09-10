@@ -67,6 +67,13 @@ const TYPE_CONFIG: Record<
     accentColor: 'text-purple-600 dark:text-purple-400',
     bgColor: 'bg-purple-50 dark:bg-purple-950/30',
     borderColor: 'border-purple-200 dark:border-purple-800/60'
+  },
+  enterprise_compliance: {
+    name: '企业安全合规体检',
+    icon: Shield,
+    accentColor: 'text-teal-600 dark:text-teal-400',
+    bgColor: 'bg-teal-50 dark:bg-teal-950/30',
+    borderColor: 'border-teal-200 dark:border-teal-800/60'
   }
 };
 
@@ -137,6 +144,13 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({ workspacePath, onPre
     }
   };
 
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => setToastMessage(null), 4000);
+  };
+
   const handleRunNow = async (task: ScheduledTask) => {
     if (!window.electronAPI) return;
     setRunningTaskId(task.id);
@@ -144,9 +158,11 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({ workspacePath, onPre
       const report = await window.electronAPI.runScheduledTaskNow(task.id, workspacePath || undefined);
       if (report) {
         await loadData();
+        showToast(`巡检完成:「${task.name}」(${report.score} 分 · ${report.status.toUpperCase()})`, 'success');
       }
     } catch (err: any) {
       console.error('Run task now failed:', err);
+      showToast(`巡检失败: ${err.message || '未知异常'}`, 'error');
     } finally {
       setRunningTaskId(null);
     }
@@ -178,22 +194,32 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({ workspacePath, onPre
       setShowCreateModal(false);
       setNewTaskName('');
       setNewTaskPrompt('');
+      showToast(`已创建后台巡航任务: ${created.name}`, 'success');
     }
   };
 
   const handleOpenReport = async (report: InspectionReport) => {
     if (!window.electronAPI) return;
-    const res = await window.electronAPI.readInspectionReport(report.filePath);
+    // 优先读取 HTML 自包含全景审计报表 (支持打印与系统级 PDF 导出)
+    const pathToRead = report.htmlReportPath || report.filePath;
+    const isHtml = Boolean(report.htmlReportPath || pathToRead.endsWith('.html'));
+    const res = await window.electronAPI.readInspectionReport(pathToRead);
     if (res.success && res.content) {
+      const reportTitle = isHtml
+        ? (report.fileName.endsWith('.html') ? report.fileName : report.fileName.replace(/\.md$/, '.html'))
+        : report.fileName;
+
       if (onPreviewReport) {
-        onPreviewReport(report.fileName, res.content, report.filePath);
+        onPreviewReport(reportTitle, res.content, pathToRead);
       } else {
         setPreviewingReport({
-          title: report.fileName,
+          title: reportTitle,
           content: res.content,
-          filePath: report.filePath
+          filePath: pathToRead
         });
       }
+    } else {
+      showToast(`读取报告失败: ${res.error || '文件无法加载'}`, 'error');
     }
   };
 
@@ -433,6 +459,17 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({ workspacePath, onPre
               >
                 单测巡检
               </button>
+              <button
+                type="button"
+                onClick={() => setActiveReportFilter('enterprise_compliance')}
+                className={`rounded px-2 py-1 font-medium transition-colors ${
+                  activeReportFilter === 'enterprise_compliance'
+                    ? 'bg-teal-600 text-white'
+                    : 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                安全合规
+              </button>
             </div>
           </div>
 
@@ -551,6 +588,7 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({ workspacePath, onPre
                   <option value="health_check">🩺 工作区代码健康体检 (Health Check)</option>
                   <option value="security_scan">🛡️ 依赖漏洞与密钥安全排查 (Security Scan)</option>
                   <option value="test_runner">🧪 自动化单元测试巡检 (Test Runner)</option>
+                  <option value="enterprise_compliance">🏢 企业级安全合规与敏感风险综合体检 (Compliance Scan)</option>
                   <option value="autonomous_task">🤖 长程自主任务巡航 (Autonomous Runner)</option>
                 </select>
               </div>
@@ -644,6 +682,24 @@ export const SchedulerTab: React.FC<SchedulerTabProps> = ({ workspacePath, onPre
             <div className="flex-1 overflow-y-auto p-5 font-mono text-xs leading-relaxed text-[var(--foreground)] bg-[var(--card)] select-text whitespace-pre-wrap">
               {previewingReport.content}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Feedback */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div className={`flex items-center space-x-2.5 rounded-xl border px-4 py-3 shadow-lg text-xs font-medium ${
+            toastMessage.type === 'success'
+              ? 'bg-teal-500/10 border-teal-500/30 text-teal-700 dark:text-teal-300 dark:bg-teal-950/80 backdrop-blur-md'
+              : 'bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-300 dark:bg-red-950/80 backdrop-blur-md'
+          }`}>
+            {toastMessage.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 text-teal-600 dark:text-teal-400 shrink-0" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
+            )}
+            <span>{toastMessage.text}</span>
           </div>
         </div>
       )}

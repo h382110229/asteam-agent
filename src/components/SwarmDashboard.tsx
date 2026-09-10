@@ -16,13 +16,16 @@ import {
   FileCheck2,
   Zap,
   Cpu,
-  Layers
+  Layers,
+  PanelRightOpen,
+  ChevronUp
 } from 'lucide-react';
 import { SwarmState, SwarmAgentRole, SwarmSubTask, SwarmBusMessage, SwarmWorkerAgent } from '../types/project';
 
 interface SwarmDashboardProps {
   swarmState: SwarmState;
   isRunning?: boolean;
+  onOpenRightTab?: () => void;
 }
 
 const ROLE_CONFIG: Record<
@@ -89,7 +92,8 @@ const PHASE_TITLES: Record<string, { label: string; color: string }> = {
   failed: { label: '⚠️ 协同受阻', color: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' }
 };
 
-export const SwarmDashboard: React.FC<SwarmDashboardProps> = ({ swarmState, isRunning }) => {
+export const SwarmDashboard: React.FC<SwarmDashboardProps> = ({ swarmState, isRunning, onOpenRightTab }) => {
+  const [isMinimized, setIsMinimized] = useState(false);
   const [isWorkersOpen, setIsWorkersOpen] = useState(true);
   const [isTasksOpen, setIsTasksOpen] = useState(true);
   const [isBusMessagesOpen, setIsBusMessagesOpen] = useState(false);
@@ -135,16 +139,42 @@ export const SwarmDashboard: React.FC<SwarmDashboardProps> = ({ swarmState, isRu
           </div>
         </div>
 
-        {swarmState.activeRole && isRunning && (
-          <div className="flex items-center gap-2 rounded-full border border-teal-300/60 bg-white/80 px-3 py-1 text-xs font-medium text-teal-800 shadow-xs dark:border-teal-700/60 dark:bg-slate-800/90 dark:text-teal-300">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75"></span>
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
-            </span>
-            <span>活跃节点: {ROLE_CONFIG[swarmState.activeRole].name}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          {swarmState.activeRole && isRunning && (
+            <div className="flex items-center gap-1.5 rounded-full border border-teal-300/60 bg-white/80 px-2.5 py-0.5 text-xs font-medium text-teal-800 shadow-xs dark:border-teal-700/60 dark:bg-slate-800/90 dark:text-teal-300">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75"></span>
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-500"></span>
+              </span>
+              <span>活跃: {ROLE_CONFIG[swarmState.activeRole].name}</span>
+            </div>
+          )}
+
+          {onOpenRightTab && (
+            <button
+              type="button"
+              onClick={onOpenRightTab}
+              className="flex items-center gap-1 rounded-lg border border-teal-300/80 bg-white px-2.5 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-50 dark:border-teal-700 dark:bg-slate-800 dark:text-teal-300 dark:hover:bg-slate-700 transition-all cursor-pointer shadow-2xs"
+              title="在右侧工作台固定视图查看实时进度，避免消息流滚动冲刷"
+            >
+              <PanelRightOpen className="h-3.5 w-3.5" />
+              <span>固定在右侧查看</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIsMinimized(!isMinimized)}
+            className="rounded-lg p-1 text-slate-400 hover:bg-white/60 hover:text-slate-600 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors cursor-pointer"
+            title={isMinimized ? '展开看板' : '折叠看板'}
+          >
+            {isMinimized ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          </button>
+        </div>
       </div>
+
+      {!isMinimized && (
+        <>
 
       {/* 2. 4 Agents Matrix Grid */}
       <div className="grid grid-cols-1 gap-2.5 p-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -464,6 +494,8 @@ export const SwarmDashboard: React.FC<SwarmDashboardProps> = ({ swarmState, isRu
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );
