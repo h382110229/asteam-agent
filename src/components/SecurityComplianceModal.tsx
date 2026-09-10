@@ -16,17 +16,30 @@ import {
   X,
   Play,
   Layers,
-  FolderGit2
+  FolderGit2,
+  FileCheck2,
+  Printer,
+  ExternalLink,
+  Loader2,
+  Sparkles,
+  CalendarClock,
+  ArrowRight
 } from 'lucide-react';
 
 interface SecurityComplianceModalProps {
   isOpen: boolean;
   onClose: () => void;
   workspacePath?: string | null;
+  onPreviewReport?: (title: string, content: string, filePath?: string) => void;
 }
 
-export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = ({ isOpen, onClose, workspacePath }) => {
-  const [activeTab, setActiveTab] = useState<'fence' | 'sandbox' | 'graph' | 'logs'>('fence');
+export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = ({
+  isOpen,
+  onClose,
+  workspacePath,
+  onPreviewReport
+}) => {
+  const [activeTab, setActiveTab] = useState<'fence' | 'sandbox' | 'graph' | 'logs' | 'compliance'>('fence');
   const [fenceConfig, setFenceConfig] = useState<any>({
     mode: 'redact',
     enabledRules: {
@@ -51,6 +64,50 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
   // Symbol Search state
   const [symbolQuery, setSymbolQuery] = useState('');
   const [symbolResults, setSymbolResults] = useState<any[]>([]);
+
+  // Compliance Inspection & Report states
+  const [complianceReports, setComplianceReports] = useState<any[]>([]);
+  const [loadingCompliance, setLoadingCompliance] = useState(false);
+  const [runningComplianceAudit, setRunningComplianceAudit] = useState(false);
+  const [complianceToast, setComplianceToast] = useState<string | null>(null);
+
+  const loadComplianceReports = async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.getInspectionReports) return;
+    setLoadingCompliance(true);
+    try {
+      const reports = await api.getInspectionReports(workspacePath || null);
+      if (Array.isArray(reports)) {
+        const compReports = reports.filter((r: any) => r.taskType === 'enterprise_compliance' || r.title?.includes('企业') || r.title?.includes('合规'));
+        setComplianceReports(compReports.length > 0 ? compReports : reports);
+      }
+    } catch (e) {
+      console.warn('Failed to load compliance reports:', e);
+    } finally {
+      setLoadingCompliance(false);
+    }
+  };
+
+  const handleRunComplianceAudit = async () => {
+    const api = (window as any).electronAPI;
+    if (!api?.runScheduledTaskNow) return;
+    setRunningComplianceAudit(true);
+    setComplianceToast('正在启动企业资产安全与合规审计引擎...');
+    try {
+      const rep = await api.runScheduledTaskNow('task-compliance', workspacePath || undefined);
+      if (rep) {
+        setComplianceToast(`合规审计完成！得分: ${rep.score} 分 (${rep.status.toUpperCase()})`);
+        await loadComplianceReports();
+      } else {
+        setComplianceToast('审计任务已执行完毕');
+      }
+    } catch (e: any) {
+      setComplianceToast(`审计执行失败: ${e.message || '未知错误'}`);
+    } finally {
+      setRunningComplianceAudit(false);
+      setTimeout(() => setComplianceToast(null), 4000);
+    }
+  };
 
   const loadData = async () => {
     const api = (window as any).electronAPI;
@@ -77,9 +134,10 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
   useEffect(() => {
     if (isOpen) {
       loadData();
+      loadComplianceReports();
       setSaveSuccess(false);
     }
-  }, [isOpen]);
+  }, [isOpen, workspacePath]);
 
   if (!isOpen) return null;
 
@@ -139,11 +197,11 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
                   跨工作区知识图谱与数据安全围栏 (Knowledge & Security Fence)
                 </h2>
                 <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800 dark:bg-purple-950 dark:text-purple-300">
-                  v1.7.0 出境防护
+                  v1.7.1 出境防护与合规审计
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                出境请求实时脱敏过滤 · 跨工程微服务契约倒排索引 · 拦截审计与防外泄围栏
+                出境请求实时脱敏过滤 · 跨工程微服务契约倒排索引 · 企业合规体检与审计报告
               </p>
             </div>
           </div>
@@ -161,6 +219,7 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
             {[
               { id: 'fence', label: '安全出境围栏', icon: Lock },
               { id: 'sandbox', label: '实时脱敏沙盒模拟', icon: EyeOff },
+              { id: 'compliance', label: `合规审计与报告 (${complianceReports.length})`, icon: FileCheck2 },
               { id: 'graph', label: `跨工作区联合图谱 (${workspaces.length})`, icon: Network },
               { id: 'logs', label: `拦截审计日志 (${auditLogs.length})`, icon: History }
             ].map(tab => {
@@ -451,7 +510,189 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
             </div>
           )}
 
-          {/* 4. Audit Logs */}
+          {/* 4. Enterprise Compliance Audit & Reports (v1.7.1) */}
+          {activeTab === 'compliance' && (
+            <div className="space-y-4">
+              {/* Top Action Banner */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-2xl border border-purple-200/80 bg-gradient-to-r from-purple-50 via-slate-50 to-teal-50/50 p-4 dark:border-purple-900/40 dark:from-purple-950/20 dark:via-slate-900/40 dark:to-teal-950/20 shadow-xs">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm">
+                      企业代码资产与出境合规自动化审计
+                    </span>
+                    <span className="rounded-full bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 px-2 py-0.5 text-[10px] font-semibold">
+                      离线就地体检
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    涵盖：工作区行为准则（.asteamrules）、全库敏感密钥/IP扫描、图谱倒排索引完整度与出境围栏状态
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRunComplianceAudit}
+                  disabled={runningComplianceAudit}
+                  className="flex items-center gap-2 rounded-xl bg-purple-600 px-4 py-2 text-xs font-semibold text-white shadow-md hover:bg-purple-700 active:scale-98 transition-all disabled:opacity-50 cursor-pointer shrink-0"
+                >
+                  {runningComplianceAudit ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>正在全量体检...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      <span>一键执行全量合规审计</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Toast Feedback */}
+              {complianceToast && (
+                <div className="flex items-center gap-2 rounded-xl border border-purple-300/80 bg-purple-50 px-3.5 py-2 text-xs font-medium text-purple-800 dark:border-purple-800/80 dark:bg-purple-950/40 dark:text-purple-300 animate-in fade-in duration-200 shadow-2xs">
+                  <CheckCircle2 className="h-4 w-4 text-purple-600 shrink-0" />
+                  <span>{complianceToast}</span>
+                </div>
+              )}
+
+              {/* Reports List / Cards */}
+              {complianceReports.length === 0 ? (
+                <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 p-8 text-center bg-slate-50/50 dark:bg-slate-900/20">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-purple-100 text-purple-600 dark:bg-purple-950 dark:text-purple-400 mb-3 shadow-xs">
+                    <FileCheck2 className="h-7 w-7" />
+                  </div>
+                  <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-200 mb-1">
+                    尚未生成工作区合规审计报告
+                  </h4>
+                  <p className="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
+                    点击上方按钮启动自动化审计引擎，系统将自动审查工作区安全基线并产出自包含企业级 HTML 报表。
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleRunComplianceAudit}
+                    disabled={runningComplianceAudit}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-purple-300 bg-white px-3 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-50 dark:border-purple-700 dark:bg-slate-800 dark:text-purple-300 dark:hover:bg-slate-700 transition-colors shadow-2xs cursor-pointer"
+                  >
+                    <Play className="h-3.5 w-3.5" />
+                    <span>立即开始首次体检</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 px-1">
+                    <span>历史合规体检记录 ({complianceReports.length})</span>
+                    <button
+                      type="button"
+                      onClick={loadComplianceReports}
+                      className="text-[11px] text-purple-600 hover:underline dark:text-purple-400 cursor-pointer"
+                    >
+                      刷新列表
+                    </button>
+                  </div>
+
+                  {complianceReports.map((rep: any, idx: number) => {
+                    const isLatest = idx === 0;
+                    const score = rep.score ?? 90;
+                    const scoreColor =
+                      score >= 95
+                        ? 'text-emerald-600 border-emerald-500/30 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400'
+                        : score >= 80
+                        ? 'text-amber-600 border-amber-500/30 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400'
+                        : 'text-rose-600 border-rose-500/30 bg-rose-50 dark:bg-rose-950/40 dark:text-rose-400';
+
+                    return (
+                      <div
+                        key={rep.id || idx}
+                        className={`rounded-2xl border p-4 transition-all shadow-xs ${
+                          isLatest
+                            ? 'border-purple-300/80 bg-white dark:border-purple-900/60 dark:bg-slate-800/80'
+                            : 'border-slate-200 bg-slate-50/60 dark:border-slate-800 dark:bg-slate-900/30'
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-start gap-3 min-w-0">
+                            {/* Score badge */}
+                            <div className={`flex flex-col items-center justify-center h-12 w-12 rounded-xl border font-bold text-base shrink-0 shadow-2xs ${scoreColor}`}>
+                              <span>{score}</span>
+                              <span className="text-[8px] font-normal uppercase tracking-wider opacity-70">分</span>
+                            </div>
+
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-slate-800 dark:text-slate-100 text-sm truncate">
+                                  {rep.title || '企业合规巡检审计报表'}
+                                </span>
+                                {isLatest && (
+                                  <span className="rounded-full bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300 px-2 py-0.2 text-[10px] font-semibold">
+                                    最新结果
+                                  </span>
+                                )}
+                                <span className="rounded bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px] px-1.5 py-0.5 font-mono">
+                                  {rep.status?.toUpperCase() || 'COMPLETED'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                                {rep.summary || '已对工作区准则文件、安全围栏配置与敏感资产进行深度扫描并汇总审计'}
+                              </p>
+                              <div className="flex items-center gap-3 mt-1.5 text-[10px] text-slate-400 font-mono">
+                                <span>审计时间: {rep.timestamp ? new Date(rep.timestamp < 10000000000 ? rep.timestamp * 1000 : rep.timestamp).toLocaleString('zh-CN', { hour12: false }) : '刚刚'}</span>
+                                {rep.durationMs && (
+                                  <span>耗时: {(rep.durationMs / 1000).toFixed(2)}s</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                            {onPreviewReport && (
+                              <button
+                                type="button"
+                                onClick={() => onPreviewReport(rep.title || '企业合规审计报告', rep.content || '', rep.filePath)}
+                                className="flex items-center gap-1.5 rounded-lg border border-purple-300/80 bg-purple-50/50 px-2.5 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300 dark:hover:bg-purple-900/60 transition-colors cursor-pointer shadow-2xs"
+                                title="关闭弹窗并在右侧工作台开启大屏多模态全景预览"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                <span>在工作台预览全景</span>
+                              </button>
+                            )}
+
+                            {(rep.content || rep.filePath) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (window.electronAPI?.openInBrowser) {
+                                    window.electronAPI.openInBrowser({
+                                      content: rep.content || '',
+                                      title: rep.title || '企业合规审计报告',
+                                      defaultPath: rep.filePath
+                                    });
+                                  } else if (rep.content) {
+                                    const blob = new Blob([rep.content], { type: 'text/html;charset=utf-8' });
+                                    const url = URL.createObjectURL(blob);
+                                    window.open(url, '_blank');
+                                  }
+                                }}
+                                className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer shadow-2xs"
+                                title="在外部浏览器打开并可直接打印或另存为 PDF"
+                              >
+                                <Printer className="h-3.5 w-3.5" />
+                                <span>浏览器 / 打印 PDF</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 5. Audit Logs */}
           {activeTab === 'logs' && (
             <div className="space-y-2">
               {auditLogs.length === 0 ? (

@@ -20,6 +20,12 @@ import { rulesManager } from './rules-manager';
 import { memoryManager } from './memory-manager';
 import { mcpManager } from './mcp-manager';
 
+function getCurrentTimeNotice(): string {
+  const now = new Date().toLocaleString('zh-CN', { hour12: false });
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+  return `【当前宿主真实物理时间】: ${now} (${tz})。输出的所有日志、时间戳、报告与代码均以此物理时间为准，严禁凭空臆造过去年份。`;
+}
+
 export class SwarmOrchestrator {
   private bus: SwarmMessageBus;
   private workerPool: ElasticWorkerPool;
@@ -190,7 +196,7 @@ ${userPrompt}
     await callLLMStream(
       this.config,
       [
-        { role: 'system', content: '你是严谨专业的系统架构总师，负责全局任务拆解与多智能体分工协同。' },
+        { role: 'system', content: `你是严谨专业的系统架构总师，负责全局任务拆解与多智能体分工协同。\n${getCurrentTimeNotice()}` },
         { role: 'user', content: planningPrompt }
       ],
       this.abortSignal,
@@ -284,6 +290,7 @@ ${userPrompt}
           const coderSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Coder 全栈核心研发子智能体 (${workerName})】。
 你专注于高质量代码实现、文件修改与工程构建。
 你必须调用工具来实际读取和写入文件，严禁凭空宣称已修改！
+${getCurrentTimeNotice()}
 
 【工作区路径】
 - 当前工作区: ${this.effectiveWorkspace}
@@ -406,6 +413,7 @@ ${task.input || task.title}
 
           const testerSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Tester 自动化测试子智能体 (${workerName})】。
 你的职责是对 Coder 提交的代码和修改进行严格的质量检验与自动化测试。
+${getCurrentTimeNotice()}
 你可以调用工具查看文件（view_file）或运行本地命令（run_terminal_command，例如 npm test, npx tsc --noEmit, 语法检查或运行脚本）。
 
 【工作区路径】
@@ -508,6 +516,7 @@ ${coderOutputs}
 
     const reviewerSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Reviewer 代码规范与安全审计官】。
 你的核心使命是对 Coder 的开发代码与 Tester 的检验结果进行全局安全与质量评审。
+${getCurrentTimeNotice()}
 
 ${rulesPrompt}
 
@@ -590,7 +599,7 @@ ${reviewerReport}
     await callLLMStream(
       this.config,
       [
-        { role: 'system', content: '你是具有全局视角的首席架构师，负责交付高水准的工程成果报告。' },
+        { role: 'system', content: `你是具有全局视角的首席架构师，负责交付高水准的工程成果报告。\n${getCurrentTimeNotice()}` },
         { role: 'user', content: summaryPrompt }
       ],
       this.abortSignal,

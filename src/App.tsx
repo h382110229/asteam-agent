@@ -818,11 +818,22 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         onClose={() => setIsEnterpriseHubOpen(false)}
       />
 
-      {/* 3.3 Security Fence & Knowledge Graph Modal (v1.7.0) */}
+      {/* 3.3 Security Fence & Knowledge Graph Modal (v1.7.1) */}
       <SecurityComplianceModal
         isOpen={isSecurityComplianceOpen}
         onClose={() => setIsSecurityComplianceOpen(false)}
         workspacePath={currentWorkspacePath}
+        onPreviewReport={(title, content, filePath) => {
+          setIsSecurityComplianceOpen(false);
+          setPreviewData({
+            type: 'html',
+            title,
+            content,
+            filePath
+          });
+          setDrawerTab('preview');
+          setIsDrawerOpen(true);
+        }}
       />
     </div>
   );

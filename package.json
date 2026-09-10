@@ -1,6 +1,6 @@
 {
   "name": "asteam-agent",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "ASTeam Agent - Intelligent Windows Desktop Client powered by deepseek-harness",
   "author": "ASTeam",
   "main": "dist-electron/main.cjs",

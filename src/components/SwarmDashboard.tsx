@@ -472,7 +472,12 @@ export const SwarmDashboard: React.FC<SwarmDashboardProps> = ({ swarmState, isRu
                   <div key={msg.id} className="py-2 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[10px] text-slate-400">
-                        {new Date(msg.timestamp).toLocaleTimeString()}
+                        {(() => {
+                          const ts = msg.timestamp;
+                          if (!ts) return '';
+                          const ms = ts < 10000000000 ? ts * 1000 : ts;
+                          return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false });
+                        })()}
                       </span>
                       <span className="font-semibold text-slate-800 dark:text-slate-200">
                         {fromConfig?.name || msg.fromRole}

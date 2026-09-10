@@ -520,7 +520,14 @@ export const SwarmTab: React.FC<SwarmTabProps> = ({ swarmState, isRunning = fals
                     <span className="font-semibold text-teal-600 dark:text-teal-400 uppercase">
                       {msg.fromRole} ➔ {msg.toRole}
                     </span>
-                    <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                    <span>
+                      {(() => {
+                        const ts = msg.timestamp;
+                        if (!ts) return '';
+                        const ms = ts < 10000000000 ? ts * 1000 : ts;
+                        return new Date(ms).toLocaleTimeString('zh-CN', { hour12: false });
+                      })()}
+                    </span>
                   </div>
                   <p className="text-[var(--foreground)]">{msg.content}</p>
                 </div>

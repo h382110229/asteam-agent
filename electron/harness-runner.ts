@@ -1883,6 +1883,8 @@ export async function runHarnessAgent(
 
 【宿主系统与本地真实环境（真实有效，严禁臆测假用户名）】
 - 操作系统平台：${process.platform === 'win32' ? 'Windows' : process.platform} (${os.release()})
+- 当前物理系统真实时间：${new Date().toLocaleString('zh-CN', { hour12: false })} (时区: ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'})
+- 真实时间锚点纪律：所有代码版本、Git 提交记录、测试报告、日志排期与分析回复必须以此物理真实时间为基准，严禁凭空臆造过去或未来的年份！
 - 当前系统登录用户名：${currentUsername}
 - 用户真实主目录：${userHome}
 - 用户真实桌面目录：${desktopDir}
