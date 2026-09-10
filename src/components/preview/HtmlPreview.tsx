@@ -86,27 +86,60 @@ export const HtmlPreview: React.FC<HtmlPreviewProps> = ({ content, title, filePa
   };
 
   // Ensure standard HTML structure
-  const wrappedContent = content.includes('<html')
+  const isCompleteHtml = content.includes('<html');
+  const isEmpty = !content || !content.trim();
+
+  const emptyPlaceholderHtml = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:360px;text-align:center;padding:32px;color:${themeMode === 'dark' ? '#94a3b8' : '#64748b'};">
+      <div style="font-size:36px;margin-bottom:12px;">📑</div>
+      <h3 style="font-size:16px;font-weight:600;color:${themeMode === 'dark' ? '#f1f5f9' : '#1e293b'};margin-bottom:6px;">暂无报表或预览内容</h3>
+      <p style="font-size:12px;max-width:320px;line-height:1.5;">文件尚未写入完成或读取内容为空。请在左侧安全围栏弹窗中点击重新加载。</p>
+    </div>
+  `;
+
+  const wrappedContent = isCompleteHtml
     ? content
     : `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${title || 'ASTeam HTML Preview'}</title>
+  <title>${title || 'ASTeam Preview'}</title>
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     body {
       margin: 0;
-      padding: 16px;
+      padding: 24px;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       background-color: ${themeMode === 'dark' ? '#0f172a' : '#ffffff'};
       color: ${themeMode === 'dark' ? '#f8fafc' : '#0f172a'};
+      line-height: 1.6;
     }
+    table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 13px; }
+    th, td { border: 1px solid ${themeMode === 'dark' ? '#334155' : '#e2e8f0'}; padding: 8px 12px; text-align: left; }
+    th { background-color: ${themeMode === 'dark' ? '#1e293b' : '#f8fafc'}; font-weight: 600; }
+    code { background: ${themeMode === 'dark' ? '#1e293b' : '#f1f5f9'}; padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; font-size: 12px; }
+    pre { background: ${themeMode === 'dark' ? '#1e293b' : '#f1f5f9'}; padding: 12px; border-radius: 8px; overflow-x: auto; }
+    blockquote { border-left: 4px solid #8b5cf6; padding-left: 12px; margin: 12px 0; color: ${themeMode === 'dark' ? '#cbd5e1' : '#475569'}; }
+    h1, h2, h3 { color: ${themeMode === 'dark' ? '#f8fafc' : '#0f172a'}; margin-top: 18px; margin-bottom: 8px; font-weight: 600; }
+    ul, ol { padding-left: 20px; }
+    li { margin-bottom: 4px; }
   </style>
 </head>
 <body>
-${content}
+  ${isEmpty ? emptyPlaceholderHtml : `<div id="render-target"></div>
+  <script>
+    (function() {
+      const raw = ${JSON.stringify(content)};
+      const target = document.getElementById('render-target');
+      if (typeof marked !== 'undefined' && marked.parse) {
+        target.innerHTML = marked.parse(raw);
+      } else {
+        target.innerText = raw;
+      }
+    })();
+  </script>`}
 </body>
 </html>`;
 

@@ -70,6 +70,103 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
   const [loadingCompliance, setLoadingCompliance] = useState(false);
   const [runningComplianceAudit, setRunningComplianceAudit] = useState(false);
   const [complianceToast, setComplianceToast] = useState<string | null>(null);
+  const [openingReportId, setOpeningReportId] = useState<string | null>(null);
+
+  const handlePreviewReportItem = async (rep: any) => {
+    if (!onPreviewReport) return;
+    const api = (window as any).electronAPI;
+    const reportKey = rep.id || rep.fileName || rep.filePath || 'report';
+    setOpeningReportId(reportKey);
+
+    try {
+      // 优先读取 HTML 版本的自包含全景审计报表
+      const pathToHtml = rep.htmlReportPath || (rep.filePath ? rep.filePath.replace(/\.md$/, '.html') : '');
+      let content = rep.content;
+      let usedPath = pathToHtml;
+
+      if (!content && api?.readInspectionReport && pathToHtml) {
+        try {
+          const res = await api.readInspectionReport(pathToHtml);
+          if (res?.success && res?.content) {
+            content = res.content;
+          }
+        } catch (e) {
+          console.warn('Failed to read html report:', e);
+        }
+      }
+
+      // 如果 HTML 读取未成功，回退读取 Markdown 报告
+      if (!content && api?.readInspectionReport && rep.filePath) {
+        try {
+          const res = await api.readInspectionReport(rep.filePath);
+          if (res?.success && res?.content) {
+            content = res.content;
+            usedPath = rep.filePath;
+          }
+        } catch (e) {
+          console.warn('Failed to read markdown report:', e);
+        }
+      }
+
+      if (!content) {
+        content = `<div style="padding: 32px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f8fafc; background-color: #0f172a; min-height: 100vh;">
+          <h2 style="color: #ef4444; margin-bottom: 12px;">⚠️ 审计报告内容未能加载</h2>
+          <p style="color: #94a3b8; font-size: 13px;">尝试读取路径: <code>${pathToHtml || rep.filePath || '未知'}</code></p>
+          <p style="color: #94a3b8; font-size: 13px; margin-top: 8px;">请确认该报告文件是否存在于本地 <code>.asteam/reports/</code> 目录中。</p>
+        </div>`;
+      }
+
+      const isHtml = content.includes('<html') || usedPath?.endsWith('.html');
+      const baseName = rep.fileName || rep.taskName || rep.title || '企业合规巡检审计报表';
+      const reportTitle = baseName.replace(/\.(md|html)$/, '') + (isHtml ? '.html' : '.md');
+
+      onPreviewReport(reportTitle, content, usedPath || rep.filePath);
+    } catch (err) {
+      console.error('Error previewing report:', err);
+    } finally {
+      setOpeningReportId(null);
+    }
+  };
+
+  const handleOpenInBrowser = async (rep: any) => {
+    const api = (window as any).electronAPI;
+    const pathToHtml = rep.htmlReportPath || (rep.filePath ? rep.filePath.replace(/\.md$/, '.html') : '');
+    const targetPath = pathToHtml || rep.filePath;
+    let content = rep.content;
+
+    if (!content && api?.readInspectionReport && targetPath) {
+      try {
+        const res = await api.readInspectionReport(targetPath);
+        if (res?.success && res?.content) {
+          content = res.content;
+        }
+      } catch {}
+    }
+
+    if (!content && api?.readInspectionReport && rep.filePath && rep.filePath !== targetPath) {
+      try {
+        const res = await api.readInspectionReport(rep.filePath);
+        if (res?.success && res?.content) {
+          content = res.content;
+        }
+      } catch {}
+    }
+
+    const baseName = rep.fileName || rep.taskName || rep.title || '企业合规审计报告';
+    const title = baseName.replace(/\.(md|html)$/, '') + '.html';
+
+    if (api?.openInBrowser) {
+      await api.openInBrowser({
+        content: content || '',
+        title,
+        defaultPath: pathToHtml || rep.filePath
+      });
+    } else if (content) {
+      const blob = new Blob([content], { type: 'text/html;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    }
+  };
 
   const loadComplianceReports = async () => {
     const api = (window as any).electronAPI;
@@ -660,31 +757,24 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
                             {onPreviewReport && (
                               <button
                                 type="button"
-                                onClick={() => onPreviewReport(rep.title || '企业合规审计报告', rep.content || '', rep.filePath)}
-                                className="flex items-center gap-1.5 rounded-lg border border-purple-300/80 bg-purple-50/50 px-2.5 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300 dark:hover:bg-purple-900/60 transition-colors cursor-pointer shadow-2xs"
+                                onClick={() => handlePreviewReportItem(rep)}
+                                disabled={openingReportId === (rep.id || rep.fileName || rep.filePath)}
+                                className="flex items-center gap-1.5 rounded-lg border border-purple-300/80 bg-purple-50/50 px-2.5 py-1.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 dark:border-purple-800 dark:bg-purple-950/40 dark:text-purple-300 dark:hover:bg-purple-900/60 transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
                                 title="关闭弹窗并在右侧工作台开启大屏多模态全景预览"
                               >
-                                <ExternalLink className="h-3.5 w-3.5" />
+                                {openingReportId === (rep.id || rep.fileName || rep.filePath) ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                )}
                                 <span>在工作台预览全景</span>
                               </button>
                             )}
 
-                            {(rep.content || rep.filePath) && (
+                            {(rep.content || rep.filePath || rep.htmlReportPath) && (
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (window.electronAPI?.openInBrowser) {
-                                    window.electronAPI.openInBrowser({
-                                      content: rep.content || '',
-                                      title: rep.title || '企业合规审计报告',
-                                      defaultPath: rep.filePath
-                                    });
-                                  } else if (rep.content) {
-                                    const blob = new Blob([rep.content], { type: 'text/html;charset=utf-8' });
-                                    const url = URL.createObjectURL(blob);
-                                    window.open(url, '_blank');
-                                  }
-                                }}
+                                onClick={() => handleOpenInBrowser(rep)}
                                 className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer shadow-2xs"
                                 title="在外部浏览器打开并可直接打印或另存为 PDF"
                               >

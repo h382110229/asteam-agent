@@ -806,14 +806,41 @@ ${testOutput.slice(0, 3000)}
         let status: 'pass' | 'warning' | 'fail' = 'pass';
         let summary = `体检报告: ${file} (${Math.round(stat.size / 1024)} KB)`;
         try {
-          const sample = fs.readFileSync(fullPath, 'utf-8').slice(0, 1500);
-          const scoreMatch = sample.match(/(?:得分|结果)[：:]\s*`?(\d+)/);
-          if (scoreMatch) score = parseInt(scoreMatch[1], 10);
-          if (sample.includes('✅ 合规达标') || sample.includes('✅ 全部通过')) status = 'pass';
-          else if (sample.includes('⚠️')) status = 'warning';
-          else if (sample.includes('❌') || sample.includes('严重隐患')) status = 'fail';
+          // 1. 优先从伴生 HTML 报表中提取真实精确得分与状态
+          if (hasHtml) {
+            try {
+              const htmlSample = fs.readFileSync(htmlFilePath, 'utf-8').slice(0, 5000);
+              const htmlScoreMatch = htmlSample.match(/class=["']score-val["']>(\d+)</);
+              if (htmlScoreMatch) {
+                score = parseInt(htmlScoreMatch[1], 10);
+              }
+              const htmlStatusMatch = htmlSample.match(/(?:合规达标|全部通过|存在警告|需整改|严重隐患)/);
+              if (htmlStatusMatch) {
+                const s = htmlStatusMatch[0];
+                if (s === '合规达标' || s === '全部通过') status = 'pass';
+                else if (s === '存在警告' || s === '需整改') status = 'warning';
+                else status = 'fail';
+              }
+            } catch {}
+          }
 
-          const summaryMatch = sample.match(/(?:企业安全合规综合评分|体检得分)[^\n]+/);
+          // 2. 从 Markdown 报告样章提取 (兼容加粗如 `**合规得分**：\`85 / 100\``)
+          const sample = fs.readFileSync(fullPath, 'utf-8').slice(0, 2000);
+          const scoreMatch = sample.match(/(?:得分|评分|结果)[^*：:\d\n]*?[*：:\s]*`?(\d+)\s*(?:\/|\s*分)/);
+          if (scoreMatch) {
+            score = parseInt(scoreMatch[1], 10);
+          } else {
+            const fallbackScore = sample.match(/`?(\d{1,3})\s*\/\s*100`?/);
+            if (fallbackScore) {
+              score = parseInt(fallbackScore[1], 10);
+            }
+          }
+
+          if (sample.includes('✅ 合规达标') || sample.includes('✅ 全部通过') || sample.includes('✅ 优秀')) status = 'pass';
+          else if (sample.includes('⚠️')) status = 'warning';
+          else if (sample.includes('❌') || sample.includes('严重隐患') || sample.includes('存在风险')) status = 'fail';
+
+          const summaryMatch = sample.match(/(?:企业安全合规综合评分|体检得分|审计结论|综合评分)[^\n]+/);
           if (summaryMatch) summary = summaryMatch[0].replace(/[#>`*]/g, '').trim();
         } catch {}
 
