@@ -1,7 +1,7 @@
 appId: online.ashawk.asteam.agent
 productName: ASTeam Agent
 directories:
-  output: dist-release
+  output: release
   buildResources: build
 files:
   - dist/**/*
