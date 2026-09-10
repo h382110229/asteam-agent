@@ -7,6 +7,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { getGitStatus, getFileDiff } from './git-manager';
 import { searchWeb, fetchWebPage } from './web-search';
+import { enterpriseHubManager } from './enterprise-hub-manager';
 
 export interface McpToolDefinition {
   name: string;
@@ -202,7 +203,7 @@ class McpManager {
       const client = new Client(
         {
           name: 'asteam-agent',
-          version: '1.6.0'
+          version: '1.7.0'
         },
         {
           capabilities: {}
@@ -273,7 +274,8 @@ class McpManager {
       throw new Error(`MCP 配置 JSON 解析失败: ${e.message}`);
     }
 
-    const targetServers = parsedConfig.mcpServers || {};
+    const enterpriseServers = enterpriseHubManager.getEnabledEnterpriseMcpServers();
+    const targetServers = { ...enterpriseServers, ...(parsedConfig.mcpServers || {}) };
 
     // 1. Disconnect servers not in the new config
     for (const [name] of this.servers.entries()) {

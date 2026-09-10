@@ -14,6 +14,7 @@ import {
 } from './harness-runner';
 import { SwarmMessageBus } from './swarm-bus';
 import { SwarmAgentRole, SwarmState, SwarmSubTask } from './swarm-types';
+import { ElasticWorkerPool, WorkerTaskJob } from './swarm-worker-pool';
 import { checkpointManager } from './checkpoint-manager';
 import { rulesManager } from './rules-manager';
 import { memoryManager } from './memory-manager';
@@ -21,6 +22,7 @@ import { mcpManager } from './mcp-manager';
 
 export class SwarmOrchestrator {
   private bus: SwarmMessageBus;
+  private workerPool: ElasticWorkerPool;
   private sessionId: string;
   private config: AgentConfig;
   private history: ChatMessage[];
@@ -48,6 +50,7 @@ export class SwarmOrchestrator {
     this.hasWorkspace = hasWorkspace;
 
     this.bus = new SwarmMessageBus(sessionId);
+    this.workerPool = new ElasticWorkerPool(this.bus, 3);
 
     // Register state updates to notify frontend
     this.bus.onStateUpdate((state: SwarmState) => {
@@ -263,22 +266,22 @@ ${userPrompt}
     this.bus.setActiveRole('coder');
     this.bus.setAgentStatus('coder', 'thinking', { taskTitle: '准备执行开发实现' });
 
-    this.callbacks.onToken(`\n\n### 💻 【Coder 全栈研发工程师】任务执行\n`, 'thought');
+    this.callbacks.onToken(`\n\n### 💻 【Coder 全栈研发集群】弹性并行执行 (Worker Pool)\n`, 'thought');
 
     const rulesPrompt = rulesManager.assembleRulesPrompt(this.effectiveWorkspace);
     const mcpPrompts = mcpManager.getEnabledToolPrompts(this.config.enabledMcpTools || ['web_search', 'web_fetch', 'git_operations']);
 
-    let allOutputs = '';
+    // 构建弹性 Worker 任务队列
+    const coderJobs: WorkerTaskJob[] = tasks.map((task, idx) => {
+      const workerName = `Coder-Worker-${idx + 1}`;
+      return {
+        task,
+        workerName,
+        executor: async (worker, updateProgress) => {
+          this.callbacks.onToken(`\n\n> ⚡ **${workerName} 开始并发处理: ${task.title}**\n`, 'thought');
+          updateProgress(20, 'running');
 
-    for (const task of tasks) {
-      if (this.abortSignal.aborted) break;
-
-      this.bus.updateTaskStatus(task.id, 'running');
-      this.bus.setAgentStatus('coder', 'executing', { currentTaskId: task.id, taskTitle: task.title });
-
-      this.callbacks.onToken(`\n\n> 💻 **Coder 开始处理子任务 #${task.id}: ${task.title}**\n`, 'thought');
-
-      const coderSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Coder 全栈核心研发工程师】。
+          const coderSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Coder 全栈核心研发子智能体 (${workerName})】。
 你专注于高质量代码实现、文件修改与工程构建。
 你必须调用工具来实际读取和写入文件，严禁凭空宣称已修改！
 
@@ -295,90 +298,90 @@ ${mcpPrompts ? `【可用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
 3. list_directory: 列出目录项。格式：\`\`\`tool:list_directory\n{"relPath": "."}\n\`\`\`
 4. run_terminal_command: 执行本地终端命令。格式：\`\`\`tool:run_terminal_command\n{"command": "命令行"}\n\`\`\`
 
-【当前任务】
+【当前专项子任务】
 ${task.input || task.title}
 (用户全局需求: ${userPrompt})`;
 
-      const messages: ChatMessage[] = [
-        { role: 'system', content: coderSystemPrompt },
-        { role: 'user', content: `请针对子任务「${task.title}」进行开发实现，若需要修改或新建文件，请直接调用工具写入。` }
-      ];
+          const messages: ChatMessage[] = [
+            { role: 'system', content: coderSystemPrompt },
+            { role: 'user', content: `请针对子任务「${task.title}」进行开发实现，若需要修改或新建文件，请直接调用工具写入。` }
+          ];
 
-      let taskSummary = '';
-      let iteration = 0;
-      const maxIterations = 5;
+          let taskSummary = '';
+          let iteration = 0;
+          const maxIterations = 5;
 
-      while (iteration < maxIterations) {
-        iteration++;
-        if (this.abortSignal.aborted) break;
+          while (iteration < maxIterations) {
+            iteration++;
+            if (this.abortSignal.aborted) break;
 
-        let stepResponse = '';
-        await callLLMStream(
-          this.config,
-          messages,
-          this.abortSignal,
-          (token, type) => {
-            stepResponse += token;
-            this.callbacks.onToken(token, type || 'thought');
+            const progressPct = Math.min(85, 20 + iteration * 15);
+            updateProgress(progressPct, 'running');
+
+            let stepResponse = '';
+            await callLLMStream(
+              this.config,
+              messages,
+              this.abortSignal,
+              (token, type) => {
+                stepResponse += token;
+                this.callbacks.onToken(token, type || 'thought');
+              }
+            );
+
+            messages.push({ role: 'assistant', content: stepResponse });
+            taskSummary = stepResponse;
+
+            const toolCall = extractToolCall(stepResponse);
+            if (!toolCall) {
+              break;
+            }
+
+            const { toolName, toolArgs } = toolCall;
+            this.callbacks.onToken(`\n⚙️ **[${workerName}] 执行工具: ${toolName}**...\n`, 'thought');
+
+            let observation = '';
+            try {
+              if (toolName === 'view_file') {
+                const fp = toolArgs.filePath || toolArgs.path || toolArgs.file || '';
+                observation = this.tools.viewFile(fp);
+              } else if (toolName === 'write_file') {
+                const fp = toolArgs.filePath || toolArgs.path || toolArgs.file || '';
+                const content = toolArgs.content ?? '';
+                observation = await this.tools.writeFile(fp, content);
+              } else if (toolName === 'list_directory') {
+                const p = toolArgs.relPath || toolArgs.path || '.';
+                observation = this.tools.listDirectory(p);
+              } else if (toolName === 'run_terminal_command') {
+                const cmd = toolArgs.command || toolArgs.cmd || '';
+                observation = await this.tools.runTerminalCommand(cmd, this.sessionId, 60000, this.callbacks, `${workerName}-${task.id}`);
+              } else {
+                const mcpRes = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: this.effectiveWorkspace });
+                observation = mcpRes !== null ? mcpRes : `Unknown tool: ${toolName}`;
+              }
+            } catch (err: any) {
+              observation = `[工具执行错误] ${err.message}`;
+            }
+
+            this.callbacks.onToken(`\n\`\`\`output\n${observation.slice(0, 400)}${observation.length > 400 ? '\n...[截断]' : ''}\n\`\`\`\n`, 'thought');
+
+            messages.push({
+              role: 'user',
+              content: `【工具调用结果】:\n${observation}\n请根据结果继续或给出开发完成结论。`
+            });
           }
-        );
 
-        messages.push({ role: 'assistant', content: stepResponse });
-        taskSummary = stepResponse;
-
-        const toolCall = extractToolCall(stepResponse);
-        if (!toolCall) {
-          break; // Done with tool execution
+          updateProgress(100, 'completed');
+          return taskSummary;
         }
+      };
+    });
 
-        const { toolName, toolArgs } = toolCall;
-        this.callbacks.onToken(`\n⚙️ **[Coder] 执行工具: ${toolName}**...\n`, 'thought');
+    const results = await this.workerPool.executeJobs(coderJobs);
+    const summary = this.workerPool.mapReduceResults(results);
 
-        let observation = '';
-        try {
-          if (toolName === 'view_file') {
-            const fp = toolArgs.filePath || toolArgs.path || toolArgs.file || '';
-            observation = this.tools.viewFile(fp);
-          } else if (toolName === 'write_file') {
-            const fp = toolArgs.filePath || toolArgs.path || toolArgs.file || '';
-            const content = toolArgs.content ?? '';
-            observation = await this.tools.writeFile(fp, content);
-          } else if (toolName === 'list_directory') {
-            const p = toolArgs.relPath || toolArgs.path || '.';
-            observation = this.tools.listDirectory(p);
-          } else if (toolName === 'run_terminal_command') {
-            const cmd = toolArgs.command || toolArgs.cmd || '';
-            observation = await this.tools.runTerminalCommand(cmd, this.sessionId, 60000, this.callbacks, `coder-${task.id}`);
-          } else {
-            const mcpRes = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: this.effectiveWorkspace });
-            observation = mcpRes !== null ? mcpRes : `Unknown tool: ${toolName}`;
-          }
-        } catch (err: any) {
-          observation = `[工具执行错误] ${err.message}`;
-        }
-
-        this.callbacks.onToken(`\n\`\`\`output\n${observation.slice(0, 400)}${observation.length > 400 ? '\n...[截断]' : ''}\n\`\`\`\n`, 'thought');
-
-        messages.push({
-          role: 'user',
-          content: `【工具调用结果】:\n${observation}\n请根据结果继续或给出开发完成结论。`
-        });
-      }
-
-      this.bus.updateTaskStatus(task.id, 'completed', taskSummary.slice(0, 300));
-      this.bus.postMessage({
-        fromRole: 'coder',
-        toRole: 'tester',
-        type: 'task_result',
-        content: `[Coder 完成] 子任务 #${task.id}「${task.title}」已实现完毕，提交给 Tester 进行质量验证。`,
-        taskId: task.id
-      });
-
-      allOutputs += `\n- **子任务 #${task.id} (${task.title})**: ${taskSummary.slice(0, 500)}\n`;
-    }
-
-    this.bus.setAgentStatus('coder', 'completed', { taskTitle: '全部研发任务交付' });
-    return allOutputs;
+    this.bus.setAgentStatus('coder', 'completed', { taskTitle: `已完成 ${results.length} 个并发研发任务` });
+    return summary.consolidatedMarkdown;
   }
 
   private async runTesterVerification(
@@ -390,19 +393,18 @@ ${task.input || task.title}
     this.bus.setActiveRole('tester');
     this.bus.setAgentStatus('tester', 'thinking', { taskTitle: '准备执行质量与测试验证' });
 
-    this.callbacks.onToken(`\n\n### 🧪 【Tester 测试与质量保障】执行验证\n`, 'thought');
+    this.callbacks.onToken(`\n\n### 🧪 【Tester 自动化测试集群】弹性并行质检 (Worker Pool)\n`, 'thought');
 
-    let allTestResults = '';
+    const testerJobs: WorkerTaskJob[] = tasks.map((task, idx) => {
+      const workerName = `Tester-Worker-${idx + 1}`;
+      return {
+        task,
+        workerName,
+        executor: async (worker, updateProgress) => {
+          this.callbacks.onToken(`\n\n> 🧪 **${workerName} 开始并发质检: ${task.title}**\n`, 'thought');
+          updateProgress(20, 'running');
 
-    for (const task of tasks) {
-      if (this.abortSignal.aborted) break;
-
-      this.bus.updateTaskStatus(task.id, 'running');
-      this.bus.setAgentStatus('tester', 'executing', { currentTaskId: task.id, taskTitle: task.title });
-
-      this.callbacks.onToken(`\n\n> 🧪 **Tester 开始验证子任务 #${task.id}: ${task.title}**\n`, 'thought');
-
-      const testerSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Tester 自动化测试与质量保障工程师】。
+          const testerSystemPrompt = `你是由 ASteam 打造的多智能体协同集群（Swarm）专属【Tester 自动化测试子智能体 (${workerName})】。
 你的职责是对 Coder 提交的代码和修改进行严格的质量检验与自动化测试。
 你可以调用工具查看文件（view_file）或运行本地命令（run_terminal_command，例如 npm test, npx tsc --noEmit, 语法检查或运行脚本）。
 
@@ -417,74 +419,73 @@ ${coderOutputs}
 如果一切正常，输出详细测试通过指标（测试用例数、构建状态、测试覆盖要点）；
 如果发现错误，指出失败原因并提供给 Reviewer 与 Coder 参考。`;
 
-      const messages: ChatMessage[] = [
-        { role: 'system', content: testerSystemPrompt },
-        { role: 'user', content: `请针对 Coder 的实现开展测试验证，给出清晰的测试结论。` }
-      ];
+          const messages: ChatMessage[] = [
+            { role: 'system', content: testerSystemPrompt },
+            { role: 'user', content: `请针对 Coder 的实现开展测试验证，给出清晰的测试结论。` }
+          ];
 
-      let testSummary = '';
-      let iteration = 0;
-      const maxIterations = 3;
+          let testSummary = '';
+          let iteration = 0;
+          const maxIterations = 3;
 
-      while (iteration < maxIterations) {
-        iteration++;
-        if (this.abortSignal.aborted) break;
+          while (iteration < maxIterations) {
+            iteration++;
+            if (this.abortSignal.aborted) break;
 
-        let stepResponse = '';
-        await callLLMStream(
-          this.config,
-          messages,
-          this.abortSignal,
-          (token, type) => {
-            stepResponse += token;
-            this.callbacks.onToken(token, type || 'thought');
+            updateProgress(30 + iteration * 25, 'running');
+
+            let stepResponse = '';
+            await callLLMStream(
+              this.config,
+              messages,
+              this.abortSignal,
+              (token, type) => {
+                stepResponse += token;
+                this.callbacks.onToken(token, type || 'thought');
+              }
+            );
+
+            messages.push({ role: 'assistant', content: stepResponse });
+            testSummary = stepResponse;
+
+            const toolCall = extractToolCall(stepResponse);
+            if (!toolCall) break;
+
+            const { toolName, toolArgs } = toolCall;
+            let observation = '';
+            try {
+              if (toolName === 'run_terminal_command') {
+                const cmd = toolArgs.command || toolArgs.cmd || '';
+                observation = await this.tools.runTerminalCommand(cmd, this.sessionId, 60000, this.callbacks, `${workerName}-${task.id}`);
+              } else if (toolName === 'view_file') {
+                const fp = toolArgs.filePath || toolArgs.path || toolArgs.file || '';
+                observation = this.tools.viewFile(fp);
+              } else {
+                observation = `Tester 暂不开放该工具: ${toolName}`;
+              }
+            } catch (err: any) {
+              observation = `[测试命令执行异常] ${err.message}`;
+            }
+
+            this.callbacks.onToken(`\n\`\`\`output\n${observation.slice(0, 400)}${observation.length > 400 ? '\n...[截断]' : ''}\n\`\`\`\n`, 'thought');
+
+            messages.push({
+              role: 'user',
+              content: `【测试执行输出】:\n${observation}\n请分析该测试结果并给出质量评价。`
+            });
           }
-        );
 
-        messages.push({ role: 'assistant', content: stepResponse });
-        testSummary = stepResponse;
-
-        const toolCall = extractToolCall(stepResponse);
-        if (!toolCall) break;
-
-        const { toolName, toolArgs } = toolCall;
-        let observation = '';
-        try {
-          if (toolName === 'run_terminal_command') {
-            const cmd = toolArgs.command || toolArgs.cmd || '';
-            observation = await this.tools.runTerminalCommand(cmd, this.sessionId, 60000, this.callbacks, `tester-${task.id}`);
-          } else if (toolName === 'view_file') {
-            const fp = toolArgs.filePath || toolArgs.path || toolArgs.file || '';
-            observation = this.tools.viewFile(fp);
-          } else {
-            observation = `Tester 暂不开放该工具: ${toolName}`;
-          }
-        } catch (err: any) {
-          observation = `[测试命令执行异常] ${err.message}`;
+          updateProgress(100, 'completed');
+          return testSummary;
         }
+      };
+    });
 
-        this.callbacks.onToken(`\n\`\`\`output\n${observation.slice(0, 400)}${observation.length > 400 ? '\n...[截断]' : ''}\n\`\`\`\n`, 'thought');
+    const results = await this.workerPool.executeJobs(testerJobs);
+    const summary = this.workerPool.mapReduceResults(results);
 
-        messages.push({
-          role: 'user',
-          content: `【测试执行输出】:\n${observation}\n请分析该测试结果并给出质量评价。`
-        });
-      }
-
-      this.bus.updateTaskStatus(task.id, 'completed', testSummary.slice(0, 300));
-      this.bus.postMessage({
-        fromRole: 'tester',
-        toRole: 'reviewer',
-        type: 'task_result',
-        content: `[Tester 质检报告] 子任务 #${task.id} 验证完成。测试状态与结论已汇总。`,
-        taskId: task.id
-      });
-
-      allTestResults += `\n- **测试项 #${task.id} (${task.title})**: ${testSummary.slice(0, 500)}\n`;
-    }
-
-    this.bus.setAgentStatus('tester', 'completed', { taskTitle: '测试验证全部通过' });
-    return allTestResults;
+    this.bus.setAgentStatus('tester', 'completed', { taskTitle: `完成 ${results.length} 项并行自动化测试质检` });
+    return summary.consolidatedMarkdown;
   }
 
   private async runReviewerAudit(

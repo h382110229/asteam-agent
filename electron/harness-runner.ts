@@ -12,6 +12,7 @@ import { storageHub } from './storage-hub';
 import { memoryManager } from './memory-manager';
 import { rulesManager } from './rules-manager';
 import { checkpointManager } from './checkpoint-manager';
+import { securityFenceManager } from './security-fence-manager';
 
 // Safe proxy-aware and CDN-friendly fetch using Chromium's network stack
 const safeFetch: typeof fetch = async (input, init) => {
@@ -1389,8 +1390,18 @@ export async function callLLMStream(
 ): Promise<string> {
   const useStream = config.stream !== false;
 
+  // 0. 企业级出境安全围栏审查与数据脱敏 (v1.7.0)
+  const fenceResult = securityFenceManager.sanitizeMessages(messages as any);
+  if (fenceResult.isBlocked) {
+    throw new Error(fenceResult.blockReason || '[企业安全拦截] 出境流量命中敏感数据安全阻断策略。');
+  }
+  const effectiveMessages = fenceResult.sanitizedMessages as ChatMessage[];
+  if (fenceResult.totalRedactions > 0) {
+    onDelta(`\n\n> 🛡️ **[企业安全围栏]** 已对请求出境文本实施实时脱敏保护 (${fenceResult.redactedSummary})\n\n`, 'thought');
+  }
+
   // 1. 会话特征探测: 是否包含图像附件或多模态信号
-  const needsVision = messages.some(m =>
+  const needsVision = effectiveMessages.some(m =>
     typeof m.content === 'string' &&
     (m.content.includes('![') || m.content.includes('data:image/') || m.content.includes('【用户附件图片:'))
   );
@@ -1459,7 +1470,7 @@ export async function callLLMStream(
 
       return await executeSingleProviderCall(
         currentProvider,
-        messages,
+        effectiveMessages,
         abortSignal,
         useStream,
         onDelta

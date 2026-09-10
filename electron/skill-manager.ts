@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { storageHub } from './storage-hub';
+import { enterpriseHubManager } from './enterprise-hub-manager';
 
 export interface SkillItem {
   id: string;
@@ -9,7 +10,7 @@ export interface SkillItem {
   description: string;
   isBuiltin: boolean;
   prompt: string;
-  category?: 'office' | 'dev' | 'custom';
+  category?: 'office' | 'dev' | 'custom' | 'enterprise';
   filePath?: string;
 }
 
@@ -231,10 +232,38 @@ export class SkillManager {
     return result;
   }
 
+  loadEnterpriseSkills(): SkillItem[] {
+    const exts = enterpriseHubManager.getExtensions().filter(e => e.type === 'skill' && e.enabled);
+    const result: SkillItem[] = [];
+
+    for (const ext of exts) {
+      const skillPath = path.join(ext.installDir, 'SKILL.md');
+      let promptContent = ext.manifest.description || '';
+      if (fs.existsSync(skillPath)) {
+        try {
+          promptContent = fs.readFileSync(skillPath, 'utf-8');
+        } catch {}
+      }
+
+      result.push({
+        id: `enterprise:${ext.id}`,
+        name: `[企业私有] ${ext.name}`,
+        description: `${ext.description} (SHA-256: ${ext.security.sha256Hash.slice(0, 8)})`,
+        isBuiltin: false,
+        category: 'enterprise',
+        filePath: skillPath,
+        prompt: `【激活企业私有技能：${ext.name}】\n${promptContent}`
+      });
+    }
+
+    return result;
+  }
+
   getAllAvailableSkills(workspacePath: string | null): SkillItem[] {
     return [
       ...this.getBuiltinSkills(),
       ...this.loadGlobalSkills(),
+      ...this.loadEnterpriseSkills(),
       ...this.loadCustomWorkspaceSkills(workspacePath)
     ];
   }

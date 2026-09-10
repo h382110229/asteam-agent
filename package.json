@@ -1,6 +1,6 @@
 {
   "name": "asteam-agent",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "ASTeam Agent - Intelligent Windows Desktop Client powered by deepseek-harness",
   "author": "ASTeam",
   "main": "dist-electron/main.cjs",
@@ -12,7 +12,7 @@
     "build:electron": "node scripts/build-electron.mjs",
     "build": "npm run build:renderer && npm run build:electron",
     "build:win": "npm run build && electron-builder --win --x64",
-    "test:verify": "node scripts/verify-v1.6.0.mjs",
+    "test:verify": "node scripts/verify-v1.7.0.mjs",
     "preview": "electron ."
   },
   "dependencies": {

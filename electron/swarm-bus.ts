@@ -5,7 +5,9 @@ import {
   SwarmSubTask,
   SwarmBusMessage,
   SwarmAgentState,
-  SwarmState
+  SwarmState,
+  SwarmWorkerAgent,
+  WorkerPoolMetrics
 } from './swarm-types';
 
 export type SwarmStateUpdateListener = (state: SwarmState) => void;
@@ -67,6 +69,16 @@ export class SwarmMessageBus {
       agents: initialAgents,
       tasks: [],
       messages: [],
+      workers: [],
+      workerPoolMetrics: {
+        totalSpawned: 0,
+        activeConcurrency: 0,
+        maxConcurrency: 4,
+        completedWorkers: 0,
+        failedWorkers: 0,
+        totalTokens: 0,
+        totalDurationMs: 0
+      },
       startedAt: now,
       updatedAt: now
     };
@@ -77,7 +89,9 @@ export class SwarmMessageBus {
       ...this.state,
       agents: { ...this.state.agents },
       tasks: [...this.state.tasks],
-      messages: [...this.state.messages]
+      messages: [...this.state.messages],
+      workers: [...this.state.workers],
+      workerPoolMetrics: { ...this.state.workerPoolMetrics }
     };
   }
 
@@ -140,7 +154,7 @@ export class SwarmMessageBus {
       fromRole: 'architect',
       toRole: taskData.role,
       type: 'task_dispatch',
-      content: `[任务派发] 派发子任务 #${newTask.id}: "${newTask.title}" 至 ${DEFAULT_AGENTS_CONFIG[taskData.role].name}`,
+      content: `[任务派发] 派发子任务 #${newTask.id}: "${newTask.title}" 至 ${DEFAULT_AGENTS_CONFIG[taskData.role]?.name || taskData.role}`,
       taskId: newTask.id
     });
 
@@ -152,7 +166,8 @@ export class SwarmMessageBus {
     taskId: string,
     status: SwarmSubTask['status'],
     output?: string,
-    error?: string
+    error?: string,
+    extra?: { progress?: number; workerId?: string }
   ): SwarmSubTask | null {
     const task = this.state.tasks.find(t => t.id === taskId);
     if (!task) return null;
@@ -170,10 +185,150 @@ export class SwarmMessageBus {
     if (error !== undefined) {
       task.error = error;
     }
+    if (extra?.progress !== undefined) {
+      task.progress = extra.progress;
+    }
+    if (extra?.workerId) {
+      task.workerId = extra.workerId;
+    }
 
     this.state.updatedAt = Date.now();
     this.broadcast();
     return task;
+  }
+
+  // ==========================================
+  // Elastic Worker Pool Management Methods
+  // ==========================================
+
+  public spawnWorker(params: {
+    name: string;
+    role: SwarmAgentRole;
+    taskTitle: string;
+    parentId?: string;
+  }): SwarmWorkerAgent {
+    const workerIndex = this.state.workers.length + 1;
+    const worker: SwarmWorkerAgent = {
+      id: `worker-${Date.now()}-${workerIndex}`,
+      name: params.name,
+      role: params.role,
+      workerIndex,
+      taskTitle: params.taskTitle,
+      progress: 0,
+      status: 'idle',
+      tokenCount: 0,
+      durationMs: 0,
+      startedAt: Date.now(),
+      parentId: params.parentId
+    };
+
+    this.state.workers.push(worker);
+    this.state.workerPoolMetrics.totalSpawned++;
+    this.state.updatedAt = Date.now();
+
+    this.postMessage({
+      fromRole: 'architect',
+      toRole: 'all',
+      type: 'system_notice',
+      content: `⚡ [Worker Pool 弹性孵化] 动态孵化子智能体 ${worker.name} (Role: ${worker.role}) 处理: ${worker.taskTitle}`,
+      workerId: worker.id
+    });
+
+    this.broadcast();
+    return worker;
+  }
+
+  public updateWorkerProgress(
+    workerId: string,
+    progress: number,
+    status: SwarmWorkerAgent['status'],
+    details?: { tokenDelta?: number; error?: string }
+  ): void {
+    const worker = this.state.workers.find(w => w.id === workerId);
+    if (!worker) return;
+
+    worker.progress = Math.min(100, Math.max(0, progress));
+    worker.status = status;
+    if (worker.startedAt) {
+      worker.durationMs = Date.now() - worker.startedAt;
+    }
+    if (details?.tokenDelta) {
+      worker.tokenCount += details.tokenDelta;
+      this.state.workerPoolMetrics.totalTokens += details.tokenDelta;
+    }
+    if (details?.error) {
+      worker.error = details.error;
+    }
+
+    // Refresh active concurrency
+    this.state.workerPoolMetrics.activeConcurrency = this.state.workers.filter(w => w.status === 'running').length;
+    this.state.updatedAt = Date.now();
+    this.broadcast();
+  }
+
+  public completeWorker(workerId: string, output: string, tokenCount = 0): void {
+    const worker = this.state.workers.find(w => w.id === workerId);
+    if (!worker) return;
+
+    worker.progress = 100;
+    worker.status = 'completed';
+    worker.completedAt = Date.now();
+    if (worker.startedAt) {
+      worker.durationMs = worker.completedAt - worker.startedAt;
+      this.state.workerPoolMetrics.totalDurationMs += worker.durationMs;
+    }
+    worker.output = output;
+    if (tokenCount > 0) {
+      worker.tokenCount += tokenCount;
+      this.state.workerPoolMetrics.totalTokens += tokenCount;
+    }
+
+    this.state.workerPoolMetrics.completedWorkers++;
+    this.state.workerPoolMetrics.activeConcurrency = this.state.workers.filter(w => w.status === 'running').length;
+    this.state.updatedAt = Date.now();
+
+    this.postMessage({
+      fromRole: worker.name,
+      toRole: 'architect',
+      type: 'task_result',
+      content: `✅ [Worker 交付] 子智能体 ${worker.name} 完成任务交付 (耗时: ${(worker.durationMs / 1000).toFixed(1)}s)`,
+      workerId: worker.id
+    });
+
+    this.broadcast();
+  }
+
+  public failWorker(workerId: string, error: string): void {
+    const worker = this.state.workers.find(w => w.id === workerId);
+    if (!worker) return;
+
+    worker.status = 'failed';
+    worker.completedAt = Date.now();
+    if (worker.startedAt) {
+      worker.durationMs = worker.completedAt - worker.startedAt;
+      this.state.workerPoolMetrics.totalDurationMs += worker.durationMs;
+    }
+    worker.error = error;
+
+    this.state.workerPoolMetrics.failedWorkers++;
+    this.state.workerPoolMetrics.activeConcurrency = this.state.workers.filter(w => w.status === 'running').length;
+    this.state.updatedAt = Date.now();
+
+    this.postMessage({
+      fromRole: worker.name,
+      toRole: 'architect',
+      type: 'issue_report',
+      content: `❌ [Worker 异常] 子智能体 ${worker.name} 执行失败: ${error}`,
+      workerId: worker.id
+    });
+
+    this.broadcast();
+  }
+
+  public setMaxConcurrency(max: number): void {
+    this.state.workerPoolMetrics.maxConcurrency = Math.max(1, max);
+    this.state.updatedAt = Date.now();
+    this.broadcast();
   }
 
   public postMessage(msgData: Omit<SwarmBusMessage, 'id' | 'timestamp'>): SwarmBusMessage {

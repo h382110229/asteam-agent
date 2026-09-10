@@ -4,6 +4,8 @@ import { spawn } from 'node:child_process';
 import { Notification } from 'electron';
 import { storageHub } from './storage-hub';
 import { rulesManager } from './rules-manager';
+import { securityFenceManager } from './security-fence-manager';
+import { knowledgeGraphManager } from './knowledge-graph-manager';
 import { ScheduledTask, InspectionReport, ScheduledTaskType, SchedulerEventPayload } from './scheduler-types';
 
 export class SchedulerManager {
@@ -69,6 +71,25 @@ export class SchedulerManager {
       if (fs.existsSync(this.tasksFile)) {
         const raw = fs.readFileSync(this.tasksFile, 'utf-8');
         this.tasks = JSON.parse(raw);
+        let modified = false;
+        if (!this.tasks.some(t => t.type === 'enterprise_compliance')) {
+          const now = Date.now();
+          this.tasks.push({
+            id: 'task-preset-compliance',
+            name: '企业级安全合规与敏感风险综合体检',
+            type: 'enterprise_compliance',
+            schedule: 'daily_9am',
+            enabled: true,
+            workspacePath: null,
+            createdAt: now,
+            runCount: 0,
+            nextRunTime: this.computeNextRunTime('daily_9am', now)
+          });
+          modified = true;
+        }
+        if (modified) {
+          this.saveTasksToDisk();
+        }
         return;
       }
     } catch (e) {
@@ -110,6 +131,17 @@ export class SchedulerManager {
         createdAt: now,
         runCount: 0,
         nextRunTime: this.computeNextRunTime('every_2h', now)
+      },
+      {
+        id: 'task-preset-compliance',
+        name: '企业级安全合规与敏感风险综合体检',
+        type: 'enterprise_compliance',
+        schedule: 'daily_9am',
+        enabled: true,
+        workspacePath: null,
+        createdAt: now,
+        runCount: 0,
+        nextRunTime: this.computeNextRunTime('daily_9am', now)
       }
     ];
     this.saveTasksToDisk();
@@ -298,6 +330,9 @@ export class SchedulerManager {
           break;
         case 'test_runner':
           report = await this.runTestRunner(task, effectiveWorkspace, reportsDir, startTime);
+          break;
+        case 'enterprise_compliance':
+          report = await this.runEnterpriseComplianceScan(task, effectiveWorkspace, reportsDir, startTime);
           break;
         case 'autonomous_task':
         default:
@@ -849,6 +884,289 @@ ${testOutput.slice(0, 3000)}
 
     walk(dir);
     return results;
+  }
+
+  /**
+   * 5. 运行企业级安全合规与敏感风险深度体检 (v1.7.0)
+   */
+  private async runEnterpriseComplianceScan(
+    task: ScheduledTask,
+    workspace: string,
+    reportsDir: string,
+    startTime: number
+  ): Promise<InspectionReport> {
+    const timestampStr = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `enterprise_compliance_${timestampStr}.md`;
+    const filePath = path.join(reportsDir, fileName);
+    const htmlFileName = `enterprise_compliance_${timestampStr}.html`;
+    const htmlFilePath = path.join(reportsDir, htmlFileName);
+
+    let score = 100;
+    const violations: string[] = [];
+    const compliancePasses: string[] = [];
+
+    // 1. 出境安全围栏防御排查
+    const fenceConfig = securityFenceManager.getConfig();
+    if (fenceConfig.mode === 'disabled') {
+      violations.push('企业出境安全围栏当前处于【已禁用】状态，出境流量未开启脱敏防护！');
+      score -= 20;
+    } else {
+      compliancePasses.push(`企业出境安全围栏处于活跃防御模式: [${fenceConfig.mode === 'redact' ? '智能脱敏占位' : '严格阻断'}]`);
+    }
+
+    // 2. 跨工程代码敏感数据泄漏排查
+    const secretMatches: string[] = [];
+    const files = this.getScannableFiles(workspace, 120);
+    for (const f of files) {
+      try {
+        const text = fs.readFileSync(f, 'utf-8');
+        const res = securityFenceManager.sanitizeText(text);
+        if (res.redactedItems.length > 0) {
+          const rel = path.relative(workspace, f);
+          const types = Array.from(new Set(res.redactedItems.map(i => i.type))).join('、');
+          secretMatches.push(`在代码文件 "${rel}" 中检出明文敏感资产: ${types}`);
+          score -= 15;
+        }
+      } catch {}
+    }
+
+    if (secretMatches.length > 0) {
+      violations.push(...secretMatches);
+    } else {
+      compliancePasses.push('全库文件未检出任何明文泄漏的 API Key、私钥或内网 IP 资产');
+    }
+
+    // 3. 项目工程行为准则规约遵循度
+    const rules = rulesManager.getActiveRules(workspace);
+    if (rules.length === 0) {
+      violations.push('当前工作区未检测到 .asteamrules 或 ASTEAM.md 架构行为准则定义，建议初始化规约');
+      score -= 10;
+    } else {
+      compliancePasses.push(`已挂载生效 ${rules.length} 份团队级工程规约规范 (${rules.map(r => r.source).join(', ')})`);
+    }
+
+    // 4. 跨工作区知识图谱连接度
+    const registeredWorkspaces = knowledgeGraphManager.getRegisteredWorkspaces();
+    if (registeredWorkspaces.length > 0) {
+      compliancePasses.push(`跨工作区联合图谱已连接 ${registeredWorkspaces.length} 个协同工程库`);
+    } else {
+      compliancePasses.push('跨工作区知识图谱单工程独立索引就绪');
+    }
+
+    score = Math.max(0, Math.min(100, score));
+    const status: InspectionReport['status'] = score >= 90 ? 'pass' : score >= 60 ? 'warning' : 'fail';
+    const durationMs = Date.now() - startTime;
+    const summary = `企业安全合规综合评分: ${score}/100 [${status.toUpperCase()}]。合规项: ${compliancePasses.length}，需治理项: ${violations.length}。`;
+
+    // 写入 Markdown 格式报告
+    const mdContent = `# 🏢 企业级安全合规与敏感风险深度体检报告
+> **任务名称**：${task.name}  
+> **审计时间**：${new Date().toLocaleString()}  
+> **工作区**：\`${workspace}\`  
+> **合规得分**：\`${score} / 100\` (${status === 'pass' ? '✅ 合规达标' : '⚠️ 需整改'})
+
+---
+
+## 🚨 合规整改与风险清单 (${violations.length})
+${violations.length > 0 ? violations.map(v => `- [ ] ⚠️ ${v}`).join('\n') : '- [x] 0 违规项，全部符合企业安全审计基线'}
+
+---
+
+## 🛡️ 安全合规达标项 (${compliancePasses.length})
+${compliancePasses.map(p => `- [x] ${p}`).join('\n')}
+`;
+    fs.writeFileSync(filePath, mdContent, 'utf-8');
+
+    // 写入现代化自包含结构化 HTML 报告
+    const htmlContent = this.generateStructuredHtmlReport({
+      title: task.name,
+      workspace,
+      score,
+      status,
+      timestamp: new Date().toLocaleString(),
+      durationMs,
+      violations,
+      compliancePasses
+    });
+    fs.writeFileSync(htmlFilePath, htmlContent, 'utf-8');
+
+    return {
+      id: `report-${Date.now()}`,
+      taskId: task.id,
+      taskName: task.name,
+      type: 'enterprise_compliance',
+      workspacePath: workspace,
+      timestamp: Date.now(),
+      status,
+      score,
+      summary,
+      filePath,
+      fileName,
+      htmlReportPath: htmlFilePath,
+      metrics: {
+        totalItemsChecked: violations.length + compliancePasses.length,
+        issuesFound: violations.length,
+        criticalIssues: secretMatches.length,
+        passedItems: compliancePasses.length,
+        durationMs
+      }
+    };
+  }
+
+  /**
+   * 生成现代化自包含响应式企业合规 HTML 报表
+   */
+  public generateStructuredHtmlReport(data: {
+    title: string;
+    workspace: string;
+    score: number;
+    status: 'pass' | 'warning' | 'fail';
+    timestamp: string;
+    durationMs: number;
+    violations: string[];
+    compliancePasses: string[];
+  }): string {
+    const statusColor = data.status === 'pass' ? '#10b981' : data.status === 'warning' ? '#f59e0b' : '#ef4444';
+    const statusText = data.status === 'pass' ? '✅ 合规达标' : data.status === 'warning' ? '⚠️ 存在警告' : '❌ 严重隐患';
+
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASTeam - ${data.title} 审计报表</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+      --accent: #0ea5e9;
+      --status: ${statusColor};
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 32px 20px;
+      line-height: 1.6;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    .header {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      background: rgba(14, 165, 233, 0.15);
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+    .score-circle {
+      text-align: center;
+      border: 4px solid var(--status);
+      border-radius: 50%;
+      width: 100px;
+      height: 100px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .score-val { font-size: 32px; font-weight: 800; color: var(--status); line-height: 1; }
+    .score-max { font-size: 11px; color: var(--text-muted); }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+    h2 { margin-top: 0; font-size: 18px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    .item-list { list-style: none; padding: 0; margin: 0; }
+    .item {
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 14px;
+    }
+    .item.pass { background: rgba(16, 185, 129, 0.08); border-left: 4px solid #10b981; }
+    .item.warn { background: rgba(239, 68, 68, 0.08); border-left: 4px solid #ef4444; }
+    .meta { font-size: 13px; color: var(--text-muted); }
+    .print-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      margin-top: 10px;
+    }
+    @media print {
+      body { background: #fff; color: #000; }
+      .header, .card { border: 1px solid #ddd; background: #fff; color: #000; }
+      .print-btn { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div>
+        <div class="badge">ASTeam Enterprise Audit Engine</div>
+        <h1 style="margin: 0 0 6px 0; font-size: 24px;">${data.title}</h1>
+        <div class="meta">
+          <span>工作区: ${data.workspace}</span> • 
+          <span>审计时间: ${data.timestamp}</span> • 
+          <span>耗时: ${(data.durationMs / 1000).toFixed(2)}s</span>
+        </div>
+      </div>
+      <div class="score-circle">
+        <div class="score-val">${data.score}</div>
+        <div class="score-max">/ 100</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="color: #ef4444;">🚨 风险治理与整改项 (${data.violations.length})</h2>
+      <ul class="item-list">
+        ${
+          data.violations.length > 0
+            ? data.violations.map(v => `<li class="item warn">⚠️ <div>${v}</div></li>`).join('')
+            : '<li class="item pass">✅ <div>经企业级深度排查，未发现任何高危敏感泄露或严重安全违规项。</div></li>'
+        }
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2 style="color: #10b981;">🛡️ 企业合规达标项 (${data.compliancePasses.length})</h2>
+      <ul class="item-list">
+        ${data.compliancePasses.map(p => `<li class="item pass">✅ <div>${p}</div></li>`).join('')}
+      </ul>
+    </div>
+
+    <div style="text-align: right;">
+      <button class="print-btn" onclick="window.print()">🖨️ 打印 / 另存为 PDF</button>
+    </div>
+  </div>
+</body>
+</html>`;
   }
 }
 

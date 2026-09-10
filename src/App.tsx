@@ -4,6 +4,8 @@ import { Sidebar } from './components/Sidebar';
 import { ChatArea, ChatMessageItem } from './components/ChatArea';
 import { SettingsModal } from './components/SettingsModal';
 import { ProjectRulesModal } from './components/ProjectRulesModal';
+import { EnterpriseHubModal } from './components/EnterpriseHubModal';
+import { SecurityComplianceModal } from './components/SecurityComplianceModal';
 import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/WorkspaceDrawer';
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
@@ -232,10 +234,11 @@ export const App: React.FC = () => {
     refreshGitStatus();
   }, [refreshGitStatus]);
 
-  // 5. Execution State & Agent IPC Listener
   const [isRunning, setIsRunning] = useState(false);
   const [isWaitingForUser, setIsWaitingForUser] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isEnterpriseHubOpen, setIsEnterpriseHubOpen] = useState(false);
+  const [isSecurityComplianceOpen, setIsSecurityComplianceOpen] = useState(false);
   const [runStartTime, setRunStartTime] = useState<number>(0);
 
   useEffect(() => {
@@ -712,6 +715,8 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         onOpenDrawer={() => setIsDrawerOpen(true)}
         projectRules={projectRules}
         onOpenRules={handleOpenRules}
+        onOpenEnterpriseHub={() => setIsEnterpriseHubOpen(true)}
+        onOpenSecurityCompliance={() => setIsSecurityComplianceOpen(true)}
       />
 
       {/* 2. Main Workspace Layout */}
@@ -774,6 +779,19 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         workspacePath={currentWorkspacePath}
         projectRules={projectRules}
         onRulesUpdated={refreshProjectRules}
+      />
+
+      {/* 3.2 Enterprise Private Hub Modal (v1.7.0) */}
+      <EnterpriseHubModal
+        isOpen={isEnterpriseHubOpen}
+        onClose={() => setIsEnterpriseHubOpen(false)}
+      />
+
+      {/* 3.3 Security Fence & Knowledge Graph Modal (v1.7.0) */}
+      <SecurityComplianceModal
+        isOpen={isSecurityComplianceOpen}
+        onClose={() => setIsSecurityComplianceOpen(false)}
+        workspacePath={currentWorkspacePath}
       />
 
       {/* 4. Workspace Workbench Drawer (Live Preview + Artifacts Shelf + Git Diff + Live Terminal + Timeline) */}

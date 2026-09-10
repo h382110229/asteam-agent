@@ -12,7 +12,9 @@ import {
   GitBranch,
   FileDiff,
   Eye,
-  ScrollText
+  ScrollText,
+  Building2,
+  Shield
 } from 'lucide-react';
 import { GitStatusSummary, ProjectRulesInfo } from '../types/project';
 
@@ -26,6 +28,8 @@ interface TitleBarProps {
   onOpenDrawer?: () => void;
   projectRules?: ProjectRulesInfo | null;
   onOpenRules?: () => void;
+  onOpenEnterpriseHub?: () => void;
+  onOpenSecurityCompliance?: () => void;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -37,7 +41,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   onOpenGitDiff,
   onOpenDrawer,
   projectRules,
-  onOpenRules
+  onOpenRules,
+  onOpenEnterpriseHub,
+  onOpenSecurityCompliance
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -168,6 +174,32 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           <Eye className="h-3.5 w-3.5 text-[var(--primary)]" />
           <span className="hidden sm:inline font-medium">工作台</span>
         </button>
+
+        {/* Enterprise Hub Button (v1.7.0) */}
+        {onOpenEnterpriseHub && (
+          <button
+            type="button"
+            onClick={onOpenEnterpriseHub}
+            title="企业私有扩展与技能中心 (Enterprise Private Hub)"
+            className="flex h-7 items-center space-x-1 rounded px-2 text-[var(--muted-foreground)] hover:bg-teal-50 hover:text-teal-600 dark:hover:bg-teal-950/40 dark:hover:text-teal-400 transition-colors cursor-pointer text-xs"
+          >
+            <Building2 className="h-3.5 w-3.5 text-teal-600 dark:text-teal-400" />
+            <span className="hidden md:inline font-medium">企业扩展</span>
+          </button>
+        )}
+
+        {/* Security & Knowledge Graph Button (v1.7.0) */}
+        {onOpenSecurityCompliance && (
+          <button
+            type="button"
+            onClick={onOpenSecurityCompliance}
+            title="跨工作区图谱与出境安全围栏 (Security & Knowledge)"
+            className="flex h-7 items-center space-x-1 rounded px-2 text-[var(--muted-foreground)] hover:bg-purple-50 hover:text-purple-600 dark:hover:bg-purple-950/40 dark:hover:text-purple-400 transition-colors cursor-pointer text-xs"
+          >
+            <Shield className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+            <span className="hidden md:inline font-medium">安全围栏</span>
+          </button>
+        )}
 
         {/* Settings Button */}
         <button

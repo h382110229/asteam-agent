@@ -83,7 +83,7 @@ export class StorageHub {
    * 确保数据中枢的核心 5 大模块子目录存在
    */
   public ensureDirectoryStructure(rootDir: string) {
-    const subdirs = ['workspaces', 'skills', 'memory', 'artifacts', 'logs'];
+    const subdirs = ['workspaces', 'skills', 'memory', 'artifacts', 'logs', 'enterprise_hub'];
     try {
       if (!fs.existsSync(rootDir)) {
         fs.mkdirSync(rootDir, { recursive: true });
@@ -101,6 +101,16 @@ export class StorageHub {
 
   public getDataRootDir(): string {
     return this.currentRootDir;
+  }
+
+  public getEnterpriseHubDir(): string {
+    const dir = path.join(this.currentRootDir, 'enterprise_hub');
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {}
+    }
+    return dir;
   }
 
   public getWorkspacesDir(): string {

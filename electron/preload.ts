@@ -87,6 +87,24 @@ export interface ElectronAPI {
   getInspectionReports: (workspacePath: string | null) => Promise<any[]>;
   readInspectionReport: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   onSchedulerEvent: (callback: (data: any) => void) => () => void;
+
+  // Enterprise Hub & Verification (v1.7.0)
+  getEnterpriseHubState: () => Promise<any>;
+  importEnterpriseExtension: (options: any) => Promise<any>;
+  toggleEnterpriseExtension: (id: string, enabled: boolean) => Promise<any>;
+  uninstallEnterpriseExtension: (id: string) => Promise<boolean>;
+
+  // Cross-Workspace Knowledge Graph (v1.7.0)
+  getKnowledgeGraphWorkspaces: () => Promise<any[]>;
+  registerKnowledgeWorkspace: (workspacePath: string) => Promise<void>;
+  unregisterKnowledgeWorkspace: (workspacePath: string) => Promise<void>;
+  searchKnowledgeSymbols: (query: string, maxResults?: number) => Promise<any[]>;
+
+  // Security Fence & Data Redaction (v1.7.0)
+  getSecurityFenceConfig: () => Promise<any>;
+  saveSecurityFenceConfig: (config: any) => Promise<void>;
+  getSecurityFenceAuditLogs: () => Promise<any[]>;
+  testSanitizeText: (text: string) => Promise<any>;
 }
 
 const api: ElectronAPI = {
@@ -175,7 +193,25 @@ const api: ElectronAPI = {
     return () => {
       ipcRenderer.removeListener('scheduler:event', subscription);
     };
-  }
+  },
+
+  // Enterprise Hub & Verification (v1.7.0)
+  getEnterpriseHubState: () => ipcRenderer.invoke('enterprise-hub:getState'),
+  importEnterpriseExtension: (options) => ipcRenderer.invoke('enterprise-hub:import', options),
+  toggleEnterpriseExtension: (id, enabled) => ipcRenderer.invoke('enterprise-hub:toggle', { id, enabled }),
+  uninstallEnterpriseExtension: (id) => ipcRenderer.invoke('enterprise-hub:uninstall', id),
+
+  // Cross-Workspace Knowledge Graph (v1.7.0)
+  getKnowledgeGraphWorkspaces: () => ipcRenderer.invoke('knowledge-graph:getWorkspaces'),
+  registerKnowledgeWorkspace: (workspacePath) => ipcRenderer.invoke('knowledge-graph:registerWorkspace', workspacePath),
+  unregisterKnowledgeWorkspace: (workspacePath) => ipcRenderer.invoke('knowledge-graph:unregisterWorkspace', workspacePath),
+  searchKnowledgeSymbols: (query, maxResults) => ipcRenderer.invoke('knowledge-graph:searchSymbols', { query, maxResults }),
+
+  // Security Fence & Data Redaction (v1.7.0)
+  getSecurityFenceConfig: () => ipcRenderer.invoke('security-fence:getConfig'),
+  saveSecurityFenceConfig: (config) => ipcRenderer.invoke('security-fence:saveConfig', config),
+  getSecurityFenceAuditLogs: () => ipcRenderer.invoke('security-fence:getAuditLogs'),
+  testSanitizeText: (text) => ipcRenderer.invoke('security-fence:testSanitize', text)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

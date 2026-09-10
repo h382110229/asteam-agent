@@ -10,6 +10,9 @@ import { rulesManager } from './rules-manager';
 import { checkpointManager } from './checkpoint-manager';
 import { mcpManager } from './mcp-manager';
 import { schedulerManager } from './scheduler-manager';
+import { enterpriseHubManager } from './enterprise-hub-manager';
+import { knowledgeGraphManager } from './knowledge-graph-manager';
+import { securityFenceManager } from './security-fence-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -653,6 +656,57 @@ function setupIPC() {
 
   ipcMain.handle('scheduler:readReport', async (_event, filePath: string) => {
     return schedulerManager.readReport(filePath);
+  });
+
+  // Enterprise Hub & Verification (v1.7.0)
+  ipcMain.handle('enterprise-hub:getState', async () => {
+    return enterpriseHubManager.getState();
+  });
+
+  ipcMain.handle('enterprise-hub:import', async (_event, options: any) => {
+    return await enterpriseHubManager.importExtension(options);
+  });
+
+  ipcMain.handle('enterprise-hub:toggle', async (_event, { id, enabled }: { id: string; enabled: boolean }) => {
+    return enterpriseHubManager.toggleExtension(id, enabled);
+  });
+
+  ipcMain.handle('enterprise-hub:uninstall', async (_event, id: string) => {
+    return enterpriseHubManager.uninstallExtension(id);
+  });
+
+  // Cross-Workspace Knowledge Graph (v1.7.0)
+  ipcMain.handle('knowledge-graph:getWorkspaces', async () => {
+    return knowledgeGraphManager.getWorkspacesInfo();
+  });
+
+  ipcMain.handle('knowledge-graph:registerWorkspace', async (_event, workspacePath: string) => {
+    knowledgeGraphManager.registerWorkspace(workspacePath);
+  });
+
+  ipcMain.handle('knowledge-graph:unregisterWorkspace', async (_event, workspacePath: string) => {
+    knowledgeGraphManager.unregisterWorkspace(workspacePath);
+  });
+
+  ipcMain.handle('knowledge-graph:searchSymbols', async (_event, { query, maxResults }: { query: string; maxResults?: number }) => {
+    return knowledgeGraphManager.searchSymbols(query, maxResults);
+  });
+
+  // Security Fence & Data Redaction (v1.7.0)
+  ipcMain.handle('security-fence:getConfig', async () => {
+    return securityFenceManager.getConfig();
+  });
+
+  ipcMain.handle('security-fence:saveConfig', async (_event, config: any) => {
+    securityFenceManager.saveConfig(config);
+  });
+
+  ipcMain.handle('security-fence:getAuditLogs', async () => {
+    return securityFenceManager.getAuditLogs();
+  });
+
+  ipcMain.handle('security-fence:testSanitize', async (_event, text: string) => {
+    return securityFenceManager.sanitizeText(text);
   });
 }
 
