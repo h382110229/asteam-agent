@@ -12,6 +12,7 @@ import {
   Edit3,
   GitCommit
 } from 'lucide-react';
+import { LiveTerminalCard } from './LiveTerminalCard';
 
 export interface AgentStep {
   id: string;
@@ -25,9 +26,17 @@ export interface AgentStep {
 
 interface AgentTrajectoryProps {
   steps: AgentStep[];
+  sessionId?: string;
+  terminalOutputs?: Record<string, string>;
+  onStopSession?: () => void;
 }
 
-export const AgentTrajectory: React.FC<AgentTrajectoryProps> = ({ steps }) => {
+export const AgentTrajectory: React.FC<AgentTrajectoryProps> = ({
+  steps,
+  sessionId,
+  terminalOutputs,
+  onStopSession
+}) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
 
@@ -87,7 +96,7 @@ export const AgentTrajectory: React.FC<AgentTrajectoryProps> = ({ steps }) => {
       {!isCollapsed && (
         <div className="mt-3 space-y-2 border-t border-[var(--border)] pt-2.5">
           {steps.map((step, idx) => {
-            const isExpanded = expandedSteps[step.id] ?? (step.status === 'running' || step.status === 'failed');
+            const isExpanded = expandedSteps[step.id] ?? (step.tool === 'run_terminal_command' || step.status === 'running' || step.status === 'failed');
 
             return (
               <div
@@ -141,37 +150,52 @@ export const AgentTrajectory: React.FC<AgentTrajectoryProps> = ({ steps }) => {
                 </div>
 
                 {/* Details Accordion */}
-                {isExpanded && (step.args || step.result || step.error) && (
+                {isExpanded && (step.args || step.result || step.error || step.status === 'running') && (
                   <div className="mt-2 space-y-1.5 border-t border-[var(--border)]/50 pt-2 font-mono text-[11px]">
-                    {step.args && (
-                      <div className="rounded bg-[var(--card)] p-2 border border-[var(--border)]/50">
-                        <span className="text-[10px] uppercase font-bold text-[var(--muted-foreground)] block mb-1">
-                          调用参数
-                        </span>
-                        <pre className="overflow-x-auto text-[var(--foreground)] whitespace-pre-wrap">
-                          {JSON.stringify(step.args, null, 2)}
-                        </pre>
-                      </div>
-                    )}
+                    {step.tool === 'run_terminal_command' ? (
+                      <LiveTerminalCard
+                        sessionId={sessionId || 'current'}
+                        stepId={step.id}
+                        command={step.args?.command}
+                        status={step.status}
+                        liveOutput={terminalOutputs?.[step.id] || (step.status === 'running' ? (terminalOutputs?.[sessionId || ''] || '') : '')}
+                        defaultOutput={step.result || step.error || ''}
+                        onStop={onStopSession}
+                        isExpandable={false}
+                      />
+                    ) : (
+                      <>
+                        {step.args && (
+                          <div className="rounded bg-[var(--card)] p-2 border border-[var(--border)]/50">
+                            <span className="text-[10px] uppercase font-bold text-[var(--muted-foreground)] block mb-1">
+                              调用参数
+                            </span>
+                            <pre className="overflow-x-auto text-[var(--foreground)] whitespace-pre-wrap">
+                              {JSON.stringify(step.args, null, 2)}
+                            </pre>
+                          </div>
+                        )}
 
-                    {step.result && (
-                      <div className="rounded bg-[var(--card)] p-2 border border-[var(--border)]/50">
-                        <span className="text-[10px] uppercase font-bold text-[var(--primary)] block mb-1">
-                          执行结果
-                        </span>
-                        <pre className="max-h-36 overflow-y-auto text-[var(--foreground)] whitespace-pre-wrap">
-                          {step.result}
-                        </pre>
-                      </div>
-                    )}
+                        {step.result && (
+                          <div className="rounded bg-[var(--card)] p-2 border border-[var(--border)]/50">
+                            <span className="text-[10px] uppercase font-bold text-[var(--primary)] block mb-1">
+                              执行结果
+                            </span>
+                            <pre className="max-h-36 overflow-y-auto text-[var(--foreground)] whitespace-pre-wrap">
+                              {step.result}
+                            </pre>
+                          </div>
+                        )}
 
-                    {step.error && (
-                      <div className="rounded bg-[var(--error)]/10 p-2 border border-[var(--error)]/30 text-[var(--error)]">
-                        <span className="text-[10px] uppercase font-bold block mb-1">
-                          执行异常
-                        </span>
-                        <pre className="whitespace-pre-wrap">{step.error}</pre>
-                      </div>
+                        {step.error && (
+                          <div className="rounded bg-[var(--error)]/10 p-2 border border-[var(--error)]/30 text-[var(--error)]">
+                            <span className="text-[10px] uppercase font-bold block mb-1">
+                              执行异常
+                            </span>
+                            <pre className="whitespace-pre-wrap">{step.error}</pre>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

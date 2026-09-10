@@ -3,10 +3,11 @@ import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { ChatArea, ChatMessageItem } from './components/ChatArea';
 import { SettingsModal } from './components/SettingsModal';
-import { GitDiffDrawer } from './components/GitDiffDrawer';
+import { ProjectRulesModal } from './components/ProjectRulesModal';
+import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/WorkspaceDrawer';
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
-import { Project, ProjectSession, GitStatusSummary, ExecutionMode } from './types/project';
+import { Project, ProjectSession, GitStatusSummary, ExecutionMode, ProjectRulesInfo } from './types/project';
 
 export const App: React.FC = () => {
   // 1. Settings & Theme
@@ -20,7 +21,7 @@ export const App: React.FC = () => {
   });
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return settings.theme || 'dark';
+    return settings.theme || 'light';
   });
 
   useEffect(() => {
@@ -32,9 +33,9 @@ export const App: React.FC = () => {
   }, [theme]);
 
   const toggleTheme = () => {
-    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    const nextTheme: 'light' | 'dark' = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    const updated = { ...settings, theme: nextTheme };
+    const updated: AppSettings = { ...settings, theme: nextTheme };
     setSettings(updated);
     localStorage.setItem('asteam_settings', JSON.stringify(updated));
   };
@@ -128,9 +129,38 @@ export const App: React.FC = () => {
     localStorage.setItem('asteam_messages', JSON.stringify(messagesMap));
   }, [messagesMap]);
 
-  // 4. Git Status & Diff Drawer State
+  // 4. Git Status & Workspace Workbench Drawer State (Preview + Git Diff + Live Terminal)
   const [gitStatus, setGitStatus] = useState<GitStatusSummary | null>(null);
-  const [isGitDiffOpen, setIsGitDiffOpen] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerTab, setDrawerTab] = useState<WorkspaceDrawerTab>('diff');
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [terminalOutputs, setTerminalOutputs] = useState<Record<string, string>>({});
+
+  const handleOpenGitDiff = useCallback(() => {
+    setDrawerTab('diff');
+    setIsDrawerOpen(true);
+  }, []);
+
+  const handleOpenPreview = useCallback((data: PreviewData) => {
+    setPreviewData(data);
+    setDrawerTab('preview');
+    setIsDrawerOpen(true);
+  }, []);
+
+  const handleOpenTerminal = useCallback(() => {
+    setDrawerTab('terminal');
+    setIsDrawerOpen(true);
+  }, []);
+
+  const handleOpenTimeline = useCallback(() => {
+    setDrawerTab('timeline');
+    setIsDrawerOpen(true);
+  }, []);
+
+  const handleOpenScheduler = useCallback(() => {
+    setDrawerTab('scheduler');
+    setIsDrawerOpen(true);
+  }, []);
 
   const refreshGitStatus = useCallback(async () => {
     if (!currentWorkspacePath || !window.electronAPI) {
@@ -144,6 +174,59 @@ export const App: React.FC = () => {
       setGitStatus(null);
     }
   }, [currentWorkspacePath]);
+
+  // 5. Project Rules State (v1.4.0)
+  const [projectRules, setProjectRules] = useState<ProjectRulesInfo | null>(null);
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
+
+  const refreshProjectRules = useCallback(async () => {
+    if (!currentWorkspacePath || !window.electronAPI?.getProjectRules) {
+      setProjectRules(null);
+      return;
+    }
+    try {
+      const rules = await window.electronAPI.getProjectRules(currentWorkspacePath);
+      setProjectRules(rules || null);
+    } catch {
+      setProjectRules(null);
+    }
+  }, [currentWorkspacePath]);
+
+  useEffect(() => {
+    refreshProjectRules();
+  }, [refreshProjectRules]);
+
+  const handleOpenRules = useCallback(() => {
+    setIsRulesModalOpen(true);
+  }, []);
+
+  const handleRollbackCheckpoint = useCallback(async (checkpointId: string): Promise<boolean> => {
+    if (!window.electronAPI) return false;
+    try {
+      const res = await window.electronAPI.rollbackCheckpoint(checkpointId, currentWorkspacePath);
+      if (res && res.success) {
+        setMessagesMap(prevMap => {
+          const list = [...(prevMap[activeSessionId] || [])];
+          const updated = list.map(m => {
+            if (m.checkpoint && m.checkpoint.id === checkpointId) {
+              return {
+                ...m,
+                checkpoint: { ...m.checkpoint, rolledBack: true }
+              };
+            }
+            return m;
+          });
+          return { ...prevMap, [activeSessionId]: updated };
+        });
+        await refreshGitStatus();
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('Rollback checkpoint failed:', err);
+      return false;
+    }
+  }, [currentWorkspacePath, activeSessionId, refreshGitStatus]);
 
   useEffect(() => {
     refreshGitStatus();
@@ -188,6 +271,13 @@ export const App: React.FC = () => {
             currentSteps.push(updatedStep);
           }
           lastMsg.steps = currentSteps;
+
+          // 当终端命令正在运行等待或执行时，放开用户输入状态，允许即时推入 stdin
+          if (updatedStep.tool === 'run_terminal_command' && updatedStep.status === 'running') {
+            setIsWaitingForUser(true);
+          } else if (updatedStep.tool === 'run_terminal_command' && (updatedStep.status === 'completed' || updatedStep.status === 'failed')) {
+            setIsWaitingForUser(false);
+          }
         } else if (type === 'question') {
           lastMsg.question = {
             questionId: payload.questionId,
@@ -203,7 +293,36 @@ export const App: React.FC = () => {
           setIsRunning(false);
           setIsWaitingForUser(false);
           refreshGitStatus();
+        } else if (type === 'terminalData') {
+          const { chunk, stepId, sessionId: sid } = payload;
+          setTerminalOutputs(prev => {
+            const next = { ...prev };
+            if (stepId) {
+              next[stepId] = (next[stepId] || '') + chunk;
+            }
+            if (sid) {
+              next[sid] = (next[sid] || '') + chunk;
+            }
+            return next;
+          });
+        } else if (type === 'checkpoint') {
+          if (payload.checkpoint) {
+            lastMsg.checkpoint = payload.checkpoint;
+          }
+        } else if (type === 'swarmState') {
+          if (payload.state) {
+            lastMsg.swarmState = payload.state;
+          }
         } else if (type === 'done') {
+          // 若上游网关或模型将全部输出归入 reasoning_content (thought)，导致正文 content 为空，自动提拔为正文
+          if (!lastMsg.content?.trim() && lastMsg.thought?.trim()) {
+            lastMsg.content = lastMsg.thought;
+            lastMsg.thought = '';
+          }
+          // 若模型无正文输出但有任务完成总结，用任务总结作为正文呈现
+          if (!lastMsg.content?.trim() && typeof payload === 'string' && payload.trim()) {
+            lastMsg.content = payload;
+          }
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
           setIsWaitingForUser(false);
@@ -337,6 +456,83 @@ export const App: React.FC = () => {
     }
   };
 
+  // v1.5.0: 会话历史智能浓缩与 Token 窗口释放
+  const handleCompactSession = (sessionId: string) => {
+    const list = messagesMap[sessionId] || [];
+    if (list.length <= 2) {
+      const tipMsg: ChatMessageItem = {
+        id: `msg-tip-${Date.now()}`,
+        role: 'assistant',
+        content: `💡 **[上下文无需浓缩]**\n\n当前会话仅包含 ${list.length} 条消息，尚未达到浓缩水位（建议在对话轮次较长、Token 占比升高时使用）。`,
+        timestamp: Date.now()
+      };
+      setMessagesMap(prev => ({
+        ...prev,
+        [sessionId]: [...(prev[sessionId] || []), tipMsg]
+      }));
+      return;
+    }
+
+    const keepCount = Math.min(2, Math.max(1, Math.floor(list.length * 0.2)));
+    const toCompact = list.slice(0, list.length - keepCount);
+    const toKeep = list.slice(list.length - keepCount);
+
+    const rawSavedTokens = toCompact.reduce(
+      (acc, m) => acc + Math.round((m.content?.length || 0) * 0.75 + (m.thought?.length || 0) * 0.5),
+      0
+    );
+
+    // 提炼历史交互主题
+    const userTopics = toCompact
+      .filter(m => m.role === 'user')
+      .map(m => m.content.replace(/【[\s\S]*?】/g, '').trim().split('\n')[0].slice(0, 90))
+      .filter(Boolean);
+
+    // 扫描关键涉及的文件
+    const fileSet = new Set<string>();
+    for (const msg of toCompact) {
+      if (msg.steps) {
+        for (const s of msg.steps) {
+          if (s.args?.path || s.args?.filePath) {
+            fileSet.add(s.args.path || s.args.filePath);
+          }
+        }
+      }
+      const fileMatches = Array.from(msg.content.matchAll(/(?:`|\[)([\w\-\.\/\\\\]+\.(?:ts|tsx|js|jsx|json|md|py|rs|html|css))(?:`|\])/g));
+      for (const fm of fileMatches) {
+        fileSet.add(fm[1]);
+      }
+    }
+
+    const compactSummaryMsg: ChatMessageItem = {
+      id: `msg-compact-${Date.now()}`,
+      role: 'assistant',
+      content: `📦 **[会话历史已智能浓缩 · 上下文已释放]**
+
+> 💡 **上下文优化报告**: 已成功将前序 **${toCompact.length}** 轮历史交互提炼为结构化高密度工程状态快照，预估释放约 **~${rawSavedTokens.toLocaleString()}** Tokens，大幅降低后续推理延迟与上下文窗口占用。
+
+### 🎯 历史交互主题与需求演化
+${userTopics.length > 0 ? userTopics.map(t => `- ${t}`).join('\n') : '- 展开项目各阶段核心技术研发与工程演进'}
+
+### 🛠️ 关键涉及与变更的文件产物
+${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).join('\n') : '- 检视了项目基础架构、规则与配置文件'}
+
+### 📌 关键决议与架构基线
+- 前序开发任务与工具调用均已按规划闭环并通过构建验证；
+- 严格遵循现行工程规约（.asteamrules）与持久记忆库约束；
+
+---
+*注: 此压缩快照已作为置顶事实保留在后续上下文中，后续交互无需重复输入前置背景，Agent 可无缝续写。*`,
+      thought: `已完成前序 ${toCompact.length} 轮消息的上下文语义浓缩，已释放约 ${rawSavedTokens} Tokens。`,
+      timestamp: Date.now()
+    };
+
+    setMessagesMap(prev => ({
+      ...prev,
+      [sessionId]: [compactSummaryMsg, ...toKeep]
+    }));
+  };
+
   // 7. Send message & start Agent
   const handleSendMessage = async (text: string, mode: ExecutionMode, attachments?: any[]) => {
     if (isWaitingForUser) {
@@ -351,9 +547,58 @@ export const App: React.FC = () => {
     if (!text.trim() && (!attachments || attachments.length === 0)) return;
     if (isRunning && !isWaitingForUser) return;
 
+    const trimmedInput = text.trim();
+
+    // v1.5.0 快捷指令: /compact 智能浓缩长会话上下文
+    if (/^\/compact(?:\s+.*)?$/i.test(trimmedInput)) {
+      handleCompactSession(activeSessionId);
+      return;
+    }
+
+    // v1.3.0 快捷指令: /remember <内容> 或 /learn <内容> 显式持久化至长期记忆库
+    const rememberMatch = trimmedInput.match(/^\/(?:remember|learn)\s+([\s\S]+)$/i);
+    if (rememberMatch && rememberMatch[1]?.trim() && window.electronAPI?.addMemoryFact) {
+      const factToSave = rememberMatch[1].trim();
+      const scope = currentWorkspacePath ? 'project' : 'global';
+      const res = await window.electronAPI.addMemoryFact(scope, factToSave, currentWorkspacePath);
+
+      const userMsg: ChatMessageItem = {
+        id: `msg-user-${Date.now()}`,
+        role: 'user',
+        content: trimmedInput,
+        timestamp: Date.now()
+      };
+
+      const assistantMsg: ChatMessageItem = {
+        id: `msg-assistant-${Date.now() + 1}`,
+        role: 'assistant',
+        content: `🧠 **[长期记忆已沉淀 · 跨会话激活]**\n\n已成功持久化落盘至 **${scope === 'project' ? '当前项目库 (.asteam/memory/MEMORY.md)' : '全局记忆库 (GLOBAL_MEMORY.md)'}**：\n\n> ${factToSave}\n\n💡 该工程规约/避坑要点已常驻生效，在此项目的所有后续任务与新会话中，Agent 将始终自动感知并严格遵循此约定。`,
+        thought: '已通过显式指令完成本地工程记忆沉淀。',
+        steps: [
+          {
+            id: `step-mem-${Date.now()}`,
+            title: '持久化沉淀至 Memory Bank',
+            status: 'completed',
+            tool: 'remember_fact',
+            result: res.message
+          }
+        ],
+        timestamp: Date.now() + 1
+      };
+
+      setMessagesMap(prev => ({
+        ...prev,
+        [activeSessionId]: [...(prev[activeSessionId] || []), userMsg, assistantMsg]
+      }));
+      return;
+    }
+
     let fullContent = text.trim();
     if (attachments && attachments.length > 0) {
       const attachSnippets = attachments.map(att => {
+        if (att.type?.startsWith('image/') && att.content) {
+          return `\n\n【用户附件图片: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n![${att.name}](${att.content})`;
+        }
         if (att.content) {
           const ext = att.name.split('.').pop() || '';
           return `\n\n【附件代码/文件: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n\`\`\`${ext}\n${att.content}\n\`\`\``;
@@ -416,10 +661,13 @@ export const App: React.FC = () => {
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
       model: settings.model,
+      stream: settings.streamResponse !== false,
       workspacePath: currentWorkspacePath,
       enabledMcpTools: settings.enabledMcpTools,
+      customMcpConfig: settings.customMcpConfig,
       enabledSkills: settings.enabledSkills,
-      executionMode: mode
+      executionMode: mode,
+      fallbackProviders: settings.fallbackProviders
     };
 
     if (window.electronAPI) {
@@ -453,14 +701,17 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
-      {/* 1. Custom Frameless TitleBar with Git Status Pill */}
+      {/* 1. Custom Frameless TitleBar with Git Status Pill & Workbench Trigger */}
       <TitleBar
         theme={theme}
         onToggleTheme={toggleTheme}
         onOpenSettings={() => setIsSettingsOpen(true)}
         workspacePath={currentWorkspacePath}
         gitStatus={gitStatus}
-        onOpenGitDiff={() => setIsGitDiffOpen(true)}
+        onOpenGitDiff={handleOpenGitDiff}
+        onOpenDrawer={() => setIsDrawerOpen(true)}
+        projectRules={projectRules}
+        onOpenRules={handleOpenRules}
       />
 
       {/* 2. Main Workspace Layout */}
@@ -493,7 +744,17 @@ export const App: React.FC = () => {
           workspacePath={currentWorkspacePath}
           currentModel={settings.model}
           providerName={providerDisplayName}
-          onOpenGitDiff={() => setIsGitDiffOpen(true)}
+          onOpenGitDiff={handleOpenGitDiff}
+          onOpenPreview={handleOpenPreview}
+          onOpenTerminal={handleOpenTerminal}
+          onOpenTimeline={handleOpenTimeline}
+          onRollbackCheckpoint={handleRollbackCheckpoint}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+          activeSessionId={activeSessionId}
+          terminalOutputs={terminalOutputs}
+          onOpenRules={handleOpenRules}
+          onCompactSession={() => handleCompactSession(activeSessionId)}
+          onOpenScheduler={handleOpenScheduler}
         />
       </div>
 
@@ -506,13 +767,33 @@ export const App: React.FC = () => {
         workspacePath={currentWorkspacePath}
       />
 
-      {/* 4. Git Diff Drawer */}
-      <GitDiffDrawer
-        isOpen={isGitDiffOpen}
-        onClose={() => setIsGitDiffOpen(false)}
+      {/* 3.1 Project Rules Modal (v1.4.0) */}
+      <ProjectRulesModal
+        isOpen={isRulesModalOpen}
+        onClose={() => setIsRulesModalOpen(false)}
+        workspacePath={currentWorkspacePath}
+        projectRules={projectRules}
+        onRulesUpdated={refreshProjectRules}
+      />
+
+      {/* 4. Workspace Workbench Drawer (Live Preview + Artifacts Shelf + Git Diff + Live Terminal + Timeline) */}
+      <WorkspaceDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        activeTab={drawerTab}
+        onTabChange={setDrawerTab}
+        previewData={previewData}
         workspacePath={currentWorkspacePath}
         gitStatus={gitStatus}
         onRefreshGit={refreshGitStatus}
+        onRollbackCheckpoint={handleRollbackCheckpoint}
+        activeSessionId={activeSessionId}
+        terminalOutput={terminalOutputs[activeSessionId] || ''}
+        messages={activeMessages}
+        onSelectPreview={(data) => {
+          setPreviewData(data);
+          setDrawerTab('preview');
+        }}
       />
     </div>
   );

@@ -1,9 +1,15 @@
-import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage, shell, net } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { runHarnessAgent, abortExecution, submitUserResponse } from './harness-runner';
-import { getGitStatus, getFileDiff, discardFileChange } from './git-manager';
+import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
+import { getGitStatus, getFileDiff, discardFileChange, getGitDiffSummary } from './git-manager';
 import { skillManager } from './skill-manager';
+import { storageHub } from './storage-hub';
+import { memoryManager } from './memory-manager';
+import { rulesManager } from './rules-manager';
+import { checkpointManager } from './checkpoint-manager';
+import { mcpManager } from './mcp-manager';
+import { schedulerManager } from './scheduler-manager';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -37,7 +43,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     frame: false,
     titleBarStyle: 'hidden',
-    backgroundColor: '#0d1412',
+    backgroundColor: '#f8faf9',
     icon: icon || undefined,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -145,6 +151,61 @@ function registerShortcuts() {
   });
 }
 
+function indexWorkspaceFiles(rootPath: string, maxFiles = 2000): Array<{ name: string; relPath: string; ext: string }> {
+  if (!rootPath || !fs.existsSync(rootPath)) return [];
+  const results: Array<{ name: string; relPath: string; ext: string }> = [];
+  const ignoredDirs = new Set(['node_modules', '.git', 'dist', 'dist-electron', 'build', 'release', '.asteam', '.vscode', '.idea', 'coverage', '.cache', 'tmp', 'temp']);
+
+  function walk(currentDir: string) {
+    if (results.length >= maxFiles) return;
+    try {
+      const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (results.length >= maxFiles) return;
+        if (entry.name.startsWith('.') && entry.name !== '.env' && entry.name !== '.asteamrules') continue;
+
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          if (!ignoredDirs.has(entry.name)) {
+            walk(fullPath);
+          }
+        } else if (entry.isFile()) {
+          const relPath = path.relative(rootPath, fullPath).replace(/\\/g, '/');
+          const ext = path.extname(entry.name).toLowerCase().replace('.', '');
+          results.push({
+            name: entry.name,
+            relPath,
+            ext
+          });
+        }
+      }
+    } catch {}
+  }
+
+  walk(rootPath);
+  return results;
+}
+
+function readWorkspaceFileSafe(rootPath: string, relPath: string): { success: boolean; content?: string; error?: string } {
+  try {
+    if (!rootPath || !fs.existsSync(rootPath)) return { success: false, error: '工作区不存在' };
+    const fullPath = path.resolve(rootPath, relPath);
+    if (!fullPath.startsWith(path.resolve(rootPath))) {
+      return { success: false, error: '非法越界文件路径' };
+    }
+    if (!fs.existsSync(fullPath)) return { success: false, error: '文件不存在' };
+    const stats = fs.statSync(fullPath);
+    if (stats.isDirectory()) return { success: false, error: '目标是目录而非文件' };
+    if (stats.size > 1024 * 1024 * 2) {
+      return { success: false, error: '文件超过 2MB，已被保护性拦截' };
+    }
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    return { success: true, content };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
 function setupIPC() {
   // Window control IPC
   ipcMain.on('window:minimize', () => {
@@ -200,6 +261,15 @@ function setupIPC() {
     }
   });
 
+  // Workspace file indexing & reading for @file context
+  ipcMain.handle('workspace:indexFiles', async (_event, dirPath: string) => {
+    return indexWorkspaceFiles(dirPath);
+  });
+
+  ipcMain.handle('workspace:readFileContent', async (_event, { workspacePath, relPath }: { workspacePath: string; relPath: string }) => {
+    return readWorkspaceFileSafe(workspacePath, relPath);
+  });
+
   // App settings IPC
   ipcMain.handle('app:getOpenAtLogin', () => {
     return app.getLoginItemSettings().openAtLogin;
@@ -226,6 +296,10 @@ function setupIPC() {
     return await discardFileChange(repoPath, relPath);
   });
 
+  ipcMain.handle('git:getDiffSummary', async (_event, repoPath: string) => {
+    return await getGitDiffSummary(repoPath);
+  });
+
   // Skills IPC
   ipcMain.handle('skills:getAll', async (_event, workspacePath: string | null) => {
     return skillManager.getAllAvailableSkills(workspacePath);
@@ -248,7 +322,7 @@ function setupIPC() {
 
   ipcMain.handle('skills:installFromUrl', async (_event, url: string) => {
     try {
-      const res = await fetch(url);
+      const res = await net.fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       const text = await res.text();
       const urlFileName = url.split('/').pop()?.replace(/\.md$/, '') || 'remote_skill';
@@ -262,6 +336,220 @@ function setupIPC() {
 
   ipcMain.handle('skills:delete', async (_event, skillId: string) => {
     return skillManager.deleteCustomSkill(skillId);
+  });
+
+  // Storage Hub IPC (v1.3.0)
+  ipcMain.handle('storage:getStats', async () => {
+    return storageHub.getStorageStats();
+  });
+
+  ipcMain.handle('storage:selectDataDir', async () => {
+    if (!mainWindow) return null;
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择 ASTeam Agent 自定义数据与存储根目录',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('storage:setDataRootDir', async (_event, newPath: string) => {
+    return storageHub.setDataRootDir(newPath);
+  });
+
+  ipcMain.handle('storage:migrateData', async () => {
+    return await storageHub.migrateLegacyData();
+  });
+
+  // Memory Bank IPC (v1.3.0)
+  ipcMain.handle('memory:getAll', async (_event, workspacePath: string | null) => {
+    return {
+      userProfile: memoryManager.readUserProfile(),
+      globalMemory: memoryManager.readGlobalMemory(),
+      projectMemory: memoryManager.readProjectMemory(workspacePath),
+      projectMemoryPath: memoryManager.getProjectMemoryPath(workspacePath)
+    };
+  });
+
+  ipcMain.handle('memory:saveContent', async (_event, { type, content, workspacePath }: { type: 'project' | 'profile' | 'global'; content: string; workspacePath: string | null }) => {
+    return memoryManager.saveMemoryContent(type, content, workspacePath);
+  });
+
+  ipcMain.handle('memory:addFact', async (_event, { scope, fact, workspacePath }: { scope: 'project' | 'global'; fact: string; workspacePath: string | null }) => {
+    return memoryManager.addMemoryFact(scope, fact, workspacePath);
+  });
+
+  ipcMain.handle('memory:parseCommand', async (_event, text: string) => {
+    return memoryManager.parseExplicitCommand(text);
+  });
+
+  // Project Rules IPC (.asteamrules / ASTEAM.md) - v1.4.0
+  ipcMain.handle('rules:get', async (_event, workspacePath: string | null) => {
+    return rulesManager.getProjectRules(workspacePath);
+  });
+
+  ipcMain.handle('rules:save', async (_event, { workspacePath, content }: { workspacePath: string; content: string }) => {
+    return rulesManager.saveProjectRules(workspacePath, content);
+  });
+
+  ipcMain.handle('rules:getPresets', async () => {
+    return rulesManager.getPresets();
+  });
+
+  // Shadow Checkpoint & Rollback IPC - v1.4.0
+  ipcMain.handle('checkpoint:list', async (_event, { workspacePath, sessionId }: { workspacePath: string | null; sessionId?: string }) => {
+    return checkpointManager.listCheckpoints(workspacePath, sessionId);
+  });
+
+  ipcMain.handle('checkpoint:rollback', async (_event, { checkpointId, workspacePath }: { checkpointId: string; workspacePath: string | null }) => {
+    return await checkpointManager.rollbackCheckpoint(checkpointId, workspacePath);
+  });
+
+  // Model Context Protocol (MCP) IPC - v1.5.0
+  ipcMain.handle('mcp:getServersStatus', async () => {
+    return mcpManager.getServersStatus();
+  });
+
+  ipcMain.handle('mcp:reloadServers', async (_event, { customMcpConfig, workspacePath }: { customMcpConfig: string; workspacePath: string | null }) => {
+    return await mcpManager.reloadServers(customMcpConfig, workspacePath);
+  });
+
+  ipcMain.handle('mcp:testServer', async (_event, { name, config, workspacePath }: { name: string; config: any; workspacePath: string | null }) => {
+    return await mcpManager.testServer(name, config, workspacePath);
+  });
+
+  // Multimodal Preview Pop-out Window IPC
+  ipcMain.handle('preview:popout', async (_event, { type, title, content }: { type: string; title?: string; content: string }) => {
+    const popoutWin = new BrowserWindow({
+      width: 1060,
+      height: 740,
+      minWidth: 480,
+      minHeight: 360,
+      title: `${title || 'ASTeam 产物实时预览'} - ASTeam Agent`,
+      autoHideMenuBar: true,
+      backgroundColor: '#0f172a',
+      webPreferences: {
+        sandbox: false
+      }
+    });
+
+    if (type === 'html') {
+      const wrapped = content.includes('<html')
+        ? content
+        : `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title || 'HTML 预览'}</title><script src="https://cdn.tailwindcss.com"></script></head><body>${content}</body></html>`;
+      popoutWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(wrapped)}`);
+    } else if (type === 'svg') {
+      const htmlWrapper = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title || 'SVG 预览'}</title><style>body{margin:0;padding:32px;background:#0f172a;display:flex;justify-content:center;align-items:center;min-height:100vh;}svg{max-width:100%;height:auto;filter:drop-shadow(0 10px 25px rgba(0,0,0,0.5));}</style></head><body>${content}</body></html>`;
+      popoutWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlWrapper)}`);
+    } else if (type === 'mermaid') {
+      const htmlWrapper = `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title || 'Mermaid 架构拓扑'}</title><script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script><style>body{margin:0;padding:32px;background:#0f172a;color:#e2e8f0;display:flex;justify-content:center;}pre.mermaid{background:transparent;}</style></head><body><pre class="mermaid">${content}</pre><script>mermaid.initialize({theme:'dark',startOnLoad:true});</script></body></html>`;
+      popoutWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlWrapper)}`);
+    }
+
+    return true;
+  });
+
+  // Native Clipboard Image Write
+  ipcMain.handle('clipboard:writeImage', async (_event, dataUrl: string) => {
+    try {
+      const img = nativeImage.createFromDataURL(dataUrl);
+      clipboard.writeImage(img);
+      return true;
+    } catch (err: any) {
+      console.error('Failed to copy image to clipboard:', err);
+      return false;
+    }
+  });
+
+  // Native Save File Dialog
+  ipcMain.handle('dialog:saveFile', async (_event, { defaultName, content, isBase64 }: { defaultName: string; content: string; isBase64?: boolean }) => {
+    try {
+      if (!mainWindow) return false;
+      const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: path.join(app.getPath('downloads'), defaultName),
+        title: '保存文件'
+      });
+      if (canceled || !filePath) return false;
+      if (isBase64) {
+        const base64Data = content.replace(/^data:[^;]+;base64,/, '');
+        fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+      } else {
+        fs.writeFileSync(filePath, content, 'utf-8');
+      }
+      return true;
+    } catch (err: any) {
+      console.error('Failed to save file:', err);
+      return false;
+    }
+  });
+
+  // External System & Browser Actions
+  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+    try {
+      if (url && (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://'))) {
+        await shell.openExternal(url);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error('Failed to open external url:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('shell:showItemInFolder', async (_event, filePath: string) => {
+    try {
+      if (!filePath) return false;
+      if (fs.existsSync(filePath)) {
+        shell.showItemInFolder(filePath);
+        return true;
+      }
+      // 若具体文件尚未落盘但其父目录存在，则优雅回退打开所在目录
+      const parentDir = path.dirname(filePath);
+      if (fs.existsSync(parentDir)) {
+        await shell.openPath(parentDir);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error('Failed to show item in folder:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('shell:openPath', async (_event, targetPath: string) => {
+    try {
+      if (targetPath && fs.existsSync(targetPath)) {
+        await shell.openPath(targetPath);
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error('Failed to open path:', err);
+      return false;
+    }
+  });
+
+  ipcMain.handle('shell:openInBrowser', async (_event, { content, title, defaultPath }: { content: string; title?: string; defaultPath?: string }) => {
+    try {
+      let targetPath = defaultPath;
+      if (!targetPath || !fs.existsSync(targetPath)) {
+        const tmpDir = path.join(app.getPath('temp'), 'asteam-previews');
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        const safeName = (title || 'preview').replace(/[\\/:*?"<>|]/g, '_').replace(/\.html?$/i, '') + `_${Date.now()}.html`;
+        targetPath = path.join(tmpDir, safeName);
+        fs.writeFileSync(targetPath, content, 'utf-8');
+      }
+      await shell.openPath(targetPath);
+      return { success: true, filePath: targetPath };
+    } catch (err: any) {
+      console.error('Failed to open in browser:', err);
+      return { success: false, error: err.message };
+    }
   });
 
   // Agent Harness IPC
@@ -304,6 +592,24 @@ function setupIPC() {
           type: 'question',
           payload: { sessionId, ...data }
         });
+      },
+      onTerminalData: (data) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'terminalData',
+          payload: data
+        });
+      },
+      onCheckpoint: (checkpoint) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'checkpoint',
+          payload: { sessionId, checkpoint }
+        });
+      },
+      onSwarmState: (state) => {
+        mainWindow?.webContents.send('agent:event', {
+          type: 'swarmState',
+          payload: { sessionId, state }
+        });
       }
     });
   });
@@ -314,6 +620,39 @@ function setupIPC() {
 
   ipcMain.handle('agent:replyQuestion', (_event, { sessionId, response }: { sessionId: string; response: string }) => {
     return submitUserResponse(sessionId, response);
+  });
+
+  ipcMain.handle('agent:sendTerminalInput', (_event, { sessionId, input }: { sessionId: string; input: string }) => {
+    return submitTerminalInput(sessionId, input);
+  });
+
+  // Autonomous Scheduler IPC (v1.6.0)
+  ipcMain.handle('scheduler:getTasks', async (_event, workspacePath?: string | null) => {
+    return schedulerManager.getTasks(workspacePath);
+  });
+
+  ipcMain.handle('scheduler:saveTask', async (_event, taskData) => {
+    return schedulerManager.saveTask(taskData);
+  });
+
+  ipcMain.handle('scheduler:deleteTask', async (_event, taskId: string) => {
+    return schedulerManager.deleteTask(taskId);
+  });
+
+  ipcMain.handle('scheduler:toggleTask', async (_event, { taskId, enabled }: { taskId: string; enabled: boolean }) => {
+    return schedulerManager.toggleTask(taskId, enabled);
+  });
+
+  ipcMain.handle('scheduler:runNow', async (_event, { taskId, workspacePath }: { taskId: string; workspacePath?: string }) => {
+    return await schedulerManager.runNow(taskId, workspacePath);
+  });
+
+  ipcMain.handle('scheduler:getReports', async (_event, workspacePath: string | null) => {
+    return schedulerManager.getReports(workspacePath);
+  });
+
+  ipcMain.handle('scheduler:readReport', async (_event, filePath: string) => {
+    return schedulerManager.readReport(filePath);
   });
 }
 
@@ -336,6 +675,11 @@ if (!gotTheLock) {
     registerShortcuts();
     setupIPC();
 
+    schedulerManager.start();
+    schedulerManager.onEvent((payload) => {
+      mainWindow?.webContents.send('scheduler:event', payload);
+    });
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createWindow();
@@ -350,6 +694,7 @@ if (!gotTheLock) {
   });
 
   app.on('will-quit', () => {
+    schedulerManager.stop();
     globalShortcut.unregisterAll();
   });
 }
