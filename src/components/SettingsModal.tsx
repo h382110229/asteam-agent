@@ -144,6 +144,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [mcpViewMode, setMcpViewMode] = useState<'market' | 'json'>('market');
   const [mcpCategoryFilter, setMcpCategoryFilter] = useState<'all' | 'database' | 'filesystem' | 'devtools' | 'automation'>('all');
   const [mcpSearchQuery, setMcpSearchQuery] = useState('');
+  const [testResultModal, setTestResultModal] = useState<{
+    serverName: string;
+    success: boolean;
+    tools: any[];
+    error?: string;
+  } | null>(null);
 
   const handleTogglePreset = (presetId: string, enabled: boolean) => {
     const preset = MCP_PRESETS.find(p => p.id === presetId);
@@ -236,14 +242,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (window.electronAPI?.testMcpServer) {
         const res = await window.electronAPI.testMcpServer(serverName, config, workspacePath || null);
         if (res.success) {
-          alert(`✅ [${serverName}] 连接测试成功！\n探测到 ${res.tools?.length || 0} 个可用工具:\n${(res.tools || []).map((t: any) => `• ${t.name}: ${t.description}`).join('\n')}`);
+          setTestResultModal({
+            serverName,
+            success: true,
+            tools: res.tools || []
+          });
           refreshMcpStatus();
         } else {
-          alert(`❌ [${serverName}] 连接测试失败:\n${res.error || '未知异常'}`);
+          setTestResultModal({
+            serverName,
+            success: false,
+            tools: [],
+            error: res.error || '未知异常'
+          });
         }
       }
     } catch (e: any) {
-      alert(`❌ 测试异常: ${e.message}`);
+      setTestResultModal({
+        serverName,
+        success: false,
+        tools: [],
+        error: e.message || '测试异常'
+      });
     } finally {
       setTestingMcpServer(null);
     }
@@ -2143,6 +2163,105 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span>{skillInstallMsg.text}</span>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MCP Test Server Result Modal Dialog (Modern in-app replacement for native alert) */}
+      {testResultModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-fade-in">
+          <div className="w-full max-w-lg rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            {/* Header */}
+            <div
+              className={`p-4 border-b border-[var(--border)] flex items-center justify-between ${
+                testResultModal.success ? 'bg-emerald-500/10' : 'bg-rose-500/10'
+              }`}
+            >
+              <div className="flex items-center space-x-2.5">
+                {testResultModal.success ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-rose-600 dark:text-rose-400 shrink-0" />
+                )}
+                <div>
+                  <h3 className="text-sm font-semibold text-[var(--foreground)]">
+                    {testResultModal.success
+                      ? `[${testResultModal.serverName}] MCP 连接测试成功`
+                      : `[${testResultModal.serverName}] MCP 连接测试失败`}
+                  </h3>
+                  <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5">
+                    {testResultModal.success
+                      ? `服务握手成功 · 探测到 ${testResultModal.tools.length} 个向 Agent 开放的工具能力`
+                      : '服务进程启动或握手异常，请核对命令、参数或系统环境'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTestResultModal(null)}
+                className="p-1 rounded-md text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--border)] transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="p-4 overflow-y-auto space-y-3 flex-1">
+              {testResultModal.success ? (
+                testResultModal.tools.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[var(--muted-foreground)] bg-[var(--background)] rounded-lg border border-[var(--border)]">
+                    该服务已握手成功，但当前未导出任何 Tool 工具。
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-[var(--foreground)] flex items-center justify-between">
+                      <span>可用工具能力清单 ({testResultModal.tools.length}):</span>
+                      <span className="text-[10px] text-[var(--muted-foreground)]">随时可被 Agent 调用</span>
+                    </div>
+                    <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+                      {testResultModal.tools.map((tool: any, idx: number) => (
+                        <div
+                          key={tool.name || idx}
+                          className="p-2.5 rounded-lg border border-[var(--border)] bg-[var(--background)] space-y-1 hover:border-[var(--primary)]/40 transition-colors"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <Wrench className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
+                            <span className="text-xs font-mono font-semibold text-[var(--foreground)]">
+                              {tool.name}
+                            </span>
+                          </div>
+                          {tool.description && (
+                            <p className="text-[11px] text-[var(--muted-foreground)] leading-relaxed pl-5.5">
+                              {tool.description}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-rose-600 dark:text-rose-400">
+                    错误诊断详情:
+                  </div>
+                  <pre className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs font-mono text-rose-700 dark:text-rose-300 overflow-x-auto whitespace-pre-wrap">
+                    {testResultModal.error || '未知异常'}
+                  </pre>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3 border-t border-[var(--border)] bg-[var(--background)] flex justify-end">
+              <button
+                type="button"
+                onClick={() => setTestResultModal(null)}
+                className="px-4 py-1.5 text-xs font-medium bg-[var(--primary)] text-white rounded-lg hover:opacity-90 transition-opacity shadow-xs"
+              >
+                确定
+              </button>
             </div>
           </div>
         </div>

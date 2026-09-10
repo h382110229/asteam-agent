@@ -232,3 +232,52 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customMcpConfig: '{\n  "mcpServers": {}\n}',
   fallbackProviders: DEFAULT_FALLBACK_PRESETS
 };
+
+/**
+ * 智能推断模型的上下文窗口大小 (Tokens)
+ * - ASteam LLMAPI: Auto 智能路由及平台默认全系支持 1M 超长窗口
+ * - Gemini 1.5/2.5/3.5/3.7: 1M ~ 2M
+ * - Claude 3.5/3.7: 200k
+ * - OpenAI o1/o3/gpt-4o: 128k
+ * - DeepSeek 官方: 64k ~ 128k
+ */
+export function getModelContextLimit(modelName: string, providerName?: string): number {
+  if (!modelName) return 1000000;
+  const name = modelName.toLowerCase();
+  const prov = (providerName || '').toLowerCase();
+
+  // ASteam LLMAPI 官方网关具备 1M 超长上下文调度能力，Auto 智能路由默认为 1M
+  if (prov.includes('llmapi') || prov.includes('asteam')) {
+    return 1000000; // 1M (1,000,000 Tokens)
+  }
+
+  // 独立 Gemini 系列: 1M 或 2M
+  if (name.includes('gemini')) {
+    if (name.includes('pro') || name.includes('1.5-pro')) {
+      return 2000000; // 2M
+    }
+    return 1000000; // 1M
+  }
+
+  // Claude 系列: 200k
+  if (name.includes('claude')) {
+    return 200000;
+  }
+
+  // OpenAI 系列
+  if (name.includes('o1') || name.includes('o3') || name.includes('4o')) {
+    return 128000;
+  }
+
+  // DeepSeek 官方直连
+  if (name.includes('deepseek') || name.includes('r1')) {
+    return 64000;
+  }
+
+  // 默认兜底：如果是 Auto 智能路由则支持 1M
+  if (name === 'auto' || name.startsWith('auto')) {
+    return 1000000;
+  }
+
+  return 128000;
+}

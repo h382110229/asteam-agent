@@ -42,7 +42,7 @@ import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestion
 import { LiveTerminalCard } from './LiveTerminalCard';
 import { ExecutionMode, CheckpointItem, WorkspaceFileItem, ProjectRulesInfo, SwarmState } from '../types/project';
 import { PreviewData } from './WorkspaceDrawer';
-import { inferModelCapabilities } from '../config/providers';
+import { inferModelCapabilities, getModelContextLimit } from '../config/providers';
 import { ConfirmModal } from './ConfirmModal';
 import { SwarmDashboard } from './SwarmDashboard';
 
@@ -512,7 +512,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     checkpoint: CheckpointItem | null;
   }>({ isOpen: false, checkpoint: null });
 
-  // Token & Context Window Monitor calculation (v1.5.0)
+  // Token & Context Window Monitor calculation (v1.5.0 / v1.6.0 dynamic 1M / 128k)
   const totalEstimatedTokens = useMemo(() => {
     return messages.reduce((acc, m) => {
       const contentTokens = Math.round((m.content?.length || 0) * 0.75);
@@ -521,12 +521,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     }, 0);
   }, [messages]);
 
-  const contextLimit = 128000;
+  const contextLimit = useMemo(() => {
+    return getModelContextLimit(currentModel, providerName);
+  }, [currentModel, providerName]);
+
   const usagePercent = Math.min(100, Math.round((totalEstimatedTokens / contextLimit) * 100));
 
   const formatTokenCount = (tokens: number) => {
-    if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`;
-    if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k`;
+    if (tokens >= 1000000) {
+      const val = tokens / 1000000;
+      return Number.isInteger(val) ? `${val}M` : `${val.toFixed(1)}M`;
+    }
+    if (tokens >= 1000) {
+      const val = tokens / 1000;
+      return Number.isInteger(val) ? `${val}k` : `${val.toFixed(1)}k`;
+    }
     return `${tokens}`;
   };
 
