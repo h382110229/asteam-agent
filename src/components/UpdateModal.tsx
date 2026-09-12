@@ -124,7 +124,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl flex flex-col max-h-[90vh]">
         {/* Modal Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 bg-[var(--background)]">

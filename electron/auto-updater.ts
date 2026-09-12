@@ -364,14 +364,37 @@ export class AutoUpdaterManager {
 
     try {
       const installerPath = this.downloadedFilePath;
-      const args = silent ? ['/S'] : [];
+      const currentExePath = process.execPath;
 
-      // Detached execution so it continues after app exits
-      const child = spawn(installerPath, args, {
-        detached: true,
-        stdio: 'ignore'
-      });
-      child.unref();
+      if (process.platform === 'win32') {
+        // Resilient background launcher daemon:
+        // 1. Waits for current ASTeam Agent process to release file locks (1.2s)
+        // 2. Runs NSIS installer silently with /S and waits for it to complete
+        // 3. Automatically relaunches ASTeam Agent.exe smoothly!
+        const escapedInstaller = installerPath.replace(/'/g, "''");
+        const escapedExe = currentExePath.replace(/'/g, "''");
+        
+        const psCommand = `Start-Sleep -Milliseconds 1200; Start-Process -FilePath '${escapedInstaller}' -ArgumentList '/S' -Wait; Start-Sleep -Milliseconds 600; Start-Process -FilePath '${escapedExe}'`;
+        
+        const child = spawn('powershell.exe', [
+          '-NoProfile',
+          '-NonInteractive',
+          '-WindowStyle',
+          'Hidden',
+          '-Command',
+          psCommand
+        ], {
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.unref();
+      } else {
+        const child = spawn(installerPath, [], {
+          detached: true,
+          stdio: 'ignore'
+        });
+        child.unref();
+      }
 
       setTimeout(() => {
         if (app) {
