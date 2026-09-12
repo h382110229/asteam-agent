@@ -70,6 +70,7 @@ interface SettingsModalProps {
   settings: AppSettings;
   onSave: (newSettings: AppSettings) => void;
   workspacePath?: string | null;
+  onOpenUpdateModal?: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -77,7 +78,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   settings,
   onSave,
-  workspacePath = null
+  workspacePath = null,
+  onOpenUpdateModal
 }) => {
   const [activeTab, setActiveTab] = useState<'provider' | 'storage' | 'memory' | 'mcp_skills' | 'desktop' | 'update'>('provider');
   const [updateServerUrl, setUpdateServerUrl] = useState<string>('https://apphub.ashawk.online');
@@ -2038,7 +2040,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="text-right">
                     <span className="rounded-full bg-[var(--primary)]/15 px-2.5 py-1 text-xs font-mono font-semibold text-[var(--primary)]">
-                      v1.9.2 (当前版本)
+                      v1.9.3 (当前版本)
                     </span>
                     <p className="text-[10px] text-[var(--muted-foreground)] mt-1">
                       通道: 企业私有云端中枢 (Stable)
@@ -2058,34 +2060,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="text"
                     value={updateServerUrl}
                     onChange={(e) => setUpdateServerUrl(e.target.value)}
-                    placeholder="例如: https://apphub.ashawk.online 或 http://127.0.0.1:3888"
-                    className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-xs font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                    placeholder="https://apphub.ashawk.online"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-hidden focus:border-[var(--primary)]"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[var(--border)]/60">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <span className="font-medium text-[var(--foreground)]">启动时静默检查更新</span>
-                      <p className="text-[10px] text-[var(--muted-foreground)]">发现新版本自动在顶部提醒</p>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div className="flex items-center justify-between p-2 rounded-lg bg-[var(--muted)]/30 border border-[var(--border)]">
+                    <div>
+                      <span className="font-medium text-[var(--foreground)] block">启动时自动检测</span>
+                      <span className="text-[10px] text-[var(--muted-foreground)]">静默同步云端发布</span>
                     </div>
                     <input
                       type="checkbox"
                       checked={autoCheckUpdate}
                       onChange={(e) => setAutoCheckUpdate(e.target.checked)}
-                      className="h-4 w-4 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                      className="rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
                     />
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <span className="font-medium text-[var(--foreground)]">发布更新通道</span>
-                      <p className="text-[10px] text-[var(--muted-foreground)]">推荐企业生产使用稳定通道</p>
+                  <div className="p-2 rounded-lg bg-[var(--muted)]/30 border border-[var(--border)] flex items-center justify-between">
+                    <div>
+                      <span className="font-medium text-[var(--foreground)] block">发布通道</span>
+                      <span className="text-[10px] text-[var(--muted-foreground)]">版本验证策略</span>
                     </div>
                     <select
                       value={updateChannel}
                       onChange={(e) => setUpdateChannel(e.target.value)}
-                      className="rounded border border-[var(--input)] bg-[var(--card)] px-2 py-1 text-xs text-[var(--foreground)]"
+                      className="rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] focus:outline-hidden"
                     >
                       <option value="stable">稳定版 (Stable)</option>
                       <option value="beta">测试版 (Beta)</option>
@@ -2118,11 +2120,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         });
                         setTimeout(() => {
                           onClose();
-                        }, 400);
+                          onOpenUpdateModal?.();
+                        }, 350);
                       } else if (res) {
                         setUpdateCheckMsg({
                           type: 'info',
-                          text: `当前已是最新版本 (v${res.currentVersion || '1.8.3'})。`
+                          text: `当前已是最新版本 (v${res.currentVersion || '1.9.3'})。`
                         });
                       } else {
                         setUpdateCheckMsg({

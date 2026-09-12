@@ -12,6 +12,7 @@ import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/W
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
 import { Project, ProjectSession, GitStatusSummary, ExecutionMode, ProjectRulesInfo } from './types/project';
+import { Sparkles, X } from 'lucide-react';
 
 export const App: React.FC = () => {
   // 1. Settings & Theme
@@ -250,6 +251,25 @@ export const App: React.FC = () => {
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateVersion, setUpdateVersion] = useState<string>('');
   const [runStartTime, setRunStartTime] = useState<number>(0);
+  const [updateWelcomeToast, setUpdateWelcomeToast] = useState<string | null>(null);
+
+  // v1.9.3: 版本更新后欢迎提示与版本记忆
+  useEffect(() => {
+    const CURRENT_VERSION = '1.9.3';
+    try {
+      const prevVer = localStorage.getItem('asteam_installed_version');
+      if (prevVer && prevVer !== CURRENT_VERSION) {
+        setUpdateWelcomeToast(`🎉 欢迎体验 ASTeam Agent v${CURRENT_VERSION}！客户端已成功升级至最新版本。`);
+        const timer = setTimeout(() => {
+          setUpdateWelcomeToast(null);
+        }, 6000);
+        localStorage.setItem('asteam_installed_version', CURRENT_VERSION);
+        return () => clearTimeout(timer);
+      } else if (!prevVer) {
+        localStorage.setItem('asteam_installed_version', CURRENT_VERSION);
+      }
+    } catch {}
+  }, []);
 
   // v1.9.0: 自动更新状态检测与实时事件监听
   useEffect(() => {
@@ -1090,6 +1110,7 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         settings={settings}
         onSave={handleSaveSettings}
         workspacePath={currentWorkspacePath}
+        onOpenUpdateModal={() => setIsUpdateModalOpen(true)}
       />
 
       {/* 3.1 Project Rules Modal (v1.4.0) */}
@@ -1144,6 +1165,26 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         onClose={() => setIsUpdateModalOpen(false)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
+
+      {/* 3.6 Post-Update Welcome Notification (v1.9.3) */}
+      {updateWelcomeToast && (
+        <div className="fixed bottom-6 right-6 z-[120] flex items-center space-x-3 rounded-xl border border-emerald-500/30 bg-[var(--card)]/95 px-4 py-3 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom duration-300">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
+            <Sparkles className="h-4 w-4" />
+          </div>
+          <div className="space-y-0.5 pr-2">
+            <div className="text-xs font-semibold text-[var(--foreground)]">版本升级成功</div>
+            <div className="text-[11px] text-[var(--muted-foreground)]">{updateWelcomeToast}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUpdateWelcomeToast(null)}
+            className="rounded-lg p-1 text-[var(--muted-foreground)] hover:bg-[var(--muted)] hover:text-[var(--foreground)] cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

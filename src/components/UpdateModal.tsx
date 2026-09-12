@@ -37,6 +37,27 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     bytesPerSecond: 0
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [restartCountdown, setRestartCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (status === 'downloaded') {
+      setRestartCountdown(5);
+    } else {
+      setRestartCountdown(null);
+    }
+  }, [status]);
+
+  useEffect(() => {
+    if (restartCountdown === null) return;
+    if (restartCountdown <= 0) {
+      handleInstallAndRestart();
+      return;
+    }
+    const timer = setTimeout(() => {
+      setRestartCountdown((prev) => (prev !== null && prev > 0 ? prev - 1 : null));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [restartCountdown]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -123,6 +144,16 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     return Math.round(bytesPerSec / 1024) + ' KB/s';
   };
 
+  const formatEta = (transferred: number, total: number, bytesPerSec: number): string => {
+    if (!total || !bytesPerSec || bytesPerSec <= 0 || transferred >= total) return '';
+    const remainingBytes = total - transferred;
+    const seconds = Math.ceil(remainingBytes / bytesPerSec);
+    if (seconds < 60) return `剩余约 ${seconds} 秒`;
+    const minutes = Math.floor(seconds / 60);
+    const remSec = seconds % 60;
+    return `剩余约 ${minutes} 分 ${remSec} 秒`;
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl flex flex-col max-h-[90vh]">
@@ -181,7 +212,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 当前客户端已是最新版本
               </h3>
               <p className="text-xs text-[var(--muted-foreground)] max-w-xs">
-                当前版本为 v{updateInfo?.currentVersion || '1.8.3'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
+                当前版本为 v{updateInfo?.currentVersion || '1.9.3'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
               </p>
               <button
                 type="button"
@@ -308,23 +339,42 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                     <span>
                       {formatBytes(progress.transferredBytes)} / {formatBytes(progress.totalBytes)}
                     </span>
-                    <span>
-                      瞬时速率: {formatSpeed(progress.bytesPerSecond)}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span>瞬时速率: {formatSpeed(progress.bytesPerSecond)}</span>
+                      {formatEta(progress.transferredBytes, progress.totalBytes, progress.bytesPerSecond) && (
+                        <span className="text-[var(--primary)] font-sans">
+                          ({formatEta(progress.transferredBytes, progress.totalBytes, progress.bytesPerSecond)})
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
               {/* Downloaded Confirmation */}
               {status === 'downloaded' && (
-                <div className="flex items-center space-x-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-600 dark:text-emerald-400">
-                  <ShieldCheck className="h-5 w-5 shrink-0" />
-                  <div>
-                    <h5 className="font-semibold text-xs">安装包下载完成并通过安全校验</h5>
-                    <p className="text-[11px] opacity-90">
-                      SHA-256 二进制完整性哈希比对通过，点击下方按钮将启动安装并无缝重启助手。
-                    </p>
+                <div className="flex items-center justify-between rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-emerald-600 dark:text-emerald-400">
+                  <div className="flex items-start space-x-3">
+                    <ShieldCheck className="h-5 w-5 shrink-0 mt-0.5" />
+                    <div>
+                      <h5 className="font-semibold text-xs">安装包下载完成并通过安全校验</h5>
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        SHA-256 二进制完整性哈希比对通过。
+                        {restartCountdown !== null && restartCountdown > 0
+                          ? `将于 ${restartCountdown} 秒后自动启动升级并平滑重启...`
+                          : '点击右下方按钮立即执行平滑升级安装。'}
+                      </p>
+                    </div>
                   </div>
+                  {restartCountdown !== null && restartCountdown > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setRestartCountdown(null)}
+                      className="text-[11px] px-2.5 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 shrink-0 cursor-pointer font-medium ml-2"
+                    >
+                      暂停倒计时
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -367,7 +417,11 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 className="inline-flex items-center space-x-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-medium text-white shadow-xs hover:bg-emerald-700 transition-colors cursor-pointer animate-pulse"
               >
                 <ArrowRight className="h-3.5 w-3.5" />
-                <span>立即重启并安装</span>
+                <span>
+                  {restartCountdown !== null && restartCountdown > 0
+                    ? `立即重启并安装 (${restartCountdown}s)`
+                    : '立即重启并安装'}
+                </span>
               </button>
             )}
           </div>
