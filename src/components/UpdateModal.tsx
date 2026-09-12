@@ -154,6 +154,29 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     return `剩余约 ${minutes} 分 ${remSec} 秒`;
   };
 
+  const renderChangelogItem = (log: string) => {
+    const match = log.match(/^【(.*?)】(.*)$/);
+    if (!match) return <span>{log}</span>;
+    const tag = match[1];
+    const text = match[2];
+    let badgeClass = "bg-[var(--primary)]/15 text-[var(--primary)] border-[var(--primary)]/30";
+    if (tag.includes('新增') || tag.includes('直达') || tag.includes('特性') || tag.includes('前台')) {
+      badgeClass = "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30";
+    } else if (tag.includes('修复') || tag.includes('安全') || tag.includes('瘦身') || tag.includes('清理')) {
+      badgeClass = "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30";
+    } else if (tag.includes('守护') || tag.includes('重启') || tag.includes('平滑') || tag.includes('脱钩')) {
+      badgeClass = "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30";
+    }
+    return (
+      <div className="flex items-start space-x-1.5 leading-relaxed">
+        <span className={`inline-flex items-center px-1.5 py-0.2 rounded border text-[10px] font-semibold shrink-0 mt-0.5 ${badgeClass}`}>
+          {tag}
+        </span>
+        <span>{text}</span>
+      </div>
+    );
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in duration-200">
       <div className="relative w-full max-w-lg overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-2xl flex flex-col max-h-[90vh]">
@@ -212,7 +235,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 当前客户端已是最新版本
               </h3>
               <p className="text-xs text-[var(--muted-foreground)] max-w-xs">
-                当前版本为 v{updateInfo?.currentVersion || '1.9.3'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
+                当前版本为 v{updateInfo?.currentVersion || '1.9.4'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
               </p>
               <button
                 type="button"
@@ -302,11 +325,10 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                     <span className="text-[11px] font-medium text-[var(--foreground)]">
                       更新亮点与变更清单:
                     </span>
-                    <ul className="space-y-1 pl-1">
+                    <ul className="space-y-1.5 pl-0.5">
                       {updateInfo.changelog.map((log: string, idx: number) => (
-                        <li key={idx} className="flex items-start space-x-2 text-[11px] text-[var(--muted-foreground)]">
-                          <span className="text-[var(--primary)] font-bold mt-0.5">•</span>
-                          <span>{log}</span>
+                        <li key={idx} className="text-[11px] text-[var(--muted-foreground)]">
+                          {renderChangelogItem(log)}
                         </li>
                       ))}
                     </ul>

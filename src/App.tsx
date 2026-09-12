@@ -253,13 +253,13 @@ export const App: React.FC = () => {
   const [runStartTime, setRunStartTime] = useState<number>(0);
   const [updateWelcomeToast, setUpdateWelcomeToast] = useState<string | null>(null);
 
-  // v1.9.3: 版本更新后欢迎提示与版本记忆
+  // v1.9.4: 版本更新后欢迎提示与版本记忆
   useEffect(() => {
-    const CURRENT_VERSION = '1.9.3';
+    const CURRENT_VERSION = '1.9.4';
     try {
       const prevVer = localStorage.getItem('asteam_installed_version');
       if (prevVer && prevVer !== CURRENT_VERSION) {
-        setUpdateWelcomeToast(`🎉 欢迎体验 ASTeam Agent v${CURRENT_VERSION}！客户端已成功升级至最新版本。`);
+        setUpdateWelcomeToast(`🎉 欢迎体验 ASTeam Agent v${CURRENT_VERSION}！客户端已成功平滑升级并自动唤醒。`);
         const timer = setTimeout(() => {
           setUpdateWelcomeToast(null);
         }, 6000);

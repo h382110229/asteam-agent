@@ -248,8 +248,19 @@ export class AutoUpdaterManager {
       fs.mkdirSync(tempDir, { recursive: true });
     }
 
-    const targetFilePath = path.join(tempDir, asset.fileName || `ASTeam-Agent-Setup-${this.currentUpdateInfo.latestVersion}.exe`);
+    const targetFileName = asset.fileName || `ASTeam-Agent-Setup-${this.currentUpdateInfo.latestVersion}.exe`;
+    const targetFilePath = path.join(tempDir, targetFileName);
     const partFilePath = `${targetFilePath}.part`;
+
+    // Housekeeping: clean older downloaded installers in tempDir to save user disk space
+    try {
+      const existingFiles = fs.readdirSync(tempDir);
+      for (const file of existingFiles) {
+        if (file !== targetFileName) {
+          try { fs.unlinkSync(path.join(tempDir, file)); } catch {}
+        }
+      }
+    } catch {}
 
     // Clean old partial files
     if (fs.existsSync(partFilePath)) {
@@ -368,13 +379,13 @@ export class AutoUpdaterManager {
 
       if (process.platform === 'win32') {
         // Resilient background launcher daemon:
-        // 1. Waits for current ASTeam Agent process to release file locks (1.2s)
+        // 1. Waits for current ASTeam Agent process to release file locks (1.5s)
         // 2. Runs NSIS installer silently with /S and waits for it to complete
-        // 3. Automatically relaunches ASTeam Agent.exe smoothly!
+        // 3. Automatically relaunches ASTeam Agent.exe via Windows Shell (cmd.exe /c start) to ensure it appears in foreground!
         const escapedInstaller = installerPath.replace(/'/g, "''");
         const escapedExe = currentExePath.replace(/'/g, "''");
         
-        const psCommand = `Start-Sleep -Milliseconds 1200; Start-Process -FilePath '${escapedInstaller}' -ArgumentList '/S' -Wait; Start-Sleep -Milliseconds 600; Start-Process -FilePath '${escapedExe}'`;
+        const psCommand = `Start-Sleep -Milliseconds 1500; Start-Process -FilePath '${escapedInstaller}' -ArgumentList '/S' -Wait; Start-Sleep -Milliseconds 1000; cmd.exe /c start \"\" \"${escapedExe}\"`;
         
         const child = spawn('powershell.exe', [
           '-NoProfile',
@@ -394,6 +405,13 @@ export class AutoUpdaterManager {
           stdio: 'ignore'
         });
         child.unref();
+      }
+
+      // Explicitly release single-instance lock BEFORE quitting so new instance starts cleanly
+      if (app) {
+        try {
+          app.releaseSingleInstanceLock();
+        } catch {}
       }
 
       setTimeout(() => {
