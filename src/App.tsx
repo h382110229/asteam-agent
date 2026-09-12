@@ -253,9 +253,9 @@ export const App: React.FC = () => {
   const [runStartTime, setRunStartTime] = useState<number>(0);
   const [updateWelcomeToast, setUpdateWelcomeToast] = useState<string | null>(null);
 
-  // v1.9.4: 版本更新后欢迎提示与版本记忆
+  // v1.9.5: 版本更新后欢迎提示与版本记忆
   useEffect(() => {
-    const CURRENT_VERSION = '1.9.4';
+    const CURRENT_VERSION = '1.9.5';
     try {
       const prevVer = localStorage.getItem('asteam_installed_version');
       if (prevVer && prevVer !== CURRENT_VERSION) {

@@ -378,25 +378,22 @@ export class AutoUpdaterManager {
       const currentExePath = process.execPath;
 
       if (process.platform === 'win32') {
-        // Resilient background launcher daemon:
-        // 1. Waits for current ASTeam Agent process to release file locks (1.5s)
-        // 2. Runs NSIS installer silently with /S and waits for it to complete
-        // 3. Automatically relaunches ASTeam Agent.exe via Windows Shell (cmd.exe /c start) to ensure it appears in foreground!
-        const escapedInstaller = installerPath.replace(/'/g, "''");
-        const escapedExe = currentExePath.replace(/'/g, "''");
-        
-        const psCommand = `Start-Sleep -Milliseconds 1500; Start-Process -FilePath '${escapedInstaller}' -ArgumentList '/S' -Wait; Start-Sleep -Milliseconds 1000; cmd.exe /c start \"\" \"${escapedExe}\"`;
-        
-        const child = spawn('powershell.exe', [
-          '-NoProfile',
-          '-NonInteractive',
-          '-WindowStyle',
-          'Hidden',
-          '-Command',
-          psCommand
-        ], {
+        // Native Windows Shell Launcher Daemon:
+        // 1. Creates a dedicated temporary batch launcher script (.cmd)
+        // 2. Waits 2s for current ASTeam Agent process to gracefully terminate and release file locks
+        // 3. Runs NSIS installer silently with /S and waits for file replacement completion
+        // 4. Invokes explorer.exe to launch ASTeam Agent into the user's active desktop session with full foreground focus!
+        // 5. Self-deletes upon completion without leaving temporary artifacts
+        const tempDir = path.dirname(installerPath);
+        const launcherScriptPath = path.join(tempDir, `asteam-update-launch-${Date.now()}.cmd`);
+        const scriptContent = `@echo off\r\ntimeout /t 2 /nobreak >nul\r\nstart /wait "" "${installerPath}" /S\r\ntimeout /t 1 /nobreak >nul\r\nexplorer.exe "${currentExePath}"\r\n(goto) 2>nul & del "%~f0"\r\n`;
+
+        fs.writeFileSync(launcherScriptPath, scriptContent, 'utf-8');
+
+        const child = spawn('cmd.exe', ['/c', launcherScriptPath], {
           detached: true,
-          stdio: 'ignore'
+          stdio: 'ignore',
+          windowsHide: true
         });
         child.unref();
       } else {

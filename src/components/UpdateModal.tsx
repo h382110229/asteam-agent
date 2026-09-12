@@ -160,7 +160,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
     const tag = match[1];
     const text = match[2];
     let badgeClass = "bg-[var(--primary)]/15 text-[var(--primary)] border-[var(--primary)]/30";
-    if (tag.includes('新增') || tag.includes('直达') || tag.includes('特性') || tag.includes('前台')) {
+    if (tag.includes('新增') || tag.includes('直达') || tag.includes('特性') || tag.includes('前台') || tag.includes('原生') || tag.includes('Shell')) {
       badgeClass = "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30";
     } else if (tag.includes('修复') || tag.includes('安全') || tag.includes('瘦身') || tag.includes('清理')) {
       badgeClass = "bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30";
@@ -235,7 +235,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 当前客户端已是最新版本
               </h3>
               <p className="text-xs text-[var(--muted-foreground)] max-w-xs">
-                当前版本为 v{updateInfo?.currentVersion || '1.9.4'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
+                当前版本为 v{updateInfo?.currentVersion || '1.9.5'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
               </p>
               <button
                 type="button"
