@@ -6,6 +6,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { ProjectRulesModal } from './components/ProjectRulesModal';
 import { EnterpriseHubModal } from './components/EnterpriseHubModal';
 import { SecurityComplianceModal } from './components/SecurityComplianceModal';
+import { SecurityPreflightModal, SensitiveItemSummary } from './components/SecurityPreflightModal';
 import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/WorkspaceDrawer';
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
@@ -246,6 +247,18 @@ export const App: React.FC = () => {
   const [isSecurityComplianceOpen, setIsSecurityComplianceOpen] = useState(false);
   const [runStartTime, setRunStartTime] = useState<number>(0);
 
+  // v1.8.3: 出境安全前置交互预检与会话豁免偏好
+  const [preflightData, setPreflightData] = useState<{
+    isOpen: boolean;
+    sensitiveItems: SensitiveItemSummary[];
+    originalText: string;
+    sanitizedText: string;
+    mode: ExecutionMode;
+    rawText: string;
+    attachments?: any[];
+  } | null>(null);
+  const [sessionFenceChoices, setSessionFenceChoices] = useState<Record<string, 'sanitize' | 'bypass'>>({});
+
   useEffect(() => {
     if (!window.electronAPI) return;
 
@@ -280,10 +293,10 @@ export const App: React.FC = () => {
           }
           lastMsg.steps = currentSteps;
 
-          // 当终端命令正在运行等待或执行时，放开用户输入状态，允许即时推入 stdin
-          if (updatedStep.tool === 'run_terminal_command' && updatedStep.status === 'running') {
-            setIsWaitingForUser(true);
-          } else if (updatedStep.tool === 'run_terminal_command' && (updatedStep.status === 'completed' || updatedStep.status === 'failed')) {
+          // run_terminal_command 运行状态不再触发 isWaitingForUser，
+          // 由 activeRunningTerminalStep（派生自 steps 状态）独立控制终端输入 UI
+          // 修复 Bug：之前设置 isWaitingForUser=true 导致底部出现"Agent 等待回复"假弹窗
+          if (updatedStep.tool === 'run_terminal_command' && (updatedStep.status === 'completed' || updatedStep.status === 'failed')) {
             setIsWaitingForUser(false);
           }
         } else if (type === 'question') {
@@ -291,6 +304,7 @@ export const App: React.FC = () => {
             questionId: payload.questionId,
             question: payload.question,
             options: payload.options,
+            questions: payload.questions,
             multiSelect: payload.multiSelect,
             answered: false
           };
@@ -324,14 +338,22 @@ export const App: React.FC = () => {
             setIsDrawerOpen(true);
           }
         } else if (type === 'done') {
-          // 若上游网关或模型将全部输出归入 reasoning_content (thought)，导致正文 content 为空，自动提拔为正文
+          const doneSummary: string = (payload as any)?.summary ?? '';
+
+          // 若模型将全部输出归入 reasoning_content (thought)，正文为空时自动提拔
           if (!lastMsg.content?.trim() && lastMsg.thought?.trim()) {
             lastMsg.content = lastMsg.thought;
             lastMsg.thought = '';
           }
-          // 若模型无正文输出但有任务完成总结，用任务总结作为正文呈现
-          if (!lastMsg.content?.trim() && typeof payload === 'string' && payload.trim()) {
-            lastMsg.content = payload;
+          // 修复 Bug：payload.summary（finalSummary）是 harness-runner 汇总的权威最终答案
+          // 若其比当前流式积累的 content 更完整（多迭代场景下，第一轮规划文本会污染 content），
+          // 则用 summary 覆盖 content，确保最终分析结论正确呈现
+          if (doneSummary.trim()) {
+            const currentContentLen = lastMsg.content?.trim().length || 0;
+            // 如果 content 为空，或 summary 明显更长（说明是真正的最终答案），则用 summary 替换
+            if (!currentContentLen || doneSummary.trim().length > currentContentLen) {
+              lastMsg.content = doneSummary.trim();
+            }
           }
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
           setIsRunning(false);
@@ -453,11 +475,28 @@ export const App: React.FC = () => {
     setMessagesMap(prev => {
       const list = [...(prev[activeSessionId] || [])];
       if (list.length === 0) return prev;
-      const last = { ...list[list.length - 1] };
-      if (last.question) {
-        last.question = { ...last.question, answered: true, selectedAnswer: answer };
+
+      // 精确在所有历史消息中寻找匹配的 questionId 或最新的未答复问题
+      let updated = false;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const m = { ...list[i] };
+        if (m.question && (!m.question.answered || m.question.questionId === questionId)) {
+          m.question = { ...m.question, answered: true, selectedAnswer: answer };
+          list[i] = m;
+          updated = true;
+          break;
+        }
       }
-      list[list.length - 1] = last;
+
+      // 兜底：若未找到精确匹配则更新最后一条
+      if (!updated && list.length > 0) {
+        const last = { ...list[list.length - 1] };
+        if (last.question) {
+          last.question = { ...last.question, answered: true, selectedAnswer: answer };
+          list[list.length - 1] = last;
+        }
+      }
+
       return { ...prev, [activeSessionId]: list };
     });
 
@@ -618,10 +657,147 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
       fullContent = fullContent ? `${fullContent}\n${attachSnippets}` : attachSnippets.trim();
     }
 
+    // v1.8.3: 真实出境调度与执行管道
+    const executeSendMessage = async (
+      textToSend: string,
+      rawTextForTitle: string,
+      execMode: ExecutionMode,
+      bypassFence: boolean = false
+    ) => {
+      const userMessage: ChatMessageItem = {
+        id: `msg-user-${Date.now()}`,
+        role: 'user',
+        content: textToSend,
+        timestamp: Date.now()
+      };
+
+      const assistantMessage: ChatMessageItem = {
+        id: `msg-assistant-${Date.now() + 1}`,
+        role: 'assistant',
+        content: '',
+        thought: '',
+        steps: [],
+        timestamp: Date.now() + 1
+      };
+
+      const currentList = messagesMap[activeSessionId] || [];
+      const nextList = [...currentList, userMessage, assistantMessage];
+
+      // Auto-update session title and timestamp
+      setSessions(prev =>
+        prev.map(s => {
+          if (s.id === activeSessionId) {
+            return {
+              ...s,
+              title: s.title === '新任务' || s.title === '新对话' ? rawTextForTitle.slice(0, 20) : s.title,
+              updatedAt: Date.now()
+            };
+          }
+          return s;
+        })
+      );
+
+      setMessagesMap(prev => ({
+        ...prev,
+        [activeSessionId]: nextList
+      }));
+
+      setIsRunning(true);
+      setRunStartTime(Date.now());
+
+      // Prepare history for LLM
+      const history = nextList
+        .slice(0, -1)
+        .map(m => ({
+          role: m.role,
+          content: m.content
+        }));
+
+      const runnerConfig = {
+        baseUrl: settings.baseUrl,
+        apiKey: settings.apiKey,
+        model: settings.model,
+        stream: settings.streamResponse !== false,
+        workspacePath: currentWorkspacePath,
+        enabledMcpTools: settings.enabledMcpTools,
+        customMcpConfig: settings.customMcpConfig,
+        enabledSkills: settings.enabledSkills,
+        executionMode: execMode,
+        fallbackProviders: settings.fallbackProviders,
+        bypassSecurityFence: bypassFence
+      };
+
+      if (window.electronAPI) {
+        try {
+          await window.electronAPI.startAgent(activeSessionId, runnerConfig, history);
+        } catch (err: any) {
+          setIsRunning(false);
+          setMessagesMap(prev => {
+            const list = [...(prev[activeSessionId] || [])];
+            const last = list[list.length - 1];
+            if (last) {
+              last.content = `启动异常: ${err.message}`;
+            }
+            return { ...prev, [activeSessionId]: list };
+          });
+        }
+      }
+    };
+
+    // v1.8.3: 出境安全围栏前置预检与会话偏好记忆
+    const rememberedChoice = sessionFenceChoices[activeSessionId];
+    if (rememberedChoice === 'bypass') {
+      await executeSendMessage(fullContent, text, mode, true);
+      return;
+    } else if (rememberedChoice === 'sanitize') {
+      if (window.electronAPI?.testSanitizeText) {
+        const check = await window.electronAPI.testSanitizeText(fullContent);
+        await executeSendMessage(check.sanitized, text, mode, false);
+      } else {
+        await executeSendMessage(fullContent, text, mode, false);
+      }
+      return;
+    }
+
+    // 未记录会话偏好：前置安全扫描
+    if (window.electronAPI?.testSanitizeText) {
+      try {
+        const check = await window.electronAPI.testSanitizeText(fullContent);
+        if (check.redactedItems && check.redactedItems.length > 0) {
+          setPreflightData({
+            isOpen: true,
+            sensitiveItems: check.redactedItems,
+            originalText: fullContent,
+            sanitizedText: check.sanitized,
+            mode,
+            rawText: text,
+            attachments
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('安全预检调用异常，执行降级出境:', err);
+      }
+    }
+
+    // 无敏感资产命中，直接标准出境
+    await executeSendMessage(fullContent, text, mode, false);
+  };
+
+  // v1.8.3: 安全预检交互回调
+  const handleConfirmSanitize = (rememberSession: boolean) => {
+    if (!preflightData) return;
+    const { sanitizedText, rawText, mode } = preflightData;
+    if (rememberSession) {
+      setSessionFenceChoices(prev => ({ ...prev, [activeSessionId]: 'sanitize' }));
+    }
+    const currentActiveId = activeSessionId;
+    setPreflightData(null);
+
     const userMessage: ChatMessageItem = {
       id: `msg-user-${Date.now()}`,
       role: 'user',
-      content: fullContent,
+      content: sanitizedText,
       timestamp: Date.now()
     };
 
@@ -634,16 +810,15 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
       timestamp: Date.now() + 1
     };
 
-    const currentList = messagesMap[activeSessionId] || [];
+    const currentList = messagesMap[currentActiveId] || [];
     const nextList = [...currentList, userMessage, assistantMessage];
 
-    // Auto-update session title and timestamp
     setSessions(prev =>
       prev.map(s => {
-        if (s.id === activeSessionId) {
+        if (s.id === currentActiveId) {
           return {
             ...s,
-            title: s.title === '新任务' || s.title === '新对话' ? text.slice(0, 20) : s.title,
+            title: s.title === '新任务' || s.title === '新对话' ? rawText.slice(0, 20) : s.title,
             updatedAt: Date.now()
           };
         }
@@ -653,20 +828,13 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
 
     setMessagesMap(prev => ({
       ...prev,
-      [activeSessionId]: nextList
+      [currentActiveId]: nextList
     }));
 
     setIsRunning(true);
     setRunStartTime(Date.now());
 
-    // Prepare history for LLM
-    const history = nextList
-      .slice(0, -1)
-      .map(m => ({
-        role: m.role,
-        content: m.content
-      }));
-
+    const history = nextList.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
     const runnerConfig = {
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
@@ -677,24 +845,107 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
       customMcpConfig: settings.customMcpConfig,
       enabledSkills: settings.enabledSkills,
       executionMode: mode,
-      fallbackProviders: settings.fallbackProviders
+      fallbackProviders: settings.fallbackProviders,
+      bypassSecurityFence: false
     };
 
     if (window.electronAPI) {
-      try {
-        await window.electronAPI.startAgent(activeSessionId, runnerConfig, history);
-      } catch (err: any) {
+      window.electronAPI.startAgent(currentActiveId, runnerConfig, history).catch((err: any) => {
         setIsRunning(false);
         setMessagesMap(prev => {
-          const list = [...(prev[activeSessionId] || [])];
+          const list = [...(prev[currentActiveId] || [])];
           const last = list[list.length - 1];
-          if (last) {
-            last.content = `启动异常: ${err.message}`;
-          }
-          return { ...prev, [activeSessionId]: list };
+          if (last) last.content = `启动异常: ${err.message}`;
+          return { ...prev, [currentActiveId]: list };
         });
-      }
+      });
     }
+  };
+
+  const handleConfirmBypass = async (rememberSession: boolean) => {
+    if (!preflightData) return;
+    const { originalText, rawText, mode, sensitiveItems } = preflightData;
+    if (rememberSession) {
+      setSessionFenceChoices(prev => ({ ...prev, [activeSessionId]: 'bypass' }));
+    }
+
+    if (window.electronAPI?.recordSecurityFenceBypass) {
+      await window.electronAPI.recordSecurityFenceBypass(sensitiveItems);
+    }
+
+    const currentActiveId = activeSessionId;
+    setPreflightData(null);
+
+    const userMessage: ChatMessageItem = {
+      id: `msg-user-${Date.now()}`,
+      role: 'user',
+      content: originalText,
+      timestamp: Date.now()
+    };
+
+    const assistantMessage: ChatMessageItem = {
+      id: `msg-assistant-${Date.now() + 1}`,
+      role: 'assistant',
+      content: '',
+      thought: '',
+      steps: [],
+      timestamp: Date.now() + 1
+    };
+
+    const currentList = messagesMap[currentActiveId] || [];
+    const nextList = [...currentList, userMessage, assistantMessage];
+
+    setSessions(prev =>
+      prev.map(s => {
+        if (s.id === currentActiveId) {
+          return {
+            ...s,
+            title: s.title === '新任务' || s.title === '新对话' ? rawText.slice(0, 20) : s.title,
+            updatedAt: Date.now()
+          };
+        }
+        return s;
+      })
+    );
+
+    setMessagesMap(prev => ({
+      ...prev,
+      [currentActiveId]: nextList
+    }));
+
+    setIsRunning(true);
+    setRunStartTime(Date.now());
+
+    const history = nextList.slice(0, -1).map(m => ({ role: m.role, content: m.content }));
+    const runnerConfig = {
+      baseUrl: settings.baseUrl,
+      apiKey: settings.apiKey,
+      model: settings.model,
+      stream: settings.streamResponse !== false,
+      workspacePath: currentWorkspacePath,
+      enabledMcpTools: settings.enabledMcpTools,
+      customMcpConfig: settings.customMcpConfig,
+      enabledSkills: settings.enabledSkills,
+      executionMode: mode,
+      fallbackProviders: settings.fallbackProviders,
+      bypassSecurityFence: true
+    };
+
+    if (window.electronAPI) {
+      window.electronAPI.startAgent(currentActiveId, runnerConfig, history).catch((err: any) => {
+        setIsRunning(false);
+        setMessagesMap(prev => {
+          const list = [...(prev[currentActiveId] || [])];
+          const last = list[list.length - 1];
+          if (last) last.content = `启动异常: ${err.message}`;
+          return { ...prev, [currentActiveId]: list };
+        });
+      });
+    }
+  };
+
+  const handleCancelPreflight = () => {
+    setPreflightData(null);
   };
 
   const handleStopAgent = async () => {
@@ -835,6 +1086,19 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           setIsDrawerOpen(true);
         }}
       />
+
+      {/* 3.4 Security Fence Pre-flight Interactive Modal (v1.8.3) */}
+      {preflightData && (
+        <SecurityPreflightModal
+          isOpen={preflightData.isOpen}
+          sensitiveItems={preflightData.sensitiveItems}
+          originalText={preflightData.originalText}
+          sanitizedText={preflightData.sanitizedText}
+          onConfirmSanitize={handleConfirmSanitize}
+          onConfirmBypass={handleConfirmBypass}
+          onCancel={handleCancelPreflight}
+        />
+      )}
     </div>
   );
 };

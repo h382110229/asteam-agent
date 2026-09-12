@@ -44,6 +44,7 @@ export const LiveTerminalCard: React.FC<LiveTerminalCardProps> = ({
   const [isAutoScroll, setIsAutoScroll] = useState(true);
   const [copied, setCopied] = useState(false);
   const [clearedOutput, setClearedOutput] = useState(false);
+  const [isStdinOpen, setIsStdinOpen] = useState(false);
 
   const terminalBodyRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,12 +58,8 @@ export const LiveTerminalCard: React.FC<LiveTerminalCardProps> = ({
     }
   }, [displayOutput, isAutoScroll]);
 
-  // Auto focus input when running
-  useEffect(() => {
-    if (status === 'running' && inputRef.current) {
-      inputRef.current.focus();
-    }
-  }, [status]);
+  // 移除自动抢占焦点的逻辑，杜绝命令一闪而过时的假弹窗体感
+
 
   const handleSendInput = (textToSend?: string) => {
     const input = (textToSend !== undefined ? textToSend : stdinText).trim();
@@ -127,7 +124,23 @@ export const LiveTerminalCard: React.FC<LiveTerminalCardProps> = ({
         </div>
 
         {/* Action icons */}
-        <div className="flex items-center space-x-1">
+        <div className="flex items-center space-x-1.5">
+          {status === 'running' && (
+            <button
+              type="button"
+              onClick={() => setIsStdinOpen(!isStdinOpen)}
+              title={isStdinOpen ? '收起标准输入条' : '展开标准输入 (向进程发送参数/按键)'}
+              className={`flex items-center space-x-1 rounded px-2 py-1 text-[10px] font-medium transition-colors cursor-pointer border ${
+                isStdinOpen
+                  ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+                  : 'bg-[var(--muted)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] border-[var(--border)]'
+              }`}
+            >
+              <CornerDownLeft className="h-3 w-3" />
+              <span>{isStdinOpen ? '收起输入' : '交互输入'}</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handleCopy}
@@ -187,9 +200,9 @@ export const LiveTerminalCard: React.FC<LiveTerminalCardProps> = ({
             )}
           </div>
 
-          {/* Interactive stdin input bar (active when status === 'running') */}
-          {status === 'running' && (
-            <div className="border-t border-[var(--border)] bg-[var(--card)] p-2.5">
+          {/* Interactive stdin input bar (only shown on demand when user clicks '交互输入') */}
+          {status === 'running' && isStdinOpen && (
+            <div className="border-t border-[var(--border)] bg-[var(--card)] p-2.5 animate-in fade-in duration-150">
               <div className="flex items-center space-x-2">
                 <span className="text-[var(--primary)] font-bold text-xs pl-1 font-mono">&gt;</span>
                 <input

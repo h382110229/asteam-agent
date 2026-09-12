@@ -18,12 +18,30 @@ export interface GitStatusSummary {
   totalDeletions: number;
 }
 
+let _isGitInstalledCache: boolean | null = null;
+
+export async function isGitInstalled(): Promise<boolean> {
+  if (_isGitInstalledCache !== null) return _isGitInstalledCache;
+  return new Promise((resolve) => {
+    exec('git --version', { windowsHide: true }, (err) => {
+      _isGitInstalledCache = !err;
+      resolve(_isGitInstalledCache);
+    });
+  });
+}
+
 function runGit(repoPath: string, args: string): Promise<string> {
   return new Promise((resolve, reject) => {
     exec(`git ${args}`, { cwd: repoPath, windowsHide: true }, (err, stdout, stderr) => {
       if (err) {
+        const isNotFound = (err as any).code === 'ENOENT' ||
+          /not recognized|not found|无此命令|command not found/i.test(err.message || stderr || '');
+        if (isNotFound) {
+          _isGitInstalledCache = false;
+        }
         reject(new Error(stderr || err.message));
       } else {
+        _isGitInstalledCache = true;
         resolve(stdout.trim());
       }
     });

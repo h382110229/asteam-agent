@@ -205,6 +205,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const refreshMcpStatus = async () => {
+    if (window.electronAPI?.getSavedMcpConfig && (!form.customMcpConfig || form.customMcpConfig.trim() === '' || form.customMcpConfig.trim() === '{}')) {
+      try {
+        const saved = await window.electronAPI.getSavedMcpConfig();
+        if (saved && saved.trim() && saved.trim() !== '{}' && saved.trim() !== '{\n  "mcpServers": {}\n}') {
+          setForm(prev => ({ ...prev, customMcpConfig: saved }));
+        }
+      } catch {}
+    }
     if (window.electronAPI?.getMcpServersStatus) {
       try {
         const statuses = await window.electronAPI.getMcpServersStatus();
@@ -2057,7 +2065,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       选择本地现有的 Skill Markdown 文件 (.md)
                     </p>
                     <p className="text-[11px] text-[var(--muted-foreground)]">
-                      系统将自动解析标题并将其安全安装至全局 <code>~/.asteam/skills/</code>
+                      系统将自动解析标题并将其安全安装至 ASTeam 专属技能中枢 <code>{storageStats?.dataRootDir ? `${storageStats.dataRootDir}/skills` : 'ASTeamData/skills'}</code>
                     </p>
                     <button
                       type="button"

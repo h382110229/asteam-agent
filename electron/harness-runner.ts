@@ -7,7 +7,11 @@ import { net } from 'electron';
 
 import { mcpManager } from './mcp-manager';
 import { skillManager } from './skill-manager';
-import { createWordDocx, createPowerPointPptx } from './office-generator';
+import { createWordDocx, createPowerPointPptx, createExcelXlsx, readExcelXlsx } from './office-generator';
+import { createPdfDocument, readPdfDocument } from './pdf-generator';
+import { compressZip, extractZip } from './zip-manager';
+import { safeWriteFileSync } from './file-resilience';
+import { artifactVerifier } from './artifact-verifier';
 import { storageHub } from './storage-hub';
 import { memoryManager } from './memory-manager';
 import { rulesManager } from './rules-manager';
@@ -49,6 +53,7 @@ export interface AgentConfig {
   fallbackProviders?: FallbackProviderItem[];
   capabilities?: string[];
   customMcpConfig?: string;
+  bypassSecurityFence?: boolean;
 }
 
 export interface ChatMessage {
@@ -68,10 +73,17 @@ export interface AgentStep {
   error?: string;
 }
 
+export interface SubQuestion {
+  question: string;
+  options?: string[];
+  multiSelect?: boolean;
+}
+
 export interface InteractiveQuestionData {
   questionId: string;
   question: string;
   options?: string[];
+  questions?: SubQuestion[];
   multiSelect?: boolean;
 }
 
@@ -253,6 +265,22 @@ export class WorkspaceTools {
       target = target.replace(/^~[\\/]Desktop[\\/]?/i, desktopDir + path.sep);
     } else if (/^(?:桌面|Desktop)(?:[\\/]|$)/i.test(target)) {
       target = target.replace(/^(?:桌面|Desktop)[\\/]?/i, desktopDir + path.sep);
+    } else if (/^~[\\/]\.asteam(?:[\\/]|$)/i.test(target) || /^(?:[a-zA-Z]:[\\/])Users[\\/][^\\/]+[\\/]\.asteam(?:[\\/]|$)/i.test(target)) {
+      // 核心闭环重定向：将一切对 ~/.asteam/... 的请求自动重定向至 ASTeam 独立中枢 (如 D:\ASTeamData)
+      const sub = target
+        .replace(/^~[\\/]\.asteam[\\/]?/i, '')
+        .replace(/^(?:[a-zA-Z]:[\\/])Users[\\/][^\\/]+[\\/]\.asteam[\\/]?/i, '');
+      if (sub.startsWith('skills')) {
+        target = path.join(storageHub.getSkillsDir(), sub.replace(/^skills[\\/]?/i, ''));
+      } else if (sub.startsWith('memory')) {
+        target = path.join(storageHub.getMemoryDir(), sub.replace(/^memory[\\/]?/i, ''));
+      } else if (sub.startsWith('artifacts')) {
+        target = path.join(storageHub.getArtifactsDir(), sub.replace(/^artifacts[\\/]?/i, ''));
+      } else if (sub.toLowerCase() === 'mcp_servers.json' || sub.toLowerCase().includes('mcp')) {
+        target = storageHub.getMcpConfigFilePath();
+      } else {
+        target = path.join(storageHub.getDataRootDir(), sub);
+      }
     } else if (/^~[\\/]/.test(target)) {
       target = target.replace(/^~[\\/]/, userHome + path.sep);
     }
@@ -260,7 +288,6 @@ export class WorkspaceTools {
     // 4. 智能识别并定向技能库 (ASTeam Skills) 虚拟与物理路径：
     // 如 "skills/custom/global/xxx.md", "custom/global/xxx.md", "custom:global:xxx", ".asteam/skills/xxx.md"
     const globalSkillsDir = storageHub.getSkillsDir();
-    const legacyGlobalSkillsDir = path.join(userHome, '.asteam', 'skills');
     const workspaceSkillsDir = this.workspacePath ? path.join(this.workspacePath, '.asteam', 'skills') : null;
     const rawSkillBase = path.basename(target).replace(/^(?:custom_global_|custom:global:|custom_workspace_|custom:workspace:)/i, '');
     const cleanSkillMd = rawSkillBase.endsWith('.md') ? rawSkillBase : `${rawSkillBase}.md`;
@@ -271,15 +298,10 @@ export class WorkspaceTools {
       target.startsWith('custom:') ||
       target.startsWith('.asteam')
     ) {
+      // 优先在 ASTeam 专属技能库中寻找 (例如 D:\ASTeamData\skills)
       const candGlobal = path.join(globalSkillsDir, cleanSkillMd);
       if (fs.existsSync(candGlobal)) {
         return candGlobal;
-      }
-      if (fs.existsSync(legacyGlobalSkillsDir)) {
-        const candLegacy = path.join(legacyGlobalSkillsDir, cleanSkillMd);
-        if (fs.existsSync(candLegacy)) {
-          return candLegacy;
-        }
       }
       if (workspaceSkillsDir) {
         const candWorkspace = path.join(workspaceSkillsDir, cleanSkillMd);
@@ -374,6 +396,15 @@ export class WorkspaceTools {
       });
     }
 
+    // 智能识别：若目标为 PDF 文档扩展名 (.pdf)，自动转为标准二进制企业级 PDF 文档排版输出
+    if (target.toLowerCase().endsWith('.pdf')) {
+      return await createPdfDocument({
+        filePath: target,
+        title: path.basename(target, '.pdf'),
+        markdownContent: content
+      });
+    }
+
     const dir = path.dirname(target);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -382,9 +413,9 @@ export class WorkspaceTools {
     const writeContent = (['.ps1', '.bat', '.cmd'].includes(ext) && !content.startsWith('\uFEFF'))
       ? '\uFEFF' + content
       : content;
-    fs.writeFileSync(target, writeContent, 'utf-8');
-    const stats = fs.statSync(target);
-    return `成功写入并持久化文件: "${target}" (${stats.size} 字节，已校验路径真实存在)`;
+    const writeRes = safeWriteFileSync(target, writeContent, 'utf-8');
+    const stats = fs.statSync(writeRes.actualPath);
+    return `成功写入并持久化文件: "${writeRes.actualPath}" (${stats.size} 字节，已校验路径真实存在)${writeRes.isFallback ? ` [提示: 原目标已被系统独占锁定，自动安全写入新版本: ${writeRes.actualPath}]` : ''}`;
   }
 
   async generateWordDocx(options: any): Promise<string> {
@@ -395,6 +426,50 @@ export class WorkspaceTools {
   async generatePowerPointPptx(options: any): Promise<string> {
     const target = this.resolveSafe(options.filePath || 'presentation.pptx');
     return await createPowerPointPptx({ ...options, filePath: target });
+  }
+
+  async generateExcelXlsx(options: any): Promise<string> {
+    const target = this.resolveSafe(options.filePath || 'data.xlsx');
+    return await createExcelXlsx({ ...options, filePath: target });
+  }
+
+  async readExcel(filePath: string, sheetName?: string): Promise<string> {
+    const target = this.resolveSafe(filePath);
+    const res = await readExcelXlsx(target, sheetName);
+    return res.summary;
+  }
+
+  async generatePdf(options: any): Promise<string> {
+    const target = this.resolveSafe(options.filePath || 'document.pdf');
+    return await createPdfDocument({ ...options, filePath: target });
+  }
+
+  async readPdf(filePath: string): Promise<string> {
+    const target = this.resolveSafe(filePath);
+    const res = await readPdfDocument(target);
+    return res.summary;
+  }
+
+  async compressZip(options: any): Promise<string> {
+    const targetZip = this.resolveSafe(options.targetZipPath || options.filePath || 'archive.zip');
+    const rawSources = options.sourcePaths || options.sources || options.files || [];
+    const sourceArray = Array.isArray(rawSources) ? rawSources : [rawSources];
+    const resolvedSources = sourceArray.map((p: string) => this.resolveSafe(p));
+    return await compressZip({
+      sourcePaths: resolvedSources,
+      targetZipPath: targetZip,
+      comment: options.comment
+    });
+  }
+
+  async extractZip(options: any): Promise<string> {
+    const zipPath = this.resolveSafe(options.zipPath || options.filePath);
+    const outputDir = this.resolveSafe(options.outputDir || options.targetDir || path.dirname(zipPath));
+    return await extractZip({
+      zipPath,
+      outputDir,
+      overwrite: options.overwrite
+    });
   }
 
   async generateImage(options: {
@@ -1121,12 +1196,54 @@ ${transcribedText}`;
       let errorOutput = '';
       let isSettled = false;
 
-      const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
-      // 在 Windows 下强制设置控制台输入/输出编码为 UTF-8 并抑制非必要的进度流干扰
-      const wrappedCommand = process.platform === 'win32'
-        ? `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; ${command}`
-        : command;
-      const shellArgs = process.platform === 'win32' ? ['-NoProfile', '-Command', wrappedCommand] : ['-c', wrappedCommand];
+      let tempScriptPath: string | null = null;
+      let shell = 'bash';
+      let shellArgs: string[] = [];
+
+      if (process.platform === 'win32') {
+        shell = 'powershell.exe';
+        // 健壮性语法纠偏：将 bash/cmd 风格的 && 与 || 转换为 PowerShell 兼容语法
+        let sanitizedCommand = command;
+        if (sanitizedCommand.includes('&&') || sanitizedCommand.includes('||')) {
+          const andParts = sanitizedCommand.split(/\s*&&\s*/);
+          if (andParts.length > 1) {
+            sanitizedCommand = andParts.reduce((acc, part, idx) => {
+              if (idx === 0) return part;
+              return `${acc}; if ($?) { ${part} }`;
+            });
+          }
+          const orParts = sanitizedCommand.split(/\s*\|\|\s*/);
+          if (orParts.length > 1) {
+            sanitizedCommand = orParts.reduce((acc, part, idx) => {
+              if (idx === 0) return part;
+              return `${acc}; if (-not $?) { ${part} }`;
+            });
+          }
+        }
+
+        // 使用临时 .ps1 脚本沙箱执行，彻底消除控制台长指令截断、引号转义失真及 UTF-8 编码乱码
+        try {
+          const tempFile = path.join(os.tmpdir(), `asteam_exec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.ps1`);
+          const scriptBody = `\uFEFF[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue';\r\n${sanitizedCommand}\r\n`;
+          fs.writeFileSync(tempFile, scriptBody, 'utf-8');
+          tempScriptPath = tempFile;
+          shellArgs = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', tempFile];
+        } catch {
+          const wrappedCommand = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; ${sanitizedCommand}`;
+          shellArgs = ['-NoProfile', '-Command', wrappedCommand];
+        }
+      } else {
+        shellArgs = ['-c', command];
+      }
+
+      const cleanupTempScript = () => {
+        if (tempScriptPath && fs.existsSync(tempScriptPath)) {
+          try {
+            fs.unlinkSync(tempScriptPath);
+          } catch {}
+          tempScriptPath = null;
+        }
+      };
 
       const child = spawn(shell, shellArgs, {
         cwd: this.workspacePath,
@@ -1152,6 +1269,7 @@ ${transcribedText}`;
       const timer = setTimeout(() => {
         if (!isSettled) {
           isSettled = true;
+          cleanupTempScript();
           try {
             if (process.platform === 'win32' && child.pid) {
               spawn('taskkill', ['/pid', child.pid.toString(), '/T', '/F']);
@@ -1198,6 +1316,7 @@ ${transcribedText}`;
       child.on('error', (err) => {
         if (!isSettled) {
           isSettled = true;
+          cleanupTempScript();
           clearTimeout(timer);
           callbacks?.onTerminalData?.({
             sessionId,
@@ -1212,6 +1331,7 @@ ${transcribedText}`;
       child.on('close', (code) => {
         if (!isSettled) {
           isSettled = true;
+          cleanupTempScript();
           clearTimeout(timer);
           if (active && active.currentProcess === child) {
             active.currentProcess = undefined;
@@ -1261,7 +1381,8 @@ async function executeSingleProviderCall(
   messages: ChatMessage[],
   abortSignal: AbortSignal,
   useStream: boolean,
-  onDelta: (text: string, type?: 'content' | 'thought') => void
+  onDelta: (text: string, type?: 'content' | 'thought') => void,
+  onSystemNotice?: (notice: string) => void
 ): Promise<string> {
   const url = `${provider.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   const headers: Record<string, string> = {
@@ -1294,7 +1415,8 @@ async function executeSingleProviderCall(
           messages,
           abortSignal,
           useStream,
-          onDelta
+          onDelta,
+          onSystemNotice
         );
       }
     }
@@ -1329,11 +1451,34 @@ async function executeSingleProviderCall(
   // Handle non-streaming application/json
   if (contentType.includes('application/json') || !contentType.includes('text/event-stream')) {
     const json = await response.json();
-    const content = json.choices?.[0]?.message?.content || json.choices?.[0]?.delta?.content || '';
+    if (json.error) {
+      throw new Error(`[API 错误] ${json.error.message || JSON.stringify(json.error)}`);
+    }
+    const msgObj = json.choices?.[0]?.message;
+    const content = msgObj?.content || json.choices?.[0]?.delta?.content || '';
+    const reasoning = msgObj?.reasoning_content || msgObj?.reasoning || msgObj?.thought || '';
+    if (reasoning) {
+      onDelta(reasoning, 'thought');
+    }
     if (content) {
       onDelta(content, 'content');
     }
-    return content;
+    const combined = (content || reasoning || '').trim();
+    if (!combined) {
+      if (provider.model === 'Auto' || (provider.model && provider.model !== 'deepseek-chat')) {
+        onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型 (${provider.model}) 响应为空，正在自动调度高可用基础线路 (deepseek-chat) 重新执行...\n\n`);
+        return await executeSingleProviderCall(
+          { ...provider, model: 'deepseek-chat' },
+          messages,
+          abortSignal,
+          useStream,
+          onDelta,
+          onSystemNotice
+        );
+      }
+      throw new Error(`[服务商响应异常] 上游模型 (${provider.name} - ${provider.model}) 未返回任何文本内容。`);
+    }
+    return combined;
   }
 
   // Handle SSE streaming
@@ -1345,6 +1490,30 @@ async function executeSingleProviderCall(
   const decoder = new TextDecoder('utf-8');
   let fullText = '';
   let buffer = '';
+
+  const processDataLine = (dataStr: string) => {
+    if (!dataStr || dataStr === '[DONE]') return;
+    try {
+      const parsed = JSON.parse(dataStr);
+      if (parsed.error) {
+        throw new Error(`[上游模型服务异常] ${parsed.error.message || JSON.stringify(parsed.error)}`);
+      }
+      const delta = parsed.choices?.[0]?.delta;
+      const deltaContent = delta?.content || delta?.text || '';
+      const deltaReasoning = delta?.reasoning_content || delta?.reasoning || delta?.thought || delta?.thinking || '';
+
+      if (deltaReasoning) {
+        fullText += deltaReasoning;
+        onDelta(deltaReasoning, 'thought');
+      }
+      if (deltaContent) {
+        fullText += deltaContent;
+        onDelta(deltaContent, 'content');
+      }
+    } catch (e: any) {
+      if (e.message?.startsWith('[上游模型服务异常]')) throw e;
+    }
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1359,24 +1528,32 @@ async function executeSingleProviderCall(
       if (!trimmed || trimmed.startsWith(':')) continue;
       if (trimmed.startsWith('data:')) {
         const dataStr = trimmed.slice(5).trim();
-        if (dataStr === '[DONE]') break;
-        try {
-          const parsed = JSON.parse(dataStr);
-          const delta = parsed.choices?.[0]?.delta;
-          const deltaContent = delta?.content || '';
-          const deltaReasoning = delta?.reasoning_content || delta?.thought || '';
-
-          if (deltaReasoning) {
-            fullText += deltaReasoning;
-            onDelta(deltaReasoning, 'thought');
-          }
-          if (deltaContent) {
-            fullText += deltaContent;
-            onDelta(deltaContent, 'content');
-          }
-        } catch {}
+        processDataLine(dataStr);
       }
     }
+  }
+
+  // Process any leftover chunk in buffer
+  if (buffer.trim()) {
+    const trimmed = buffer.trim();
+    if (trimmed.startsWith('data:')) {
+      processDataLine(trimmed.slice(5).trim());
+    }
+  }
+
+  if (!fullText.trim()) {
+    if (provider.model === 'Auto' || (provider.model && provider.model !== 'deepseek-chat')) {
+      onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型 (${provider.model}) 响应为空，正在自动调度高可用基础线路 (deepseek-chat) 重新执行...\n\n`);
+      return await executeSingleProviderCall(
+        { ...provider, model: 'deepseek-chat' },
+        messages,
+        abortSignal,
+        useStream,
+        onDelta,
+        onSystemNotice
+      );
+    }
+    throw new Error(`[服务商响应异常] 上游模型 (${provider.name} - ${provider.model}) 未返回任何文本内容。`);
   }
 
   return fullText;
@@ -1386,18 +1563,25 @@ export async function callLLMStream(
   config: AgentConfig,
   messages: ChatMessage[],
   abortSignal: AbortSignal,
-  onDelta: (text: string, type?: 'content' | 'thought') => void
+  onDelta: (text: string, type?: 'content' | 'thought') => void,
+  onSystemNotice?: (notice: string) => void
 ): Promise<string> {
   const useStream = config.stream !== false;
+  const notifySystem = onSystemNotice || ((notice: string) => onDelta(notice, 'thought'));
 
-  // 0. 企业级出境安全围栏审查与数据脱敏 (v1.7.0)
-  const fenceResult = securityFenceManager.sanitizeMessages(messages as any);
-  if (fenceResult.isBlocked) {
-    throw new Error(fenceResult.blockReason || '[企业安全拦截] 出境流量命中敏感数据安全阻断策略。');
-  }
-  const effectiveMessages = fenceResult.sanitizedMessages as ChatMessage[];
-  if (fenceResult.totalRedactions > 0) {
-    onDelta(`\n\n> 🛡️ **[企业安全围栏]** 已对请求出境文本实施实时脱敏保护 (${fenceResult.redactedSummary})\n\n`, 'thought');
+  // 0. 企业级出境安全围栏审查与数据脱敏 (v1.7.0 / v1.8.3)
+  let effectiveMessages = messages;
+  if (config.bypassSecurityFence) {
+    notifySystem(`\n\n> ⚡ **[出境安全豁免已生效]** 本次请求已根据用户授权原样发送至模型（已留存合规审计日志）。\n\n`);
+  } else {
+    const fenceResult = securityFenceManager.sanitizeMessages(messages as any);
+    if (fenceResult.isBlocked) {
+      throw new Error(fenceResult.blockReason || '[企业安全拦截] 出境流量命中敏感数据安全阻断策略。');
+    }
+    effectiveMessages = fenceResult.sanitizedMessages as ChatMessage[];
+    if (fenceResult.totalRedactions > 0) {
+      notifySystem(`\n\n> 🛡️ **[企业安全围栏]** 已对请求出境文本实施实时脱敏保护 (${fenceResult.redactedSummary})\n\n`);
+    }
   }
 
   // 1. 会话特征探测: 是否包含图像附件或多模态信号
@@ -1452,9 +1636,8 @@ export async function callLLMStream(
 
   // 若跳过了纯文本模型，在 thought 流中输出提示
   if (needsVision && skippedPureTextProviders.length > 0) {
-    onDelta(
-      `\n\n> 👁️ **[多模态能力感知路由]** 检测到任务包含图片输入，系统已自动过滤纯文本线路 [${skippedPureTextProviders.join('、')}]，优先锁定具备 Vision 能力的服务商发起推理...\n\n`,
-      'thought'
+    notifySystem(
+      `\n\n> 👁️ **[多模态能力感知路由]** 检测到任务包含图片输入，系统已自动过滤纯文本线路 [${skippedPureTextProviders.join('、')}]，优先锁定具备 Vision 能力的服务商发起推理...\n\n`
     );
   }
 
@@ -1473,7 +1656,8 @@ export async function callLLMStream(
         effectiveMessages,
         abortSignal,
         useStream,
-        onDelta
+        onDelta,
+        notifySystem
       );
     } catch (err: any) {
       if (abortSignal.aborted) {
@@ -1485,7 +1669,7 @@ export async function callLLMStream(
       errors.push(`[${currentProvider.name} - ${currentProvider.model}]: ${msg}`);
 
       // 判定是否可进行无感故障转移 (Failover)：
-      // 524(Cloudflare超时), 429(限流), 500/502/503/504(网关宕机), 或网络连接被拒/fetch失败
+      // 524(Cloudflare超时), 429(限流), 500/502/503/504(网关宕机), 网络连接被拒/fetch失败, 或响应为空
       const isRecoverable =
         status === 524 ||
         status === 429 ||
@@ -1493,15 +1677,18 @@ export async function callLLMStream(
         msg.includes('fetch') ||
         msg.includes('network') ||
         msg.includes('timeout') ||
-        msg.includes('ECONNREFUSED');
+        msg.includes('ECONNREFUSED') ||
+        msg.includes('未返回任何文本') ||
+        msg.includes('响应异常') ||
+        msg.includes('响应为空');
 
       const hasNextProvider = i + 1 < providerQueue.length;
 
       if (isRecoverable && hasNextProvider) {
         const nextProvider = providerQueue[i + 1];
-        const reasonText = status ? `HTTP ${status}` : '网络连接受阻';
+        const reasonText = status ? `HTTP ${status}` : (msg.includes('未返回任何文本') ? '响应为空' : '网络连接受阻');
         const notice = `\n\n> 🛡️ **[524 自动容灾 · 故障转移]** ${currentProvider.name} 遭遇 ${reasonText}，系统已自动无感平滑切换至备用线路 **「${nextProvider.name}」** (模型: \`${nextProvider.model}\`) 发起重试...\n\n`;
-        onDelta(notice, 'thought');
+        notifySystem(notice);
         console.warn(`[Failover] Switch from ${currentProvider.name} to ${nextProvider.name} due to: ${msg}`);
         continue; // 切换至下一线路重试
       } else {
@@ -1521,6 +1708,32 @@ export async function callLLMStream(
 export function parseToolArgs(raw: string): any {
   if (!raw || !raw.trim()) return {};
   const trimmed = raw.trim();
+
+  // 0. 支持 XML/Function 风格参数: <parameter:name>value</parameter> 或 <parameter=name>value</parameter>
+  if (trimmed.includes('<parameter')) {
+    const xmlResult: any = {};
+    const paramRegex = /<parameter(?:[:=\s]+(?:name=)?["']?([a-zA-Z0-9_-]+)["']?)>([\s\S]*?)<\/parameter>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = paramRegex.exec(trimmed)) !== null) {
+      const pName = match[1].trim();
+      const pVal = match[2].trim();
+      if (pName === 'options' || pName === 'questions') {
+        try {
+          xmlResult[pName] = JSON.parse(pVal);
+        } catch {
+          if (pName === 'options') {
+            const items = Array.from(pVal.matchAll(/["']([^"']+)["']/g)).map(m => m[1]);
+            xmlResult.options = items.length > 0 ? items : [pVal];
+          }
+        }
+      } else {
+        xmlResult[pName] = pVal;
+      }
+    }
+    if (Object.keys(xmlResult).length > 0) {
+      return xmlResult;
+    }
+  }
 
   // 1. Try standard JSON.parse first
   try {
@@ -1571,6 +1784,24 @@ export function parseToolArgs(raw: string): any {
   const qMatch = trimmed.match(/"(?:question)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
   if (qMatch) {
     result.question = qMatch[1].replace(/\\"/g, '"');
+  }
+  // Extract options array
+  const optMatch = trimmed.match(/"(?:options)"\s*:\s*(\[[^\]]*\])/i);
+  if (optMatch) {
+    try {
+      result.options = JSON.parse(optMatch[1]);
+    } catch {
+      const items = Array.from(optMatch[1].matchAll(/["']([^"']+)["']/g)).map(m => m[1]);
+      if (items.length > 0) result.options = items;
+    }
+  }
+
+  // Extract questions array (for Grill-me multi-question mode)
+  const questionsMatch = trimmed.match(/"(?:questions)"\s*:\s*(\[[\s\S]*?\])(?=\s*[,}\]])/i);
+  if (questionsMatch) {
+    try {
+      result.questions = JSON.parse(questionsMatch[1]);
+    } catch {}
   }
 
   // Extract prompt (for generate_image)
@@ -1627,23 +1858,59 @@ export function parseToolArgs(raw: string): any {
     result.input = inputMatch[1].replace(/\\\\/g, '\\').replace(/\\"/g, '"');
   }
 
-  // Extract content
-  const contentKeyIdx = trimmed.indexOf('"content"');
-  if (contentKeyIdx !== -1) {
-    let afterContent = trimmed.slice(contentKeyIdx + 9).replace(/^\s*:\s*/, '');
-    if (afterContent.startsWith('"')) {
-      afterContent = afterContent.slice(1);
-    }
+  // Extract title
+  const titleMatch = trimmed.match(/"(?:title)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (titleMatch) {
+    result.title = titleMatch[1].replace(/\\"/g, '"');
+  }
+
+  // Extract subtitle
+  const subMatch = trimmed.match(/"(?:subtitle|desc|description)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (subMatch) {
+    result.subtitle = subMatch[1].replace(/\\"/g, '"');
+  }
+
+  // Extract author
+  const authorMatch = trimmed.match(/"(?:author|creator)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (authorMatch) {
+    result.author = authorMatch[1].replace(/\\"/g, '"');
+  }
+
+  // Extract version
+  const verMatch = trimmed.match(/"(?:version|ver)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (verMatch) {
+    result.version = verMatch[1].replace(/\\"/g, '"');
+  }
+
+  // Extract confidentiality
+  const confMatch = trimmed.match(/"(?:confidentiality|secret)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+  if (confMatch) {
+    result.confidentiality = confMatch[1].replace(/\\"/g, '"');
+  }
+
+  // Extract includeToc
+  const tocMatch = trimmed.match(/"(?:includeToc|toc)"\s*:\s*(true|false)/i);
+  if (tocMatch) {
+    result.includeToc = tocMatch[1].toLowerCase() === 'true';
+  }
+
+  // Extract content or markdownContent
+  const contentKeyMatch = trimmed.match(/"(?:markdownContent|content|text|markdown)"\s*:\s*"/i);
+  if (contentKeyMatch && contentKeyMatch.index !== undefined) {
+    const startContentIdx = contentKeyMatch.index + contentKeyMatch[0].length;
+    let afterContent = trimmed.slice(startContentIdx);
     const endMatch = afterContent.match(/("?\s*}\s*)$/);
     if (endMatch) {
       afterContent = afterContent.slice(0, -endMatch[0].length);
     }
-    result.content = afterContent
+    const unescaped = afterContent
       .replace(/\\n/g, '\n')
       .replace(/\\r/g, '\r')
       .replace(/\\t/g, '\t')
       .replace(/\\"/g, '"')
       .replace(/\\\\/g, '\\');
+    result.markdownContent = unescaped;
+    result.content = unescaped;
   }
 
   if (Object.keys(result).length > 0) {
@@ -1653,10 +1920,126 @@ export function parseToolArgs(raw: string): any {
   return { raw: trimmed };
 }
 
+export function extractQuestionsFromText(raw: string): { intro: string; questions: SubQuestion[] } | null {
+  if (!raw || typeof raw !== 'string') return null;
+
+  // Find boundaries where a numbered item starts: e.g. "1. " or " 2. " or "\n1. " or "：1. "
+  const regex = /(?:^|[\r\n]+|[:：；;]|\s{2,}|\s)(?:(\d+)[\.、\)]|Q(\d+)[:：])\s*(?!\d)/gi;
+  const matches: Array<{ index: number; digit: number }> = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(raw)) !== null) {
+    const digitStr = match[1] || match[2];
+    const digit = parseInt(digitStr, 10);
+    const digitOffset = match[0].indexOf(digitStr);
+    matches.push({
+      index: match.index + digitOffset,
+      digit
+    });
+  }
+
+  if (matches.length <= 1) return null;
+
+  // Verify that numbers look like a sequence: e.g. 1, 2...
+  if (matches[0].digit !== 1) return null;
+  for (let i = 1; i < matches.length; i++) {
+    if (matches[i].digit !== matches[i - 1].digit + 1) {
+      return null;
+    }
+  }
+
+  const intro = raw.slice(0, matches[0].index).trim();
+  const slices: string[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const end = (i + 1 < matches.length) ? matches[i + 1].index : raw.length;
+    slices.push(raw.slice(start, end).trim());
+  }
+
+  const questions: SubQuestion[] = slices.map(s => {
+    const cleaned = s.replace(/^(?:\d+[\.、\)]|Q\d+[:：])\s*/, '').trim();
+    // Split into question title and options by "- " or "• " or "– " or "* "
+    const parts = cleaned.split(/(?:\r?\n\s*[-•–*]\s*|\s+[-•–*]\s+)/);
+    if (parts.length > 1) {
+      return {
+        question: parts[0].trim().replace(/[:：\s]+$/, ''),
+        options: parts.slice(1).map(o => o.replace(/^[-•–*\s]+/, '').trim()).filter(Boolean)
+      };
+    }
+    return {
+      question: cleaned,
+      options: []
+    };
+  });
+
+  return { intro, questions };
+}
+
 export function extractToolCall(response: string): { toolName: string; toolArgs: any } | null {
   if (!response) return null;
 
   // 1. Standard markdown codeblock: ```tool:name ... ``` or ```json:tool:name
+  // 核心增强：当 toolArgs 内包含内嵌代码块 (如 ```typescript ... ``` 或 ```json ... ```) 时，
+  // 普通非贪婪匹配 /```...```/ 会在第一个内嵌代码块的反引号处提前截断！
+  // 此处采用括号平衡扫描：若以 { 开头，精准探测匹配的外层闭合 }，彻底杜绝内容被截断！
+  const startMatch = response.match(/```(?:json:)?tool:([a-z_]+)\s*/i);
+  if (startMatch && startMatch.index !== undefined) {
+    const toolName = startMatch[1].trim().toLowerCase();
+    const startIdx = startMatch.index + startMatch[0].length;
+    const rest = response.slice(startIdx);
+
+    // 若参数为 JSON 对象 ({...})，进行健壮的括号配对探测
+    const trimmedRest = rest.trimStart();
+    if (trimmedRest.startsWith('{')) {
+      const leadingOffset = rest.length - trimmedRest.length;
+      let braceCount = 0;
+      let inString = false;
+      let escape = false;
+      let jsonEndIdx = -1;
+
+      for (let i = leadingOffset; i < rest.length; i++) {
+        const ch = rest[i];
+        if (escape) {
+          escape = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escape = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (!inString) {
+          if (ch === '{') {
+            braceCount++;
+          } else if (ch === '}') {
+            braceCount--;
+            if (braceCount === 0) {
+              jsonEndIdx = i + 1;
+              break;
+            }
+          }
+        }
+      }
+
+      if (jsonEndIdx !== -1) {
+        const jsonStr = rest.slice(leadingOffset, jsonEndIdx);
+        const toolArgs = parseToolArgs(jsonStr.trim());
+        return { toolName, toolArgs };
+      }
+    }
+
+    // 备用：若非大括号结构，寻找位于独立行或末尾的闭合 ```
+    const endMatch = rest.match(/(?:[\r\n]+|^)```(?:\s*$|[\r\n]+)/);
+    if (endMatch && endMatch.index !== undefined) {
+      const rawArgs = rest.slice(0, endMatch.index).trim();
+      const toolArgs = parseToolArgs(rawArgs);
+      return { toolName, toolArgs };
+    }
+  }
+
+  // 1.1 经典正则兜底
   const mdMatch = response.match(/```(?:json:)?tool:([a-z_]+)\s*([\s\S]*?)```/i);
   if (mdMatch) {
     const toolName = mdMatch[1].trim().toLowerCase();
@@ -1750,6 +2133,14 @@ export function extractToolCall(response: string): { toolName: string; toolArgs:
     return { toolName, toolArgs: parseToolArgs(argRaw) };
   }
 
+  // 4. Naked tool:name or unclosed code block: tool:name\n{...} or ```tool:name without closing ```
+  const nakedToolMatch = response.match(/(?:^|\n)\s*(?:```(?:json:)?tool:|tool:)([a-z_]+)\s*\n\s*(\{[\s\S]*?\})(?:\s*```|\n|$)/i);
+  if (nakedToolMatch) {
+    const toolName = nakedToolMatch[1].trim().toLowerCase();
+    const toolArgs = parseToolArgs(nakedToolMatch[2].trim());
+    return { toolName, toolArgs };
+  }
+
   return null;
 }
 
@@ -1825,11 +2216,14 @@ export async function runHarnessAgent(
 
     const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_search', 'web_fetch', 'git_operations', 'system_inspector']);
 
-    // 动态侦测并强制激活用户在输入中通过 @ 显式提及的技能
+    // P1: 两阶段轻量索引与按需渐进式动态激活
+    // 阶段一：动态侦测并强制激活用户在输入中通过 @ 显式提及的技能
     const userMentionedSkills: string[] = [];
     const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
-    if (lastUserMsg && typeof lastUserMsg.content === 'string') {
-      const mentionMatches = Array.from(lastUserMsg.content.matchAll(/@([a-zA-Z0-9_\-:]+)/g));
+    const userText = (lastUserMsg && typeof lastUserMsg.content === 'string') ? lastUserMsg.content : '';
+
+    if (userText) {
+      const mentionMatches = Array.from(userText.matchAll(/@([a-zA-Z0-9_\-:]+)/g));
       for (const match of mentionMatches) {
         const skillKey = match[1];
         const found = skillManager.findSkill(skillKey, config.workspacePath || null);
@@ -1840,11 +2234,36 @@ export async function runHarnessAgent(
     }
 
     const effectiveEnabledSkills = Array.from(new Set([
-      ...(config.enabledSkills || ['code_review', 'unit_test', 'git_commit_helper']),
+      ...(config.enabledSkills || ['office_word_report', 'office_excel_master', 'code_review', 'unit_test', 'git_commit_helper']),
       ...userMentionedSkills
     ]));
 
-    const skillPrompts = skillManager.getAggregatedSkillPrompt(effectiveEnabledSkills, config.workspacePath || null);
+    // 阶段一微型技能索引清单（仅含元数据，占用 Token < 200）
+    const microSkillIndex = skillManager.getMicroSkillIndex(effectiveEnabledSkills, config.workspacePath || null);
+
+    // 阶段二意图触发与按需精准激活：扫描最新输入，匹配技能 triggers 关键词（至多自动激活 2 项）
+    const intentMatchedSkills: string[] = [];
+    if (userText) {
+      const allAvailable = skillManager.getAllAvailableSkills(config.workspacePath || null);
+      const lowerUserText = userText.toLowerCase();
+      for (const skill of allAvailable) {
+        if (!effectiveEnabledSkills.includes(skill.id)) continue;
+        if (userMentionedSkills.includes(skill.id)) continue;
+        if (skill.triggers && skill.triggers.some(t => lowerUserText.includes(t.toLowerCase()))) {
+          intentMatchedSkills.push(skill.id);
+        }
+      }
+    }
+
+    // 综合激活清单：显式指派优先 + 意图匹配 (上限 2 个)
+    const activatedSkillIds = Array.from(new Set([
+      ...userMentionedSkills,
+      ...intentMatchedSkills.slice(0, 2)
+    ]));
+
+    const activatedSkillPrompts = activatedSkillIds.length > 0
+      ? skillManager.getAggregatedSkillPrompt(activatedSkillIds, config.workspacePath || null)
+      : '';
 
     // 注入长期记忆上下文 (Memory Bank: 项目级 MEMORY.md 与全局 user_profile.md)
     const memoryContextPrompt = memoryManager.assembleMemoryContext(config.workspacePath || null);
@@ -1893,6 +2312,14 @@ export async function runHarnessAgent(
   * 也支持直接使用快捷别名 "~/Desktop/文件名.docx" 或 "Desktop/文件名.docx"，系统底层会自动精确映射到真实桌面；
   * 严禁凭空猜测臆想非当前用户名的路径（如 "Admin"、"Administrator"、"User" 等）！
 
+【ASTeam 智能体专属存储中枢与环境自闭环 (完全隔离宿主与其它 Agent 环境)】
+- 存储中枢数据根目录 (Data Root)：${storageHub.getDataRootDir()}
+- 全局专属技能库路径 (Skills)：${storageHub.getSkillsDir()}
+- 长期记忆与画像路径 (Memory)：${storageHub.getMemoryDir()}
+- 制品与成果归档路径 (Artifacts)：${storageHub.getArtifactsDir()}
+- MCP 服务自闭环配置文件：${storageHub.getMcpConfigFilePath()}
+- 环境自闭环纪律：所有技能沉淀、长期记忆存储、MCP 配置与制品落盘，全部在 ASTeam 自身中枢目录自闭环（优先使用非系统盘，如 D 盘），绝不污染或侵入 C 盘系统用户主目录，严格避免与宿主及其他外部 Agent (如 Antigravity / Gemini / Claude) 发生默认路径与环境配置冲突！
+
 ${isHostMode
   ? `【当前运行模式：Windows 宿主系统免项目模式】
 - 默认工作目录：${effectiveWorkspace}
@@ -1915,29 +2342,63 @@ ${rulesPrompt}
 - filePath 路径推荐使用正斜杠 / 或转义反斜杠 \\\\；
 - 若 filePath 扩展名为 .docx，系统会自动排版生成标准 Microsoft Word 二进制文档。
 
-3. generate_docx: 生成排版专业精美的标准 Microsoft Word (.docx) 文档。调用格式：
+3. generate_docx: 生成排版专业精美的标准 Microsoft Word (.docx) 文档（全量内置，原生支持华为云/政企风格封面、自动目录、页眉页脚与动态页码、以及 10~20+ 复杂表格自动布局排版与斑马纹）。调用格式：
 \`\`\`tool:generate_docx
-{"filePath": "~/Desktop/方案白皮书.docx", "title": "方案白皮书标题", "subtitle": "副标题/描述", "markdownContent": "# 一、执行摘要\\n正文...\\n## 二、架构设计\\n..."}
+{"filePath": "~/Desktop/方案白皮书.docx", "title": "方案白皮书标题", "subtitle": "副标题/描述", "version": "V1.0", "author": "团队名称", "markdownContent": "# 一、执行摘要\\n正文...\\n## 二、架构设计\\n..."}
 \`\`\`
 
-4. generate_pptx: 生成现代化 16:9 比例的商业演说 Microsoft PowerPoint (.pptx) 演示文稿（含封面、核心金句、观点列表与讲者演讲逐字稿）。调用格式：
+4. generate_excel: 生成企业级 Microsoft Excel (.xlsx) 工作簿（全量内置纯 JS 引擎，支持多 Sheet 级联、首行冻结、公式计算、表头企业色与自动列宽）。调用格式：
+\`\`\`tool:generate_excel
+{"filePath": "~/Desktop/资产清单.xlsx", "sheets": [{"name": "云主机清单", "columns": [{"header": "主机名称", "key": "name"}, {"header": "CPU核数", "key": "cpu"}], "rows": [{"name": "host-01", "cpu": 16}]}]}
+\`\`\`
+或直接通过 Markdown 表格生成：
+\`\`\`tool:generate_excel
+{"filePath": "~/Desktop/资产清单.xlsx", "markdownContent": "| 主机名 | IP | 状态 |\\n| host-1 | 127.0.0.1 | 运行中 |"}
+\`\`\`
+
+5. read_excel: 原生读取解析 Microsoft Excel (.xlsx) 工作簿（全量内置纯 JS 引擎，零外部 Python/pandas 依赖，自动提取所有 Sheet 名称、数据结构并转为 Markdown 表格预览）。调用格式：
+\`\`\`tool:read_excel
+{"filePath": "E:/path/to/file.xlsx", "sheetName": "云主机ECU信息"}
+\`\`\`
+
+6. generate_pptx: 生成现代化 16:9 比例的商业演说 Microsoft PowerPoint (.pptx) 演示文稿（含封面、核心金句、观点列表与讲者演讲逐字稿）。调用格式：
 \`\`\`tool:generate_pptx
 {"filePath": "~/Desktop/方案汇报.pptx", "title": "方案演说汇报", "subtitle": "副标题", "slides": [{"title": "现状痛点与突破", "keyTakeaway": "单页核心观点金句", "bullets": ["要点1", "要点2", "要点3"], "speakerNotes": "讲者现场演讲逐字稿..."}]}
 \`\`\`
 
-5. list_directory: 查看目录列表。调用格式：
+7. list_directory: 查看目录列表。调用格式：
 \`\`\`tool:list_directory
 {"dirPath": "."}
 \`\`\`
-6. run_terminal_command: 执行控制台终端命令（在工作目录执行）。调用格式：
+
+8. run_terminal_command: 执行控制台终端命令（在工作目录执行，内核具备 PowerShell 健壮性沙箱与语法纠偏）。调用格式：
 \`\`\`tool:run_terminal_command
 {"command": "ipconfig 或 node -v 或 dir"}
 \`\`\`
-7. ask_user_question: 涉及方案选择、关键确认或采访模式（Grill-me 互动）时向用户弹出选择与输入卡片。调用格式：
+
+9. ask_user_question: 涉及方案选择、关键决策确认或需求调研（Grill-me / 采访交互）时向用户弹出结构化交互卡片。
+单问题调用格式：
 \`\`\`tool:ask_user_question
 {"question": "问题描述", "options": ["选项1", "选项2"]}
 \`\`\`
-8. install_skill: 自主安装或动态扩展新的 Agent 专属技能（支持从公开 URL 链接下载，或根据用户需求自主编写专业行动规约持久化到技能库中）。调用格式：
+多问题/采访调研模式（Grill-me 强烈推荐调用格式）：
+\`\`\`tool:ask_user_question
+{
+  "question": "请确认以下偏好设置：",
+  "questions": [
+    { "question": "报告格式", "options": ["Word (.docx)", "PDF (.pdf)"] },
+    { "question": "报告风格", "options": ["正式商务（侧重执行摘要、管理视角）", "技术详细（侧重架构分析、实现细节）"] }
+  ]
+}
+\`\`\`
+【重要规约】当需要向用户同时确认 2 个或更多问题/选项（如 Grill-me 模式）时，必须使用 questions 数组传递每个子问题及其 options，严禁将多个问题与选项合并成一段无结构的纯文本！
+
+10. distill_skill: 自主提炼新技能 (Hermes 式自演进技能体系)。在完成高频复杂任务后，将最佳实践、架构流程与输出 Schema 封装提炼为标准技能 (${storageHub.getSkillsDir()})，后续同类任务一键激活。调用格式：
+\`\`\`tool:distill_skill
+{"id": "idc_migration", "name": "IDC迁移专家", "description": "处理云迁移方案的标准化技能", "prompt": "【激活技能：...】\\n- 规约指南..."}
+\`\`\`
+
+11. install_skill: 自主安装或动态扩展新的 Agent 专属技能（支持从公开 URL 链接下载，或根据用户需求自主编写专业行动规约持久化到技能库中）。调用格式：
 \`\`\`tool:install_skill
 {"id": "skill_id", "name": "技能名称", "description": "适用说明", "prompt": "【激活技能：...】\\n- 详细行动指南与规约..."}
 \`\`\`
@@ -2002,9 +2463,34 @@ ${rulesPrompt}
 {"input": "需要向量化的文本或知识条目", "model": "gemini-embedding-2"}
 \`\`\`
 
+17. generate_pdf: 原生排版生成企业级标准 PDF (.pdf) 文档（纯 JS 引擎闭环，支持科技蓝封面、章节自动排版、页码与元数据注入，零外部 Python/reportlab/wkhtmltopdf 依赖）。调用格式：
+\`\`\`tool:generate_pdf
+{"filePath": "~/Desktop/架构白皮书.pdf", "title": "架构迁移白皮书", "subtitle": "企业级技术方案", "author": "ASTeam", "markdownContent": "# 一、执行摘要\\n正文内容...\\n## 二、核心架构\\n..."}
+\`\`\`
+
+18. read_pdf: 原生提取检视 PDF (.pdf) 文档结构与元数据（纯 JS 引擎，提取标题、作者、页数、尺寸等信息）。调用格式：
+\`\`\`tool:read_pdf
+{"filePath": "~/Desktop/架构白皮书.pdf"}
+\`\`\`
+
+19. compress_zip: 原生将文件或文件夹打包压缩为 ZIP (.zip) 归档文件（纯 JS 引擎闭环，零系统 zip/tar/7z 命令依赖）。调用格式：
+\`\`\`tool:compress_zip
+{"sourcePaths": ["~/Desktop/file1.docx", "~/Desktop/file2.pdf"], "targetZipPath": "~/Desktop/交付归档.zip", "comment": "交付产物归档"}
+\`\`\`
+
+20. extract_zip: 原生解压缩 ZIP (.zip) 归档文件到指定目录（纯 JS 引擎闭环，支持目录层级递归还原）。调用格式：
+\`\`\`tool:extract_zip
+{"zipPath": "~/Desktop/交付归档.zip", "outputDir": "~/Desktop/解压目录"}
+\`\`\`
+
+21. activate_skill: 按需动态加载/激活特定专属技能规约。当微型索引中某技能契合当前复杂任务时，调用此工具即可将该技能的完整结构化 Prompt 注入上下文。调用格式：
+\`\`\`tool:activate_skill
+{"id": "office_word_report"}
+\`\`\`
+
 ${memoryContextPrompt}
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
-${skillPrompts ? `【已激活的专属 Skill 技能】\n${skillPrompts}\n` : ''}
+${microSkillIndex ? `${microSkillIndex}\n\n` : ''}${activatedSkillPrompts ? `【已精准按需激活的专属 Skill 规约 (Active Skills)】\n${activatedSkillPrompts}\n` : ''}
 ${userMentionInstruction}
 ${modeInstruction}
 
@@ -2014,9 +2500,9 @@ ${modeInstruction}
   2. 视觉美学规范：必须遵循高水准现代工业设计语言（Linear / Stripe 风格），采用精致配色（优雅渐变色 <defs><linearGradient>、圆角卡片 rx="10"、柔和阴影 <filter id="shadow">、精致图例与无衬线排版 font-family="system-ui, -apple-system, sans-serif"），严禁绘制仅有单调黑白粗框的简陋图形；
   3. 色彩与对比：支持自适应暗色/明亮底色背景，确保文字与图形具有良好对比度。
 
-【执行规范】
-- 如果用户只是普通的咨询或交谈，直接给出详尽解答即可，无需强行调用工具。
-- 如果用户需要生成文档、创建脚本、查询本机环境或执行系统操作，先给出分步规划思考（Plan），然后调用对应工具执行。
+【执行规范与即时工具调用纪律】
+- 如果用户只是普通的咨询、闲聊或理论探讨，直接给出详尽解答即可，无需强行调用工具。
+- 【工具调用即时性（极度重要）】：如果你需要执行系统操作、运行命令、读写文件或生成文档，在给出分步规划思考（Plan）后，**必须在同一个回复中紧接着立即输出第一个工具调用块**（例如 \`\`\`tool:run_terminal_command ... \`\`\`）！**绝对严禁**只列出计划或说“开始执行：”却不输出工具调用块就停止回复！如果你不输出工具调用块，执行引擎将判定任务提前终止。
 - 【严禁虚构修改事实】：如果用户要求修改文件，你必须通过实际调用 write_file 工具完成！如果之前尝试读取（如 view_file）发生异常（例如 File not found），【绝对严禁】在总结答复中谎称“已成功添加/修改了文件”！若文件不存在或未实际写入，必须如实向用户反馈文件未找到或未写入。
 - 完成任务后，请给出客观详细的总结并说明真实生成的文件路径或命令输出。`;
 
@@ -2030,6 +2516,12 @@ ${modeInstruction}
     let iteration = 0;
     let finalSummary = '';
 
+    // v1.8.0 核心：记录任务物理起始毫秒时间戳与生成交付物清单
+    const sessionStartTime = Date.now();
+    const trackedArtifacts: string[] = [];
+    const recoveredErrors: string[] = [];
+    let gateRetries = 0;
+
     while (iteration < maxIterations) {
       iteration++;
 
@@ -2038,6 +2530,7 @@ ${modeInstruction}
       }
 
       let stepResponse = '';
+      let stepContent = ''; // 仅追踪非 thought 类型的正文 token（排除 reasoning_content）
       callbacks.onToken(`\n\n**[Agent 思考与规划 - 轮次 ${iteration}]**\n`, 'thought');
 
       await callLLMStream(
@@ -2046,21 +2539,87 @@ ${modeInstruction}
         abortController.signal,
         (token, type) => {
           stepResponse += token;
+          if (type !== 'thought') stepContent += token;  // 仅累积正文 token
           callbacks.onToken(token, type || 'content');
+        },
+        (systemNotice) => {
+          // 系统级提示（如安全脱敏、自动容灾转移、动态路由调度等）直接注入思考流，绝不污染模型正文 stepResponse
+          callbacks.onToken(systemNotice, 'thought');
         }
       );
 
-      finalSummary = stepResponse;
+      // 若模型未返回任何正文或思考内容（如网关熔断或空包）
+      if (!stepResponse.trim()) {
+        throw new Error('未能从模型获取到有效回复内容，请检查模型服务状态或切换线路后重试。');
+      }
+
+      // finalSummary 优先使用正文 token；若模型全部走 reasoning_content（深度思考模式），则降级到 stepResponse
+      finalSummary = stepContent.trim() || stepResponse.trim();
       messages.push({ role: 'assistant', content: stepResponse });
 
       // Match tool calls (supports ```tool:xxx```, <tool_call> JSON, and <function=xxx> XML)
       const toolCall = extractToolCall(stepResponse);
       if (!toolCall) {
+        // v1.8.0 核心：触发交付制品底层物理探针硬门禁 (Artifact Verification Gate)
+        const gateReport = artifactVerifier.inspectDeliveryGate(
+          stepResponse,
+          sessionStartTime,
+          trackedArtifacts,
+          config.workspacePath
+        );
+
+        if (!gateReport.passed) {
+          gateRetries++;
+          if (gateRetries <= 2) {
+            callbacks.onToken(`\n\n🛡️ **[物理探针硬门禁拦截]** 侦测到交付制品落盘校验未通过，已拦截纯文本虚假答复并触发内核自愈重试...\n`, 'thought');
+            messages.push({
+              role: 'user',
+              content: gateReport.blockingMessage || '【物理探针门禁拦截】交付物物理落盘校验失败，请调用原生工具完成实际文件生成！'
+            });
+            continue;
+          } else {
+            stepResponse += `\n\n⚠️ **【交付制品物理探针拦截提示】**\n底层物理探针未能检测到合格的落盘交付物。已如实向您反馈异常原因，杜绝纯文本伪造报告。`;
+            finalSummary = stepResponse;
+          }
+        } else {
+          // 门禁校验通过，若存在有效交付物则附加上不可伪造的防伪验签证书
+          if (gateReport.badges.length > 0) {
+            const badgeBlock = `\n\n---\n### 🛡️ 交付制品物理探针验收报告\n${gateReport.badges.join('\n\n')}`;
+            stepResponse += badgeBlock;
+            finalSummary = stepResponse;
+            callbacks.onToken(badgeBlock, 'assistant');
+          }
+        }
+        // 检测是否属于“制定了计划但未调用工具直接悬挂停顿”的情况 (Plan-Execution Decoupling)
+        const trimmed = stepResponse.trim();
+        const isHangingPlan = iteration === 1 && (
+          trimmed.endsWith('：') || trimmed.endsWith(':') ||
+          trimmed.includes('开始执行') || trimmed.includes('执行计划') ||
+          (trimmed.length < 400 && (trimmed.includes('运行 `') || trimmed.includes('执行以下操作') || trimmed.includes('依次执行')))
+        );
+
+        if (isHangingPlan) {
+          callbacks.onToken(`\n\n⚙️ **[内核自驱动]** 检测到规划制定完毕，正在自动触发工具调用链...\n`, 'thought');
+          messages.push({
+            role: 'user',
+            content: '请立即使用 ```tool:工具名 {"参数": "..."}``` 代码块格式调用对应的工具开始执行上述操作，严禁只输出说明文本。'
+          });
+          continue;
+        }
+
         // No more tool calls needed, task completed
         break;
       }
 
       const { toolName, toolArgs } = toolCall;
+
+      // 在切换到下一步之前，将当前正在运行的步骤标记为已完成
+      // 修复 Bug：Step-1 初始化为 running，若不显式完成则会永远卡在 running 状态
+      const prevRunningStep = initialPlanSteps.find(s => s.status === 'running');
+      if (prevRunningStep) {
+        prevRunningStep.status = 'completed';
+        callbacks.onStepUpdate({ ...prevRunningStep });
+      }
 
       currentStepIndex = Math.min(currentStepIndex + 1, initialPlanSteps.length - 1);
       const activeStep = initialPlanSteps[currentStepIndex];
@@ -2093,6 +2652,7 @@ ${modeInstruction}
           if (!targetPath || targetPath.trim() === '') {
             throw new Error('未识别到有效的文件路径 (filePath 不能为空，请提供目标文件名)');
           }
+          trackedArtifacts.push(targetPath);
           observation = await tools.writeFile(targetPath, content);
         } else if (toolName === 'generate_docx') {
           let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
@@ -2103,11 +2663,36 @@ ${modeInstruction}
           if (!targetPath) {
             targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '方案白皮书'}.docx`);
           }
+          trackedArtifacts.push(targetPath);
           observation = await tools.generateWordDocx({
             ...toolArgs,
             filePath: targetPath,
             markdownContent: toolArgs.markdownContent || toolArgs.content || ''
           });
+        } else if (toolName === 'generate_excel') {
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          if (!targetPath) {
+            targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '数据表格'}.xlsx`);
+          }
+          trackedArtifacts.push(targetPath);
+          observation = await tools.generateExcelXlsx({
+            ...toolArgs,
+            filePath: targetPath
+          });
+        } else if (toolName === 'read_excel') {
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          if (!targetPath) {
+            throw new Error('read_excel 失败: 请提供要读取的 Excel 文件路径 (filePath)');
+          }
+          observation = await tools.readExcel(targetPath, toolArgs.sheetName);
         } else if (toolName === 'generate_pptx') {
           let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
           if (!targetPath && toolArgs.raw) {
@@ -2117,20 +2702,55 @@ ${modeInstruction}
           if (!targetPath) {
             targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '演说汇报'}.pptx`);
           }
+          trackedArtifacts.push(targetPath);
           observation = await tools.generatePowerPointPptx({
             ...toolArgs,
             filePath: targetPath
           });
+        } else if (toolName === 'distill_skill') {
+          if (!toolArgs.name || !toolArgs.prompt) {
+            throw new Error('distill_skill 失败: 需要提供 name 和 prompt 字段');
+          }
+          const cleanId = (toolArgs.id || toolArgs.name).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+          const distilled = skillManager.distillSkill(
+            cleanId,
+            toolArgs.name,
+            toolArgs.description || '由 Agent 自主演进提炼的专属技能',
+            toolArgs.prompt,
+            toolArgs.target || (config.workspacePath ? 'workspace' : 'global'),
+            config.workspacePath
+          );
+          const targetDir = (toolArgs.target === 'workspace' && config.workspacePath)
+            ? path.join(config.workspacePath, '.asteam', 'skills')
+            : storageHub.getSkillsDir();
+          observation = `[Skill 自演进提炼成功] 已成功提炼沉淀专属技能 "${distilled.name}" (ID: ${distilled.id})，已持久化落盘至 ASTeam 闭环技能库 (${distilled.filePath || targetDir}) 并即时激活生效！`;
         } else if (toolName === 'list_directory') {
           observation = tools.listDirectory(toolArgs.dirPath || toolArgs.path || '.');
         } else if (toolName === 'run_terminal_command') {
           observation = await tools.runTerminalCommand(toolArgs.command || '', sessionId, 120000, callbacks, activeStep?.id);
         } else if (toolName === 'ask_user_question') {
           const qId = `q-${Date.now()}`;
+          let parsedQuestions: SubQuestion[] | undefined = Array.isArray(toolArgs.questions) && toolArgs.questions.length > 0
+            ? toolArgs.questions
+            : undefined;
+          let mainQuestion = toolArgs.question || '请针对上述方案进行选择或确认：';
+
+          // 智能兜底：若未提供结构化 questions 数组，但 question 文本中含有多项编号与选项（如 Grill-me 场景），自动提取为结构化对象
+          if (!parsedQuestions || parsedQuestions.length <= 1) {
+            const extracted = extractQuestionsFromText(mainQuestion);
+            if (extracted && extracted.questions && extracted.questions.length > 1) {
+              parsedQuestions = extracted.questions;
+              if (extracted.intro) {
+                mainQuestion = extracted.intro;
+              }
+            }
+          }
+
           const qData: InteractiveQuestionData = {
             questionId: qId,
-            question: toolArgs.question || '请针对上述方案进行选择或确认：',
+            question: mainQuestion,
             options: toolArgs.options || [],
+            questions: parsedQuestions,
             multiSelect: !!toolArgs.multiSelect
           };
           callbacks.onQuestion?.(qData);
@@ -2140,9 +2760,22 @@ ${modeInstruction}
           activeStep.result = '等待用户在界面卡片中答复...';
           callbacks.onStepUpdate({ ...activeStep });
 
-          // Await user response via submitUserResponse
-          observation = await new Promise<string>((resolve) => {
-            pendingUserResponses.set(sessionId, resolve);
+          // Await user response via submitUserResponse with abort protection
+          observation = await new Promise<string>((resolve, reject) => {
+            const onAbort = () => {
+              pendingUserResponses.delete(sessionId);
+              reject(new Error('用户主动中止了任务。'));
+            };
+            if (abortController.signal.aborted) {
+              return reject(new Error('用户主动中止了任务。'));
+            }
+            abortController.signal.addEventListener('abort', onAbort, { once: true });
+
+            pendingUserResponses.set(sessionId, (ans: string) => {
+              abortController.signal.removeEventListener('abort', onAbort);
+              pendingUserResponses.delete(sessionId);
+              resolve(ans);
+            });
           });
         } else if (toolName === 'install_skill') {
           if (toolArgs.url) {
@@ -2153,7 +2786,7 @@ ${modeInstruction}
             const titleMatch = text.match(/^#\s+(.+)$/m);
             const name = titleMatch ? titleMatch[1].trim() : urlFileName;
             const installed = skillManager.installSkillFromContent(urlFileName, name, `从 URL 安装: ${toolArgs.url}`, text);
-            observation = `[Skill 自主安装成功] 已成功从远程下载并安装技能 "${installed.name}" (ID: ${installed.id})，已存入全局技能库 (~/.asteam/skills/) 并即时激活生效！`;
+            observation = `[Skill 自主安装成功] 已成功从远程下载并安装技能 "${installed.name}" (ID: ${installed.id})，已存入 ASTeam 专属技能库 (${installed.filePath || storageHub.getSkillsDir()}) 并即时激活生效！`;
           } else if (toolArgs.name && toolArgs.prompt) {
             const cleanId = (toolArgs.id || toolArgs.name).toLowerCase().replace(/[^a-z0-9_-]/g, '_');
             const installed = skillManager.installSkillFromContent(
@@ -2162,7 +2795,7 @@ ${modeInstruction}
               toolArgs.description || '由 Agent 自主生成并安装的技能',
               toolArgs.prompt
             );
-            observation = `[Skill 自主安装成功] 已成功创建并安装专属技能 "${installed.name}" (ID: ${installed.id})，已安全持久化至 ~/.asteam/skills/ 并即时激活生效！`;
+            observation = `[Skill 自主安装成功] 已成功创建并安装专属技能 "${installed.name}" (ID: ${installed.id})，已安全持久化至 ASTeam 专属技能库 (${installed.filePath || storageHub.getSkillsDir()}) 并即时激活生效！`;
           } else {
             throw new Error('install_skill 参数错误: 需要提供 url 字段或者 { id, name, description, prompt } 字段');
           }
@@ -2173,16 +2806,20 @@ ${modeInstruction}
             return `- [${s.isBuiltin ? '内置技能' : '自定义技能'}] ${s.name} (ID: ${s.id})${loc}\n  - 说明: ${s.description}`;
           }).join('\n\n');
           observation = `当前系统已挂载技能列表 (${all.length} 项):\n${listStr}\n\n💡 提示：若需查阅某技能的详细规约要求，可直接调用 read_skill 或使用 view_file 查看其文件路径。`;
-        } else if (toolName === 'read_skill') {
+        } else if (toolName === 'activate_skill' || toolName === 'read_skill') {
           const skillId = toolArgs.id || toolArgs.skillId || toolArgs.name || toolArgs.skill;
           if (!skillId) {
-            throw new Error('read_skill 失败: 请提供技能 ID 或名称 (参数格式: {"id": "skill_id"})');
+            throw new Error(`${toolName} 失败: 请提供技能 ID 或名称 (参数格式: {"id": "office_word_report"})`);
           }
           const skill = skillManager.findSkill(skillId, config.workspacePath || null);
           if (skill) {
-            observation = `【技能规约定义: ${skill.name} (ID: ${skill.id})】\n${skill.prompt}`;
+            let promptText = skill.prompt;
+            if (skill.recommendedTools && skill.recommendedTools.length > 0) {
+              promptText += `\n\n【规约 + 工具联动绑定 (Recommended Tools)】\n本技能专属推荐协同调度工具: ${skill.recommendedTools.join(', ')}。请优先调用这些工具以保障交付最高质量。`;
+            }
+            observation = `[Skill 动态激活成功] 已精准加载并激活专属技能「${skill.name}」(@${skill.id}):\n${promptText}`;
           } else {
-            throw new Error(`未找到技能: "${skillId}"。请先调用 list_skills 查看当前已挂载的所有技能清单。`);
+            throw new Error(`未找到技能: "${skillId}"。请先查阅可用技能微型索引清单或调用 list_skills。`);
           }
         } else if (toolName === 'remember_fact') {
           const scope = (toolArgs.scope === 'global' || !config.workspacePath) ? 'global' : 'project';
@@ -2258,6 +2895,58 @@ ${modeInstruction}
             input,
             model: toolArgs.model
           });
+        } else if (toolName === 'generate_pdf') {
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          if (!targetPath) {
+            targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '方案白皮书'}.pdf`);
+          }
+          trackedArtifacts.push(targetPath);
+          observation = await tools.generatePdf({
+            ...toolArgs,
+            filePath: targetPath,
+            markdownContent: toolArgs.markdownContent || toolArgs.content || ''
+          });
+        } else if (toolName === 'read_pdf') {
+          let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.filePath || secondary.path || secondary.file;
+          }
+          if (!targetPath) {
+            throw new Error('read_pdf 失败: 请提供要读取的 PDF 文件路径 (filePath)');
+          }
+          observation = await tools.readPdf(targetPath);
+        } else if (toolName === 'compress_zip') {
+          let targetZip = toolArgs.targetZipPath || toolArgs.filePath || toolArgs.zipPath || toolArgs.target;
+          if (!targetZip && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetZip = secondary.targetZipPath || secondary.filePath || secondary.zipPath;
+          }
+          if (!targetZip) {
+            targetZip = path.join(getSystemDesktopDir(), 'archive.zip');
+          }
+          trackedArtifacts.push(targetZip);
+          observation = await tools.compressZip({
+            ...toolArgs,
+            targetZipPath: targetZip
+          });
+        } else if (toolName === 'extract_zip') {
+          let zipPath = toolArgs.zipPath || toolArgs.filePath || toolArgs.path;
+          if (!zipPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            zipPath = secondary.zipPath || secondary.filePath || secondary.path;
+          }
+          if (!zipPath) {
+            throw new Error('extract_zip 失败: 请提供要解压的 ZIP 文件路径 (zipPath)');
+          }
+          observation = await tools.extractZip({
+            ...toolArgs,
+            zipPath
+          });
         } else {
           // Check MCP tools
           const mcpResult = await mcpManager.executeTool(toolName, toolArgs, { workspacePath: config.workspacePath || null });
@@ -2271,6 +2960,7 @@ ${modeInstruction}
         activeStep.result = observation.slice(0, 300);
       } catch (err: any) {
         observation = `Tool Execution Error: ${err.message}`;
+        recoveredErrors.push(`[${toolName}] ${err.message}`);
         activeStep.status = 'failed';
         activeStep.error = err.message;
       }
@@ -2296,6 +2986,23 @@ ${modeInstruction}
     const turnCkpt = checkpointManager.finishTurnCheckpoint(sessionId);
     if (turnCkpt && (turnCkpt.modifiedFiles.length > 0 || turnCkpt.newFiles.length > 0)) {
       callbacks.onCheckpoint?.(turnCkpt);
+    }
+
+    // v1.8.0 核心：Hermes 式自省微型复盘与记忆自动沉淀
+    try {
+      const reflectRes = memoryManager.autoReflectAndPersist({
+        userPrompt: prompt,
+        stepsCount: currentStepIndex + 1,
+        toolsUsed: Array.from(new Set(initialPlanSteps.map(s => s.tool).filter(Boolean) as string[])),
+        artifactsGenerated: trackedArtifacts,
+        recoveredErrors,
+        workspacePath: config.workspacePath
+      });
+      if (reflectRes.reflected && reflectRes.insights.length > 0) {
+        callbacks.onToken(`\n\n🧠 **[Hermes 经验自省沉淀]**\n已自动复盘本轮任务要点并持久化至记忆库：\n${reflectRes.insights.map(i => `- ${i}`).join('\n')}\n`, 'thought');
+      }
+    } catch (reflectErr) {
+      console.warn('[AutoReflection] Warning:', reflectErr);
     }
 
     callbacks.onDone(finalSummary);

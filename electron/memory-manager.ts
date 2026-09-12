@@ -248,6 +248,61 @@ export class MemoryManager {
     }
     return { isCommand: false };
   }
+
+  /**
+   * Hermes 式自主复盘反思引擎 (Post-Task Reflection)
+   * 在复合长程任务或多步工具调用完成后，提取关键避坑要点与用户习惯，沉淀至项目/全局记忆
+   */
+  public autoReflectAndPersist(context: {
+    userPrompt: string;
+    stepsCount: number;
+    toolsUsed: string[];
+    artifactsGenerated?: string[];
+    recoveredErrors?: string[];
+    workspacePath?: string | null;
+  }): { reflected: boolean; insights: string[] } {
+    const insights: string[] = [];
+
+    // 1. 若使用了原生 Office 生成器并交付了文档
+    if (context.toolsUsed.some(t => ['generate_docx', 'generate_excel', 'generate_pptx'].includes(t))) {
+      if (context.artifactsGenerated && context.artifactsGenerated.length > 0) {
+        const fileExts = context.artifactsGenerated.map(f => path.extname(f).toLowerCase());
+        if (fileExts.includes('.docx')) {
+          insights.push('办公方案生成偏好：优先调用客户端全量内置的纯 JS 原生 Word 套件 (generate_docx)，支持华为云高标准封面、自动目录与复杂斑马纹表格排版，杜绝外部 Python 依赖。');
+        }
+        if (fileExts.includes('.xlsx')) {
+          insights.push('数据表格处理经验：使用内置 exceljs 原生套件 (generate_excel/read_excel) 读写多 Sheet 与冻结首行，保障零外部黑盒环境依赖。');
+        }
+      }
+    }
+
+    // 2. 若在任务中遭遇了终端环境语法问题并成功自愈
+    if (context.recoveredErrors && context.recoveredErrors.some(e => e.includes('&&') || e.includes('powershell'))) {
+      insights.push('终端环境避坑经验：Windows 宿主 PowerShell 老版本不支持 && 拼接符，需由内核健壮性沙箱使用分号或临时安全 .ps1 脚本执行。');
+    }
+
+    // 3. 针对云迁移与资源盘点的高频业务场景经验
+    if (/迁移|华为云|IDC|CBS|ECU|资源盘点/i.test(context.userPrompt)) {
+      insights.push('华为云迁移方案工程规范：针对 IDC 与 CBS 系统迁移，需全面盘点各业务云主机 ECU、MySQL/GP/SQL Server 数据库明文配置，并输出标准迁移矩阵与实施排期表。');
+    }
+
+    if (insights.length === 0) {
+      return { reflected: false, insights: [] };
+    }
+
+    // 避免重复追加：读取现有记忆，若已包含则不重复添加
+    const existing = this.readProjectMemory(context.workspacePath || null);
+    const newInsights = insights.filter(ins => !existing.includes(ins));
+
+    if (newInsights.length > 0) {
+      const scope = context.workspacePath ? 'project' : 'global';
+      for (const ins of newInsights) {
+        this.addMemoryFact(scope, `[自省沉淀] ${ins}`, context.workspacePath || null);
+      }
+    }
+
+    return { reflected: true, insights };
+  }
 }
 
 export const memoryManager = new MemoryManager();

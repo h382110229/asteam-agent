@@ -40,6 +40,15 @@ export class StorageHub {
   }
 
   private resolveConfigFilePath(): string {
+    // 优先检查 Windows D:\ASTeamData 或已存在的独立自闭环配置文件
+    if (process.platform === 'win32') {
+      try {
+        const dDriveCfg = path.join('D:\\ASTeamData', 'storage-config.json');
+        if (fs.existsSync(dDriveCfg)) {
+          return dDriveCfg;
+        }
+      } catch {}
+    }
     try {
       if (app && app.isReady && app.isReady()) {
         return path.join(app.getPath('userData'), 'asteam-storage-config.json');
@@ -50,11 +59,27 @@ export class StorageHub {
 
   /**
    * 自动探测与决定初始数据根目录：
-   * 1. 优先读取已持久化的自定义配置；
-   * 2. 若无配置，优先尝试非系统盘（如 D:\ASTeamData）；
-   * 3. 若无 D 盘，回退使用本地主目录下的 ASTeamData (避免直接塞进隐藏的 C:\Users\xxx\.asteam)。
+   * 1. 优先读取已存在的非系统盘自闭环配置 (如 D:\ASTeamData\storage-config.json)；
+   * 2. 读取用户自定义持久化配置；
+   * 3. 若无配置，默认智能首选 Windows 非系统盘（D:\ASTeamData），实现真正的存储与环境自闭环；
+   * 4. 若无 D 盘，回退使用本地主目录下的 ASTeamData (彻底避免污染 C:\Users\xxx\.asteam)。
    */
   private loadInitialRootDir(): string {
+    // 1. 优先探测 D:\ASTeamData 自闭环配置
+    if (process.platform === 'win32') {
+      try {
+        const dCfg = path.join('D:\\ASTeamData', 'storage-config.json');
+        if (fs.existsSync(dCfg)) {
+          const raw = fs.readFileSync(dCfg, 'utf-8');
+          const parsed = JSON.parse(raw);
+          if (parsed.dataRootDir && typeof parsed.dataRootDir === 'string') {
+            return path.normalize(parsed.dataRootDir);
+          }
+        }
+      } catch {}
+    }
+
+    // 2. 读取配置中心文件
     try {
       if (fs.existsSync(this.configFilePath)) {
         const raw = fs.readFileSync(this.configFilePath, 'utf-8');
@@ -67,7 +92,7 @@ export class StorageHub {
       console.warn('[StorageHub] Failed to read storage config, using default:', e);
     }
 
-    // 默认智能优选：Windows 探测 D 盘
+    // 3. 默认智能优选：Windows 探测并优先使用 D 盘，实现自闭环隔离
     if (process.platform === 'win32') {
       try {
         if (fs.existsSync('D:\\')) {
@@ -134,6 +159,13 @@ export class StorageHub {
   }
 
   /**
+   * 获取 MCP 服务持久化配置文件路径 (存储在中枢根目录下以确保自闭环，与宿主及其他 Agent 隔离)
+   */
+  public getMcpConfigFilePath(): string {
+    return path.join(this.currentRootDir, 'mcp_servers.json');
+  }
+
+  /**
    * 动态切换数据根目录并持久化
    */
   public setDataRootDir(newPath: string): { success: boolean; rootDir: string; error?: string } {
@@ -155,7 +187,15 @@ export class StorageHub {
         customized: true,
         lastMigratedAt: Date.now()
       };
+      // 1. 持久化到应用级配置
       fs.writeFileSync(this.configFilePath, JSON.stringify(configData, null, 2), 'utf-8');
+      // 2. 同时在目标中枢根目录下保存一份自闭环配置，确保数据盘插拔或跨环境迁移自闭环
+      const selfContainedConfig = path.join(normalized, 'storage-config.json');
+      if (path.normalize(this.configFilePath) !== path.normalize(selfContainedConfig)) {
+        try {
+          fs.writeFileSync(selfContainedConfig, JSON.stringify(configData, null, 2), 'utf-8');
+        } catch {}
+      }
       return { success: true, rootDir: normalized };
     } catch (err: any) {
       return { success: false, rootDir: this.currentRootDir, error: err.message || '切换目录失败' };

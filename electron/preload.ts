@@ -73,9 +73,10 @@ export interface ElectronAPI {
   listCheckpoints: (workspacePath: string | null, sessionId?: string) => Promise<any[]>;
   rollbackCheckpoint: (checkpointId: string, workspacePath: string | null) => Promise<{ success: boolean; message: string; restoredFiles: string[]; removedFiles: string[] }>;
 
-  // MCP Management (v1.5.0)
+  // MCP Management (v1.5.0 / v1.8.1)
   getMcpServersStatus: () => Promise<any[]>;
-  reloadMcpServers: (customMcpConfig: string, workspacePath: string | null) => Promise<any[]>;
+  getSavedMcpConfig: () => Promise<string>;
+  reloadMcpServers: (customMcpConfig?: string, workspacePath?: string | null) => Promise<any[]>;
   testMcpServer: (name: string, config: any, workspacePath: string | null) => Promise<{ success: boolean; tools?: any[]; error?: string }>;
 
   // Autonomous Scheduler & Runner (v1.6.0)
@@ -100,11 +101,12 @@ export interface ElectronAPI {
   unregisterKnowledgeWorkspace: (workspacePath: string) => Promise<void>;
   searchKnowledgeSymbols: (query: string, maxResults?: number) => Promise<any[]>;
 
-  // Security Fence & Data Redaction (v1.7.0)
+  // Security Fence & Data Redaction (v1.7.0 / v1.8.3)
   getSecurityFenceConfig: () => Promise<any>;
   saveSecurityFenceConfig: (config: any) => Promise<void>;
   getSecurityFenceAuditLogs: () => Promise<any[]>;
   testSanitizeText: (text: string) => Promise<any>;
+  recordSecurityFenceBypass: (sensitiveItems: any[]) => Promise<void>;
 }
 
 const api: ElectronAPI = {
@@ -174,8 +176,9 @@ const api: ElectronAPI = {
   listCheckpoints: (workspacePath, sessionId) => ipcRenderer.invoke('checkpoint:list', { workspacePath, sessionId }),
   rollbackCheckpoint: (checkpointId, workspacePath) => ipcRenderer.invoke('checkpoint:rollback', { checkpointId, workspacePath }),
 
-  // MCP Management (v1.5.0)
+  // MCP Management (v1.5.0 / v1.8.1)
   getMcpServersStatus: () => ipcRenderer.invoke('mcp:getServersStatus'),
+  getSavedMcpConfig: () => ipcRenderer.invoke('mcp:getSavedConfig'),
   reloadMcpServers: (customMcpConfig, workspacePath) => ipcRenderer.invoke('mcp:reloadServers', { customMcpConfig, workspacePath }),
   testMcpServer: (name, config, workspacePath) => ipcRenderer.invoke('mcp:testServer', { name, config, workspacePath }),
 
@@ -211,7 +214,8 @@ const api: ElectronAPI = {
   getSecurityFenceConfig: () => ipcRenderer.invoke('security-fence:getConfig'),
   saveSecurityFenceConfig: (config) => ipcRenderer.invoke('security-fence:saveConfig', config),
   getSecurityFenceAuditLogs: () => ipcRenderer.invoke('security-fence:getAuditLogs'),
-  testSanitizeText: (text) => ipcRenderer.invoke('security-fence:testSanitize', text)
+  testSanitizeText: (text) => ipcRenderer.invoke('security-fence:testSanitize', text),
+  recordSecurityFenceBypass: (sensitiveItems) => ipcRenderer.invoke('security-fence:recordBypass', sensitiveItems)
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

@@ -18,6 +18,7 @@ export interface SecurityFenceAuditRecord {
   redactedItems: RedactedItemDetail[];
   totalSensitiveCount: number;
   blocked: boolean;
+  bypassed?: boolean;
   blockReason?: string;
 }
 
@@ -162,7 +163,7 @@ export class SecurityFenceManager {
 
     // 3. Database Connection Credentials
     if (this.config.enabledRules.dbConnections) {
-      sanitized = sanitized.replace(/(?:postgres|mysql|mongodb|redis):\/\/([^:]+):([^@\s]+)@/gi, (match, user, pass) => {
+      sanitized = sanitized.replace(/(?:postgres(?:ql)?|mysql|mongodb|redis):\/\/([^:]+):([^@\s]+)@/gi, (match, user, pass) => {
         const redactedPass = recordRedaction(pass, '数据库连接口令', 'DB_PASSWORD');
         return match.replace(pass, redactedPass);
       });
@@ -222,6 +223,26 @@ export class SecurityFenceManager {
   /**
    * 对一组 ChatMessage 出境消息执行整体脱敏
    */
+  /**
+   * 记录用户主动确认的出境放行审计日志（Bypass Audit）
+   */
+  public recordBypass(sensitiveItems: RedactedItemDetail[]): void {
+    if (!sensitiveItems || sensitiveItems.length === 0) return;
+    const totalCount = sensitiveItems.reduce((acc, i) => acc + i.count, 0);
+    const record: SecurityFenceAuditRecord = {
+      id: `audit-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      timestamp: Date.now(),
+      mode: this.config.mode,
+      redactedItems: sensitiveItems,
+      totalSensitiveCount: totalCount,
+      blocked: false,
+      bypassed: true,
+      blockReason: '用户发送前主动确认豁免放行 (Bypassed by User)'
+    };
+    this.auditLogs.push(record);
+    this.saveAuditLogs();
+  }
+
   public sanitizeMessages(messages: Array<{ role: string; content: string }>): {
     sanitizedMessages: Array<{ role: string; content: string }>;
     totalRedactions: number;

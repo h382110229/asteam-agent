@@ -812,6 +812,16 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       return;
     }
 
+    // 若当前处于问答等待中 (isWaitingForUser)，用户直接在底部打字回车，自动提交为当前问答的答复！
+    if (isWaitingForUser && activeSessionId && trimmed) {
+      onReplyQuestion?.('active', trimmed);
+      setInput('');
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto';
+      }
+      return;
+    }
+
     if (isRunning && !isWaitingForUser) return;
 
     if (trimmed === '/diff') {
@@ -1224,10 +1234,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.2.0)
+                ASTeam Agent (v1.8.3)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 实时交互控制台 (Live Terminal)</strong> 与 <strong>🖥️ 原生多模态产物实时预览 (HTML/Mermaid/SVG)</strong>，并融合 Word/PPT 双引擎排版生成。
+                内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>🧩 内置统一 Skill & MCP 深度融合演化</strong>、<strong>⚡ 实时极客运行时 (Terminal & Safe Sandbox)</strong> 与 <strong>📑 原生 Office 排版套件</strong>。
               </p>
             </div>
 
@@ -1334,6 +1344,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 {/* Interactive Question Card if Agent prompted a question */}
                 {msg.question && (
                   <InteractiveQuestionCard
+                    key={msg.question.questionId}
                     data={msg.question}
                     onSubmitAnswer={(qId, ans) => onReplyQuestion(qId, ans)}
                   />
@@ -1586,21 +1597,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           ))
         )}
 
-        {/* 正在运行的独立交互控制台卡片 (直接置底浮现，与 ASteam UI 体系严格保持一致) */}
+        {/* 正在运行的独立交互控制台卡片 (内嵌平滑展示，避免误导为交互弹窗) */}
         {activeRunningTerminalStep && (
-          <div className="my-4 rounded-2xl border border-[var(--primary)]/40 bg-[var(--card)] p-3.5 shadow-lg animate-in zoom-in-95 duration-150 select-text">
+          <div className="my-3 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-xs animate-in fade-in duration-200 select-text">
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-[var(--border)] select-none">
               <div className="flex items-center space-x-2">
-                <span className="relative flex h-2.5 w-2.5">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--primary)]"></span>
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-60"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--primary)]"></span>
                 </span>
-                <span className="font-semibold text-xs text-[var(--foreground)] tracking-wide">
-                  ⚡ 实时控制台管道已就绪 (Live Console)
+                <span className="font-medium text-xs text-[var(--foreground)] tracking-wide">
+                  终端进程实时管道 (Terminal Stream)
                 </span>
               </div>
-              <span className="text-[10px] bg-[var(--primary)]/15 text-[var(--primary)] border border-[var(--primary)]/30 rounded-full px-2.5 py-0.5 font-medium animate-pulse">
-                等待交互输入 (支持 stdin 交互)
+              <span className="text-[10px] bg-[var(--muted)] text-[var(--muted-foreground)] rounded px-2 py-0.5 font-medium">
+                执行中 (支持按需推入 stdin)
               </span>
             </div>
 
@@ -1959,7 +1970,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               onPaste={handlePaste}
               placeholder={
                 activeRunningTerminalStep
-                  ? `⚡ 终端命令正在等待标准输入 (stdin)... 在此输入 y / n / 参数后按 Enter 即刻发送`
+                  ? `终端命令执行中... 若需交互输入（如 y/n）可直接在此键入后按 Enter`
                   : isWaitingForUser
                   ? `Agent 正在等待回复，请在此输入答复，或在上方卡片中直接点击选择...`
                   : workspacePath

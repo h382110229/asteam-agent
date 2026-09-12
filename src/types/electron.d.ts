@@ -71,7 +71,7 @@ export interface ElectronAPI {
   listCheckpoints: (workspacePath: string | null, sessionId?: string) => Promise<any[]>;
   rollbackCheckpoint: (checkpointId: string, workspacePath: string | null) => Promise<{ success: boolean; message: string; restoredFiles: string[]; removedFiles: string[] }>;
 
-  // MCP Management (v1.5.0)
+  // MCP Management (v1.5.0 / v1.8.1)
   getMcpServersStatus: () => Promise<Array<{
     name: string;
     status: 'connected' | 'connecting' | 'error' | 'disconnected';
@@ -86,7 +86,8 @@ export interface ElectronAPI {
     error?: string;
     lastConnectedAt?: number;
   }>>;
-  reloadMcpServers: (customMcpConfig: string, workspacePath: string | null) => Promise<any[]>;
+  getSavedMcpConfig: () => Promise<string>;
+  reloadMcpServers: (customMcpConfig?: string, workspacePath?: string | null) => Promise<any[]>;
   testMcpServer: (name: string, config: any, workspacePath: string | null) => Promise<{ success: boolean; tools?: any[]; error?: string }>;
 
   // Autonomous Scheduler & Runner (v1.6.0)
@@ -98,6 +99,35 @@ export interface ElectronAPI {
   getInspectionReports: (workspacePath: string | null) => Promise<any[]>;
   readInspectionReport: (filePath: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   onSchedulerEvent: (callback: (data: any) => void) => () => void;
+
+  // Enterprise Hub & Verification (v1.7.0)
+  getEnterpriseHubState?: () => Promise<any>;
+  importEnterpriseExtension?: (options: any) => Promise<any>;
+  toggleEnterpriseExtension?: (id: string, enabled: boolean) => Promise<any>;
+  uninstallEnterpriseExtension?: (id: string) => Promise<boolean>;
+
+  // Cross-Workspace Knowledge Graph (v1.7.0)
+  getKnowledgeGraphWorkspaces?: () => Promise<any[]>;
+  registerKnowledgeWorkspace?: (workspacePath: string) => Promise<void>;
+  unregisterKnowledgeWorkspace?: (workspacePath: string) => Promise<void>;
+  searchKnowledgeSymbols?: (query: string, maxResults?: number) => Promise<any[]>;
+
+  // Security Fence & Data Redaction (v1.7.0 / v1.8.3)
+  getSecurityFenceConfig?: () => Promise<any>;
+  saveSecurityFenceConfig?: (config: any) => Promise<void>;
+  getSecurityFenceAuditLogs?: () => Promise<any[]>;
+  testSanitizeText?: (text: string) => Promise<{
+    sanitized: string;
+    redactedItems: Array<{
+      type: string;
+      original: string;
+      placeholder: string;
+      count: number;
+    }>;
+    isBlocked: boolean;
+    blockReason?: string;
+  }>;
+  recordSecurityFenceBypass?: (sensitiveItems: any[]) => Promise<void>;
 }
 
 declare global {

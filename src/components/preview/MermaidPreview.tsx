@@ -13,44 +13,13 @@ import {
   Play,
   Image as ImageIcon
 } from 'lucide-react';
+import { cleanupStrayMermaidElements, sanitizeMermaidCode } from '../../utils/mermaid-sanitizer';
+
+export { cleanupStrayMermaidElements, sanitizeMermaidCode };
 
 interface MermaidPreviewProps {
   content: string;
   title?: string;
-}
-
-/**
- * 智能清洗并修复 LLM 生成的 Mermaid 代码中的常见语法缺陷：
- * 1. 箭头标注包含括号或特殊字符未加引号: 如 `-->|变更监听 (Chokidar)|` => `-->|"变更监听 (Chokidar)"|`
- * 2. 节点形状包含嵌套括号未转义: 如 `id(文本 (说明))` => `id["文本 (说明)"]`
- * 3. 剥离可能残留的 Markdown 标记
- */
-export function sanitizeMermaidCode(raw: string): string {
-  if (!raw) return '';
-
-  // 1. 剥离 Markdown 围栏代码块
-  let clean = raw.replace(/^```(?:mermaid)?/gm, '').replace(/```$/gm, '').trim();
-
-  // 2. 修复箭头标注 |...| 未加引号时包含括号、特殊符号导致的解析崩溃
-  // 匹配形如 -->|label|, -.->|label|, ==>|label|, ---|label|
-  clean = clean.replace(/(-->|-.->|==>|---|~~~)\|([^|\r\n]+?)\|/g, (match, arrow, label) => {
-    const trimmed = label.trim();
-    // 如果已经带有双引号包裹，则不处理
-    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
-      return match;
-    }
-    // 对内部的双引号进行单引号转义，并使用双引号安全包裹
-    const escaped = trimmed.replace(/"/g, "'");
-    return `${arrow}|"${escaped}"|`;
-  });
-
-  // 3. 修复圆括号节点中嵌套括号导致的崩溃 (如 `A(服务 (Daemon))` => `A["服务 (Daemon)"]`)
-  clean = clean.replace(/([a-zA-Z0-9_-]+)\(\s*([^()]+?\([^()]+?\)[^()]*?)\s*\)/g, (match, id, text) => {
-    const escaped = text.trim().replace(/"/g, "'");
-    return `${id}["${escaped}"]`;
-  });
-
-  return clean;
 }
 
 export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }) => {
@@ -66,6 +35,7 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
 
   // 当外部传入的 content 变化时同步
   useEffect(() => {
+    cleanupStrayMermaidElements();
     setEditableCode(sanitizeMermaidCode(content));
   }, [content]);
 
@@ -74,6 +44,7 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
     let isMounted = true;
     setLoading(true);
     setRenderError(null);
+    cleanupStrayMermaidElements();
 
     const renderGraph = async () => {
       try {
@@ -82,11 +53,13 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
           startOnLoad: false,
           theme: 'dark',
           securityLevel: 'loose',
+          suppressErrorRendering: true, // 核心：禁止 Mermaid 向 document.body 注入语法错误炸弹节点，防止遮挡或卡死界面
           fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
         });
 
+        cleanupStrayMermaidElements();
         const id = 'mermaid-render-' + Math.random().toString(36).substring(2, 9);
-        const codeToRender = editableCode.trim();
+        const codeToRender = sanitizeMermaidCode(editableCode);
 
         if (!codeToRender) {
           if (isMounted) {
@@ -97,28 +70,32 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
         }
 
         const { svg } = await mermaid.render(id, codeToRender);
+        cleanupStrayMermaidElements();
         if (isMounted) {
           setSvgCode(svg);
           setRenderError(null);
           setLoading(false);
         }
       } catch (err: any) {
+        cleanupStrayMermaidElements();
         if (isMounted) {
           console.warn('Mermaid initial parse error:', err);
-          // 尝试更激进的自动修复 (将所有未包裹引号的节点文字加上引号)
+          // 尝试再次通过宽松转义兜底修复
           try {
             const { default: mermaid } = await import('mermaid');
-            const aggressiveFixed = editableCode
+            const aggressiveFixed = sanitizeMermaidCode(editableCode)
               .replace(/\[\s*([^\[\]]+?)\s*\]/g, '["$1"]')
-              .replace(/\|([^|\r\n]+?)\|/g, '|"$1"|');
+              .replace(/\|([^|\r\n]+?)\|/g, (m, label) => `|"${label.replace(/['"]/g, '').trim()}"|`);
             const fallbackId = 'mermaid-fallback-' + Math.random().toString(36).substring(2, 9);
             const { svg } = await mermaid.render(fallbackId, aggressiveFixed);
+            cleanupStrayMermaidElements();
             setSvgCode(svg);
             setRenderError(null);
             setLoading(false);
             return;
           } catch {}
 
+          cleanupStrayMermaidElements();
           setRenderError(err.message || 'Mermaid 语法解析失败');
           setLoading(false);
         }
@@ -129,18 +106,14 @@ export const MermaidPreview: React.FC<MermaidPreviewProps> = ({ content, title }
 
     return () => {
       isMounted = false;
+      cleanupStrayMermaidElements();
     };
   }, [editableCode]);
 
   const handleApplyAutoFix = () => {
-    const aggressivelyFixed = editableCode
-      .replace(/(-->|-.->|==>|---|~~~)\|([^|\r\n]+?)\|/g, (m, arrow, label) => {
-        const cleanLabel = label.replace(/"/g, "'").trim();
-        return `${arrow}|"${cleanLabel}"|`;
-      })
-      .replace(/([a-zA-Z0-9_-]+)\(([^()]+?\([^()]+?\)[^()]*?)\)/g, '$1["$2"]')
-      .replace(/\[\s*([^"\[\]]+?)\s*\]/g, '["$1"]');
-    setEditableCode(aggressivelyFixed);
+    cleanupStrayMermaidElements();
+    const fixed = sanitizeMermaidCode(editableCode);
+    setEditableCode(fixed);
   };
 
   const handleCopy = async () => {

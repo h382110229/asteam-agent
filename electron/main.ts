@@ -410,12 +410,16 @@ function setupIPC() {
     return await checkpointManager.rollbackCheckpoint(checkpointId, workspacePath);
   });
 
-  // Model Context Protocol (MCP) IPC - v1.5.0
+  // Model Context Protocol (MCP) IPC - v1.5.0 / v1.8.1
   ipcMain.handle('mcp:getServersStatus', async () => {
     return mcpManager.getServersStatus();
   });
 
-  ipcMain.handle('mcp:reloadServers', async (_event, { customMcpConfig, workspacePath }: { customMcpConfig: string; workspacePath: string | null }) => {
+  ipcMain.handle('mcp:getSavedConfig', async () => {
+    return mcpManager.getSavedConfigJson();
+  });
+
+  ipcMain.handle('mcp:reloadServers', async (_event, { customMcpConfig, workspacePath }: { customMcpConfig?: string; workspacePath: string | null }) => {
     return await mcpManager.reloadServers(customMcpConfig, workspacePath);
   });
 
@@ -707,6 +711,10 @@ function setupIPC() {
 
   ipcMain.handle('security-fence:testSanitize', async (_event, text: string) => {
     return securityFenceManager.sanitizeText(text);
+  });
+
+  ipcMain.handle('security-fence:recordBypass', async (_event, sensitiveItems: any[]) => {
+    return securityFenceManager.recordBypass(sensitiveItems);
   });
 }
 
