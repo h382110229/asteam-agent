@@ -13,6 +13,7 @@ import { schedulerManager } from './scheduler-manager';
 import { enterpriseHubManager } from './enterprise-hub-manager';
 import { knowledgeGraphManager } from './knowledge-graph-manager';
 import { securityFenceManager } from './security-fence-manager';
+import { autoUpdaterManager } from './auto-updater';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -716,6 +717,31 @@ function setupIPC() {
   ipcMain.handle('security-fence:recordBypass', async (_event, sensitiveItems: any[]) => {
     return securityFenceManager.recordBypass(sensitiveItems);
   });
+
+  // Auto-Updater (v1.9.0)
+  ipcMain.handle('auto-updater:getStatus', async () => {
+    return autoUpdaterManager.getStatus();
+  });
+
+  ipcMain.handle('auto-updater:getConfig', async () => {
+    return autoUpdaterManager.getConfig();
+  });
+
+  ipcMain.handle('auto-updater:saveConfig', async (_event, newConfig: any) => {
+    return autoUpdaterManager.saveConfig(newConfig);
+  });
+
+  ipcMain.handle('auto-updater:checkForUpdates', async (_event, customServerUrl?: string) => {
+    return autoUpdaterManager.checkForUpdates(customServerUrl);
+  });
+
+  ipcMain.handle('auto-updater:startDownload', async () => {
+    return autoUpdaterManager.startDownload();
+  });
+
+  ipcMain.handle('auto-updater:installAndRestart', async (_event, silent = true) => {
+    return autoUpdaterManager.installAndRestart(silent);
+  });
 }
 
 // App lifecycle
@@ -741,6 +767,18 @@ if (!gotTheLock) {
     schedulerManager.onEvent((payload) => {
       mainWindow?.webContents.send('scheduler:event', payload);
     });
+
+    autoUpdaterManager.onEvent((payload) => {
+      mainWindow?.webContents.send('auto-updater:event', payload);
+    });
+
+    if (autoUpdaterManager.getConfig().autoCheck) {
+      setTimeout(() => {
+        autoUpdaterManager.checkForUpdates().catch(err => {
+          console.warn('[AutoUpdater] Silent check failed:', err);
+        });
+      }, 3000);
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -215,7 +215,22 @@ const api: ElectronAPI = {
   saveSecurityFenceConfig: (config) => ipcRenderer.invoke('security-fence:saveConfig', config),
   getSecurityFenceAuditLogs: () => ipcRenderer.invoke('security-fence:getAuditLogs'),
   testSanitizeText: (text) => ipcRenderer.invoke('security-fence:testSanitize', text),
-  recordSecurityFenceBypass: (sensitiveItems) => ipcRenderer.invoke('security-fence:recordBypass', sensitiveItems)
+  recordSecurityFenceBypass: (sensitiveItems) => ipcRenderer.invoke('security-fence:recordBypass', sensitiveItems),
+
+  // Auto-Updater (v1.9.0)
+  getUpdateStatus: () => ipcRenderer.invoke('auto-updater:getStatus'),
+  getUpdateConfig: () => ipcRenderer.invoke('auto-updater:getConfig'),
+  saveUpdateConfig: (newConfig: any) => ipcRenderer.invoke('auto-updater:saveConfig', newConfig),
+  checkForUpdates: (customServerUrl?: string) => ipcRenderer.invoke('auto-updater:checkForUpdates', customServerUrl),
+  startDownloadUpdate: () => ipcRenderer.invoke('auto-updater:startDownload'),
+  installAndRestartUpdate: (silent = true) => ipcRenderer.invoke('auto-updater:installAndRestart', silent),
+  onUpdateEvent: (callback: (data: any) => void) => {
+    const subscription = (_event: any, data: any) => callback(data);
+    ipcRenderer.on('auto-updater:event', subscription);
+    return () => {
+      ipcRenderer.removeListener('auto-updater:event', subscription);
+    };
+  }
 };
 
 contextBridge.exposeInMainWorld('electronAPI', api);

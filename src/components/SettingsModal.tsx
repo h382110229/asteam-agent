@@ -79,7 +79,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSave,
   workspacePath = null
 }) => {
-  const [activeTab, setActiveTab] = useState<'provider' | 'storage' | 'memory' | 'mcp_skills' | 'desktop'>('provider');
+  const [activeTab, setActiveTab] = useState<'provider' | 'storage' | 'memory' | 'mcp_skills' | 'desktop' | 'update'>('provider');
+  const [updateServerUrl, setUpdateServerUrl] = useState<string>('https://agent.ashawk.online');
+  const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean>(true);
+  const [updateChannel, setUpdateChannel] = useState<string>('stable');
+  const [checkingUpdate, setCheckingUpdate] = useState<boolean>(false);
+  const [updateCheckMsg, setUpdateCheckMsg] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
   const [form, setForm] = useState<AppSettings>({
     ...settings,
     enabledMcpTools: settings.enabledMcpTools || ['web_search', 'web_fetch', 'git_operations', 'system_inspector'],
@@ -319,6 +324,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       refreshStorageStats();
       refreshMemory();
       refreshMcpStatus();
+      if (window.electronAPI?.getUpdateConfig) {
+        window.electronAPI.getUpdateConfig().then(cfg => {
+          if (cfg) {
+            setUpdateServerUrl(cfg.serverUrl || 'https://agent.ashawk.online');
+            setAutoCheckUpdate(cfg.autoCheck !== false);
+            setUpdateChannel(cfg.channel || 'stable');
+          }
+        }).catch(() => {});
+      }
     }
   }, [isOpen, workspacePath]);
 
@@ -680,6 +694,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (window.electronAPI?.reloadMcpServers) {
       window.electronAPI.reloadMcpServers(form.customMcpConfig, workspacePath || null).catch(() => {});
     }
+    if (window.electronAPI?.saveUpdateConfig) {
+      window.electronAPI.saveUpdateConfig({
+        serverUrl: updateServerUrl,
+        autoCheck: autoCheckUpdate,
+        channel: updateChannel
+      }).catch(() => {});
+    }
     onClose();
   };
 
@@ -788,6 +809,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             <Monitor className="h-3.5 w-3.5" />
             <span>系统与偏好</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('update')}
+            className={`flex items-center space-x-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+              activeTab === 'update'
+                ? 'border-[var(--primary)] text-[var(--primary)] font-semibold'
+                : 'border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>版本与更新</span>
           </button>
         </div>
 
@@ -1980,6 +2014,149 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </kbd>
                 </div>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'update' && (
+            <div className="space-y-4 text-xs">
+              {/* Current Version & Branding */}
+              <div className="rounded-xl border border-[var(--border)] p-4 bg-[var(--background)]/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--primary)] text-white shadow-xs">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-semibold text-[var(--foreground)]">
+                        ASTeam Agent
+                      </h4>
+                      <p className="text-[11px] text-[var(--muted-foreground)]">
+                        智能桌面助手 · 企业自适应演进引擎
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="rounded-full bg-[var(--primary)]/15 px-2.5 py-1 text-xs font-mono font-semibold text-[var(--primary)]">
+                      v1.8.3 (基线)
+                    </span>
+                    <p className="text-[10px] text-[var(--muted-foreground)] mt-1">
+                      目标通道: v1.9.0
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Server Configuration */}
+              <div className="rounded-xl border border-[var(--border)] p-4 bg-[var(--background)]/40 space-y-3">
+                <div className="space-y-1">
+                  <label className="font-semibold text-[var(--foreground)] flex items-center justify-between">
+                    <span>企业私有 ASTeam Server 地址</span>
+                    <span className="text-[10px] text-[var(--muted-foreground)]">支持 Cloudflare 穿透域名或内网地址</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={updateServerUrl}
+                    onChange={(e) => setUpdateServerUrl(e.target.value)}
+                    placeholder="例如: https://agent.ashawk.online 或 http://127.0.0.1:3888"
+                    className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-xs font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-2 border-t border-[var(--border)]/60">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="font-medium text-[var(--foreground)]">启动时静默检查更新</span>
+                      <p className="text-[10px] text-[var(--muted-foreground)]">发现新版本自动在顶部提醒</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={autoCheckUpdate}
+                      onChange={(e) => setAutoCheckUpdate(e.target.checked)}
+                      className="h-4 w-4 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <span className="font-medium text-[var(--foreground)]">发布更新通道</span>
+                      <p className="text-[10px] text-[var(--muted-foreground)]">推荐企业生产使用稳定通道</p>
+                    </div>
+                    <select
+                      value={updateChannel}
+                      onChange={(e) => setUpdateChannel(e.target.value)}
+                      className="rounded border border-[var(--input)] bg-[var(--card)] px-2 py-1 text-xs text-[var(--foreground)]"
+                    >
+                      <option value="stable">稳定版 (Stable)</option>
+                      <option value="beta">测试版 (Beta)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Check Action & Feedback */}
+              <div className="rounded-xl border border-[var(--border)] p-4 bg-[var(--background)]/40 flex items-center justify-between">
+                <div>
+                  <span className="font-medium text-[var(--foreground)]">手动探测服务端更新</span>
+                  <p className="text-[11px] text-[var(--muted-foreground)]">
+                    向已配置的服务端发送版本检测请求并核验哈希
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={checkingUpdate}
+                  onClick={async () => {
+                    setCheckingUpdate(true);
+                    setUpdateCheckMsg(null);
+                    try {
+                      const res = await window.electronAPI?.checkForUpdates?.(updateServerUrl);
+                      if (res && res.hasUpdate) {
+                        setUpdateCheckMsg({
+                          type: 'success',
+                          text: `发现新版本 v${res.latestVersion}！已在主界面弹出更新确认。`
+                        });
+                      } else if (res) {
+                        setUpdateCheckMsg({
+                          type: 'info',
+                          text: `当前已是最新版本 (v${res.currentVersion || '1.8.3'})。`
+                        });
+                      } else {
+                        setUpdateCheckMsg({
+                          type: 'error',
+                          text: '检查更新失败，未收到服务端有效响应。'
+                        });
+                      }
+                    } catch (err: any) {
+                      setUpdateCheckMsg({
+                        type: 'error',
+                        text: err?.message || '检查更新发生异常'
+                      });
+                    } finally {
+                      setCheckingUpdate(false);
+                    }
+                  }}
+                  className="inline-flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] px-3.5 py-1.5 text-xs font-medium text-white shadow-xs hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${checkingUpdate ? 'animate-spin' : ''}`} />
+                  <span>{checkingUpdate ? '检测中...' : '立即检查更新'}</span>
+                </button>
+              </div>
+
+              {updateCheckMsg && (
+                <div
+                  className={`p-3 rounded-lg border text-xs flex items-center space-x-2 ${
+                    updateCheckMsg.type === 'success'
+                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : updateCheckMsg.type === 'info'
+                      ? 'border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400'
+                      : 'border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400'
+                  }`}
+                >
+                  <Sparkles className="h-4 w-4 shrink-0" />
+                  <span>{updateCheckMsg.text}</span>
+                </div>
+              )}
             </div>
           )}
         </div>

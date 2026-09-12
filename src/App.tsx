@@ -7,6 +7,7 @@ import { ProjectRulesModal } from './components/ProjectRulesModal';
 import { EnterpriseHubModal } from './components/EnterpriseHubModal';
 import { SecurityComplianceModal } from './components/SecurityComplianceModal';
 import { SecurityPreflightModal, SensitiveItemSummary } from './components/SecurityPreflightModal';
+import { UpdateModal } from './components/UpdateModal';
 import { WorkspaceDrawer, WorkspaceDrawerTab, PreviewData } from './components/WorkspaceDrawer';
 import { AppSettings, DEFAULT_SETTINGS, PROVIDER_PRESETS } from './config/providers';
 import { AgentStep } from './components/AgentTrajectory';
@@ -245,7 +246,41 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isEnterpriseHubOpen, setIsEnterpriseHubOpen] = useState(false);
   const [isSecurityComplianceOpen, setIsSecurityComplianceOpen] = useState(false);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updateVersion, setUpdateVersion] = useState<string>('');
   const [runStartTime, setRunStartTime] = useState<number>(0);
+
+  // v1.9.0: 自动更新状态检测与实时事件监听
+  useEffect(() => {
+    if (window.electronAPI?.getUpdateStatus) {
+      window.electronAPI.getUpdateStatus().then(res => {
+        if (res && res.updateInfo?.hasUpdate) {
+          setUpdateAvailable(true);
+          setUpdateVersion(res.updateInfo.latestVersion);
+        }
+      }).catch(() => {});
+    }
+
+    if (window.electronAPI?.onUpdateEvent) {
+      const unsubscribe = window.electronAPI.onUpdateEvent((payload: any) => {
+        if (payload.type === 'status') {
+          if (payload.status === 'available') {
+            setUpdateAvailable(true);
+            if (payload.updateInfo?.latestVersion) {
+              setUpdateVersion(payload.updateInfo.latestVersion);
+            }
+            if (payload.updateInfo?.isMandatory) {
+              setIsUpdateModalOpen(true);
+            }
+          } else if (payload.status === 'up-to-date') {
+            setUpdateAvailable(false);
+          }
+        }
+      });
+      return unsubscribe;
+    }
+  }, []);
 
   // v1.8.3: 出境安全前置交互预检与会话豁免偏好
   const [preflightData, setPreflightData] = useState<{
@@ -976,6 +1011,9 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         onOpenRules={handleOpenRules}
         onOpenEnterpriseHub={() => setIsEnterpriseHubOpen(true)}
         onOpenSecurityCompliance={() => setIsSecurityComplianceOpen(true)}
+        updateAvailable={updateAvailable}
+        onOpenUpdate={() => setIsUpdateModalOpen(true)}
+        updateVersion={updateVersion}
       />
 
       {/* 2. Main Workspace Layout (Sidebar + Center Chat + Right Split-Pane Workbench) */}
@@ -1099,6 +1137,13 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           onCancel={handleCancelPreflight}
         />
       )}
+
+      {/* 3.5 Auto-Updater Modal (v1.9.0) */}
+      <UpdateModal
+        isOpen={isUpdateModalOpen}
+        onClose={() => setIsUpdateModalOpen(false)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
     </div>
   );
 };

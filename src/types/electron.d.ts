@@ -128,6 +128,25 @@ export interface ElectronAPI {
     blockReason?: string;
   }>;
   recordSecurityFenceBypass?: (sensitiveItems: any[]) => Promise<void>;
+
+  // Auto-Updater (v1.9.0)
+  getUpdateStatus?: () => Promise<{
+    status: 'idle' | 'checking' | 'available' | 'up-to-date' | 'downloading' | 'downloaded' | 'installing' | 'error';
+    updateInfo: any | null;
+    error: string | null;
+    downloadedFilePath: string | null;
+  }>;
+  getUpdateConfig?: () => Promise<{
+    serverUrl: string;
+    autoCheck: boolean;
+    channel: string;
+    lastCheckedAt?: number;
+  }>;
+  saveUpdateConfig?: (newConfig: any) => Promise<any>;
+  checkForUpdates?: (customServerUrl?: string) => Promise<any>;
+  startDownloadUpdate?: () => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  installAndRestartUpdate?: (silent?: boolean) => Promise<{ success: boolean; error?: string }>;
+  onUpdateEvent?: (callback: (data: any) => void) => () => void;
 }
 
 declare global {

@@ -31,6 +31,9 @@ interface TitleBarProps {
   onOpenRules?: () => void;
   onOpenEnterpriseHub?: () => void;
   onOpenSecurityCompliance?: () => void;
+  updateAvailable?: boolean;
+  onOpenUpdate?: () => void;
+  updateVersion?: string;
 }
 
 export const TitleBar: React.FC<TitleBarProps> = ({
@@ -45,7 +48,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({
   projectRules,
   onOpenRules,
   onOpenEnterpriseHub,
-  onOpenSecurityCompliance
+  onOpenSecurityCompliance,
+  updateAvailable = false,
+  onOpenUpdate,
+  updateVersion
 }) => {
   const [isMaximized, setIsMaximized] = useState(false);
 
@@ -204,6 +210,19 @@ export const TitleBar: React.FC<TitleBarProps> = ({
           >
             <Shield className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
             <span className="hidden md:inline font-medium">安全围栏</span>
+          </button>
+        )}
+
+        {/* Update Available Badge */}
+        {updateAvailable && (
+          <button
+            type="button"
+            onClick={onOpenUpdate}
+            title={`检测到 ASTeam Agent 新版本 ${updateVersion || ''}，点击立即更新`}
+            className="flex h-7 items-center space-x-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-all cursor-pointer animate-pulse shadow-xs"
+          >
+            <Sparkles className="h-3 w-3 text-amber-500" />
+            <span>新版本 {updateVersion ? `v${updateVersion}` : '可用'}</span>
           </button>
         )}
 
