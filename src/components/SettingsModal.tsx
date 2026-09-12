@@ -80,7 +80,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   workspacePath = null
 }) => {
   const [activeTab, setActiveTab] = useState<'provider' | 'storage' | 'memory' | 'mcp_skills' | 'desktop' | 'update'>('provider');
-  const [updateServerUrl, setUpdateServerUrl] = useState<string>('https://agent.ashawk.online');
+  const [updateServerUrl, setUpdateServerUrl] = useState<string>('https://apphub.ashawk.online');
   const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean>(true);
   const [updateChannel, setUpdateChannel] = useState<string>('stable');
   const [checkingUpdate, setCheckingUpdate] = useState<boolean>(false);
@@ -327,7 +327,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       if (window.electronAPI?.getUpdateConfig) {
         window.electronAPI.getUpdateConfig().then(cfg => {
           if (cfg) {
-            setUpdateServerUrl(cfg.serverUrl || 'https://agent.ashawk.online');
+            setUpdateServerUrl(cfg.serverUrl || 'https://apphub.ashawk.online');
             setAutoCheckUpdate(cfg.autoCheck !== false);
             setUpdateChannel(cfg.channel || 'stable');
           }
@@ -2058,7 +2058,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="text"
                     value={updateServerUrl}
                     onChange={(e) => setUpdateServerUrl(e.target.value)}
-                    placeholder="例如: https://agent.ashawk.online 或 http://127.0.0.1:3888"
+                    placeholder="例如: https://apphub.ashawk.online 或 http://127.0.0.1:3888"
                     className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-xs font-mono text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none"
                   />
                 </div>

@@ -101,7 +101,7 @@ export class AutoUpdaterManager {
 
   private loadConfig(): UpdaterConfig {
     const defaultConfig: UpdaterConfig = {
-      serverUrl: 'http://localhost:3888',
+      serverUrl: 'https://apphub.ashawk.online',
       autoCheck: true,
       channel: 'stable'
     };
