@@ -2038,10 +2038,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="text-right">
                     <span className="rounded-full bg-[var(--primary)]/15 px-2.5 py-1 text-xs font-mono font-semibold text-[var(--primary)]">
-                      v1.8.3 (基线)
+                      v1.9.1 (当前版本)
                     </span>
                     <p className="text-[10px] text-[var(--muted-foreground)] mt-1">
-                      目标通道: v1.9.0
+                      通道: 企业私有云端中枢 (Stable)
                     </p>
                   </div>
                 </div>
