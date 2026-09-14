@@ -386,7 +386,34 @@ export class AutoUpdaterManager {
         // 5. Self-deletes upon completion without leaving temporary artifacts
         const tempDir = path.dirname(installerPath);
         const launcherScriptPath = path.join(tempDir, `asteam-update-launch-${Date.now()}.cmd`);
-        const scriptContent = `@echo off\r\ntimeout /t 2 /nobreak >nul\r\nstart /wait "" "${installerPath}" /S\r\ntimeout /t 1 /nobreak >nul\r\nexplorer.exe "${currentExePath}"\r\n(goto) 2>nul & del "%~f0"\r\n`;
+        const exeName = path.basename(currentExePath);
+        const scriptLines = [
+          '@echo off',
+          'setlocal enabledelayedexpansion',
+          'rem 1. Wait up to 8s for ASTeam Agent to gracefully exit and release file locks',
+          'for /l %%i in (1,1,8) do (',
+          `    tasklist /fi "imagename eq ${exeName}" 2>nul | find /i "${exeName}" >nul`,
+          '    if errorlevel 1 goto :procexit',
+          '    timeout /t 1 /nobreak >nul',
+          ')',
+          `taskkill /f /im "${exeName}" 2>nul`,
+          'timeout /t 1 /nobreak >nul',
+          ':procexit',
+          'timeout /t 2 /nobreak >nul',
+          'rem 2. Run silent installer with retry',
+          'for /l %%r in (1,1,3) do (',
+          `    start /wait "" "${installerPath}" /S`,
+          '    if !errorlevel! equ 0 goto :installsucceeded',
+          '    timeout /t 2 /nobreak >nul',
+          ')',
+          ':installsucceeded',
+          'timeout /t 2 /nobreak >nul',
+          'rem 3. Relaunch via Windows Explorer shell into active desktop with focus',
+          `explorer.exe "${currentExePath}"`,
+          'rem 4. Self-delete script',
+          '(goto) 2>nul & del "%~f0"'
+        ];
+        const scriptContent = scriptLines.join('\r\n') + '\r\n';
 
         fs.writeFileSync(launcherScriptPath, scriptContent, 'utf-8');
 
@@ -413,11 +440,11 @@ export class AutoUpdaterManager {
 
       setTimeout(() => {
         if (app) {
-          app.quit();
+          app.exit(0);
         } else {
           process.exit(0);
         }
-      }, 500);
+      }, 300);
 
       return { success: true };
     } catch (err: any) {

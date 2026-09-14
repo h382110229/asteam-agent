@@ -235,7 +235,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 当前客户端已是最新版本
               </h3>
               <p className="text-xs text-[var(--muted-foreground)] max-w-xs">
-                当前版本为 v{updateInfo?.currentVersion || '1.9.5'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
+                当前版本为 v{updateInfo?.currentVersion || '1.9.6'}，已包含最新的 Office 本地生成套件、沙箱隔离与安全围栏。
               </p>
               <button
                 type="button"
