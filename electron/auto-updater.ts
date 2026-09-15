@@ -256,106 +256,177 @@ export class AutoUpdaterManager {
     try {
       const existingFiles = fs.readdirSync(tempDir);
       for (const file of existingFiles) {
-        if (file !== targetFileName) {
+        if (file !== targetFileName && file !== `${targetFileName}.part`) {
           try { fs.unlinkSync(path.join(tempDir, file)); } catch {}
         }
       }
     } catch {}
 
-    // Clean old partial files
-    if (fs.existsSync(partFilePath)) {
-      try { fs.unlinkSync(partFilePath); } catch {}
-    }
+    const maxRetries = 3;
+    let attempt = 0;
 
-    return new Promise((resolve) => {
-      const fileStream = fs.createWriteStream(partFilePath);
-      const hashStream = crypto.createHash('sha256');
+    const performDownload = async (currentUrl: string, redirectCount = 0): Promise<{ success: boolean; filePath?: string; error?: string }> => {
+      if (redirectCount > 5) {
+        return { success: false, error: '下载跳转次数过多 (超过 5 次重定向)' };
+      }
 
-      let transferredBytes = 0;
-      let totalBytes = asset.fileSize || 0;
-      let lastTime = Date.now();
-      let lastBytes = 0;
-
-      const urlObj = new URL(downloadUrl);
-      const isHttps = urlObj.protocol === 'https:';
-      const client = isHttps ? https : http;
-
-      const req = client.get(downloadUrl, (res) => {
-        if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
-          fileStream.close();
-          try { fs.unlinkSync(partFilePath); } catch {}
-          this.notifyStatus('error', `下载失败: HTTP ${res.statusCode}`);
-          return resolve({ success: false, error: `下载失败: HTTP ${res.statusCode}` });
-        }
-
-        const serverHeaderSha256 = res.headers['x-checksum-sha256'] as string;
-        const contentLength = res.headers['content-length'];
-        if (contentLength) {
-          totalBytes = parseInt(contentLength, 10);
-        }
-
-        res.on('data', (chunk: Buffer) => {
-          transferredBytes += chunk.length;
-          fileStream.write(chunk);
-          hashStream.update(chunk);
-
-          const now = Date.now();
-          const elapsed = (now - lastTime) / 1000;
-          if (elapsed >= 0.3 || transferredBytes === totalBytes) {
-            const bytesPerSecond = elapsed > 0 ? (transferredBytes - lastBytes) / elapsed : 0;
-            const percent = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : 0;
-            lastTime = now;
-            lastBytes = transferredBytes;
-
-            this.notifyProgress({
-              percent,
-              transferredBytes,
-              totalBytes,
-              bytesPerSecond: Math.round(bytesPerSecond)
-            });
+      return new Promise((resolve) => {
+        let existingBytes = 0;
+        if (fs.existsSync(partFilePath)) {
+          try {
+            existingBytes = fs.statSync(partFilePath).size;
+          } catch {
+            existingBytes = 0;
           }
-        });
+        }
 
-        res.on('end', () => {
-          fileStream.end(async () => {
-            const computedSha256 = hashStream.digest('hex');
-            const targetSha256 = asset.sha256 || serverHeaderSha256;
+        const urlObj = new URL(currentUrl);
+        const isHttps = urlObj.protocol === 'https:';
+        const client = isHttps ? https : http;
 
-            // SHA-256 Anti-Tamper Verification
-            if (targetSha256 && computedSha256.toLowerCase() !== targetSha256.toLowerCase()) {
-              try { fs.unlinkSync(partFilePath); } catch {}
-              const msg = `安装包 SHA-256 完整性校验失败 (预期: ${targetSha256.slice(0, 8)}..., 实际: ${computedSha256.slice(0, 8)}...)，已丢弃被篡改或损坏的文件`;
-              this.notifyStatus('error', msg);
-              return resolve({ success: false, error: msg });
+        const headers: Record<string, string> = {
+          'User-Agent': 'ASTeam-Agent-AutoUpdater'
+        };
+
+        // If partial file exists and total expected size is larger, request Range
+        if (existingBytes > 0 && asset.fileSize && existingBytes < asset.fileSize) {
+          headers['Range'] = `bytes=${existingBytes}-`;
+        } else if (existingBytes > 0 && asset.fileSize && existingBytes >= asset.fileSize) {
+          try { fs.unlinkSync(partFilePath); } catch {}
+          existingBytes = 0;
+        }
+
+        const req = client.get(currentUrl, { headers, timeout: 25000 }, (res) => {
+          // Handle 301, 302, 303, 307, 308 redirects (e.g. Origin -> Cloudflare R2 CDN)
+          if (res.statusCode && [301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+            res.resume();
+            const redirectUrl = new URL(res.headers.location, currentUrl).toString();
+            return resolve(performDownload(redirectUrl, redirectCount + 1));
+          }
+
+          if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+            return resolve({ success: false, error: `下载失败: HTTP ${res.statusCode}` });
+          }
+
+          const isPartial = res.statusCode === 206;
+          const serverHeaderSha256 = res.headers['x-checksum-sha256'] as string;
+          let totalBytes = asset.fileSize || 0;
+          const contentLength = res.headers['content-length'];
+
+          if (isPartial) {
+            const contentRange = res.headers['content-range'];
+            if (contentRange) {
+              const match = contentRange.match(/\/(\d+)$/);
+              if (match) totalBytes = parseInt(match[1], 10);
+            } else if (contentLength) {
+              totalBytes = existingBytes + parseInt(contentLength, 10);
             }
-
-            // Move .part to target
-            if (fs.existsSync(targetFilePath)) {
-              try { fs.unlinkSync(targetFilePath); } catch {}
+          } else {
+            existingBytes = 0;
+            if (contentLength) {
+              totalBytes = parseInt(contentLength, 10);
             }
-            fs.renameSync(partFilePath, targetFilePath);
+          }
 
-            this.downloadedFilePath = targetFilePath;
-            this.notifyStatus('downloaded');
-            resolve({ success: true, filePath: targetFilePath });
+          let transferredBytes = existingBytes;
+          const fileStream = fs.createWriteStream(partFilePath, { flags: isPartial ? 'a' : 'w' });
+          let lastTime = Date.now();
+          let lastBytes = transferredBytes;
+
+          res.on('data', (chunk: Buffer) => {
+            transferredBytes += chunk.length;
+            fileStream.write(chunk);
+
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            if (elapsed >= 0.3 || transferredBytes === totalBytes) {
+              const bytesPerSecond = elapsed > 0 ? (transferredBytes - lastBytes) / elapsed : 0;
+              const percent = totalBytes > 0 ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100)) : 0;
+              lastTime = now;
+              lastBytes = transferredBytes;
+
+              this.notifyProgress({
+                percent,
+                transferredBytes,
+                totalBytes,
+                bytesPerSecond: Math.round(bytesPerSecond)
+              });
+            }
+          });
+
+          res.on('end', () => {
+            fileStream.end(() => {
+              // SHA-256 Anti-Tamper Verification over complete file
+              const hashStream = crypto.createHash('sha256');
+              const readStream = fs.createReadStream(partFilePath);
+              readStream.on('data', c => hashStream.update(c));
+              readStream.on('end', () => {
+                const computedSha256 = hashStream.digest('hex');
+                const targetSha256 = asset.sha256 || serverHeaderSha256;
+
+                if (targetSha256 && computedSha256.toLowerCase() !== targetSha256.toLowerCase()) {
+                  try { fs.unlinkSync(partFilePath); } catch {}
+                  const msg = `安装包 SHA-256 完整性校验失败 (预期: ${targetSha256.slice(0, 8)}..., 实际: ${computedSha256.slice(0, 8)}...)，已丢弃被篡改或损坏的文件`;
+                  return resolve({ success: false, error: msg });
+                }
+
+                // Move .part to target
+                if (fs.existsSync(targetFilePath)) {
+                  try { fs.unlinkSync(targetFilePath); } catch {}
+                }
+                fs.renameSync(partFilePath, targetFilePath);
+
+                this.downloadedFilePath = targetFilePath;
+                this.notifyStatus('downloaded');
+                resolve({ success: true, filePath: targetFilePath });
+              });
+
+              readStream.on('error', (err) => {
+                resolve({ success: false, error: `校验文件异常: ${err.message}` });
+              });
+            });
+          });
+
+          res.on('error', (err) => {
+            fileStream.close();
+            resolve({ success: false, error: `下载过程异常: ${err.message}` });
           });
         });
 
-        res.on('error', (err) => {
-          fileStream.close();
-          try { fs.unlinkSync(partFilePath); } catch {}
-          this.notifyStatus('error', `下载过程异常: ${err.message}`);
-          resolve({ success: false, error: err.message });
+        req.on('timeout', () => {
+          req.destroy();
+          resolve({ success: false, error: '连接下载服务器超时' });
+        });
+
+        req.on('error', (err) => {
+          resolve({ success: false, error: `连接下载服务器失败: ${err.message}` });
         });
       });
+    };
 
-      req.on('error', (err) => {
-        fileStream.close();
-        try { fs.unlinkSync(partFilePath); } catch {}
-        this.notifyStatus('error', `连接下载服务器失败: ${err.message}`);
-        resolve({ success: false, error: err.message });
-      });
-    });
+    while (attempt < maxRetries) {
+      attempt++;
+      const result = await performDownload(downloadUrl);
+      if (result.success) {
+        return result;
+      }
+
+      // If SHA-256 mismatch or terminal error, do not retry blindly
+      if (result.error && result.error.includes('SHA-256 完整性校验失败')) {
+        this.notifyStatus('error', result.error);
+        return result;
+      }
+
+      if (attempt < maxRetries) {
+        console.warn(`[AutoUpdater] Download attempt ${attempt} failed: ${result.error}. Retrying in 1s...`);
+        await new Promise(r => setTimeout(r, 1000));
+      } else {
+        this.notifyStatus('error', result.error || '下载失败');
+        return result;
+      }
+    }
+
+    return { success: false, error: '下载失败' };
   }
 
   /**

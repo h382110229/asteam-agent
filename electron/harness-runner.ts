@@ -8,7 +8,8 @@ import { net } from 'electron';
 import { mcpManager } from './mcp-manager';
 import { skillManager } from './skill-manager';
 import { createWordDocx, createPowerPointPptx, createExcelXlsx, readExcelXlsx } from './office-generator';
-import { createPdfDocument, readPdfDocument } from './pdf-generator';
+import { createPdfDocument, readPdfDocument, exportHtmlToPdf } from './pdf-generator';
+import { fastScanner } from './fast-scanner';
 import { compressZip, extractZip } from './zip-manager';
 import { safeWriteFileSync } from './file-resilience';
 import { artifactVerifier } from './artifact-verifier';
@@ -1184,6 +1185,61 @@ ${transcribedText}`;
     return items.join('\n') || '(empty directory)';
   }
 
+  async systemFastScan(options: {
+    roots?: string[];
+    maxDepth?: number;
+    outputPath?: string;
+    format?: 'markdown' | 'csv' | 'json';
+  }): Promise<string> {
+    const projects = await fastScanner.scanProjects({
+      roots: options.roots,
+      maxDepth: options.maxDepth !== undefined ? options.maxDepth : 4
+    });
+
+    const format = options.format || 'markdown';
+    let outputContent = '';
+    if (format === 'csv') {
+      outputContent = fastScanner.toCsv(projects);
+    } else if (format === 'json') {
+      outputContent = JSON.stringify(projects, null, 2);
+    } else {
+      outputContent = fastScanner.toMarkdownTable(projects);
+    }
+
+    if (options.outputPath) {
+      const resolved = this.resolveSafe(options.outputPath);
+      try { this.onBeforeWrite?.(resolved); } catch {}
+      fs.writeFileSync(resolved, outputContent, 'utf-8');
+      return `[极速项目扫描完成并已导出]
+- 扫描发现项目数: ${projects.length} 个
+- 输出文件: "${resolved}" (格式: ${format})
+
+${projects.slice(0, 15).map(p => `- [${p.drive}] ${p.name} (${p.projectType}, ${p.sizeMB}MB)`).join('\n')}${projects.length > 15 ? `\n... 还有 ${projects.length - 15} 个项目已保存至 ${resolved}` : ''}`;
+    }
+
+    return `[极速项目扫描完成] 扫描发现 ${projects.length} 个开发工程：\n\n${outputContent}`;
+  }
+
+  async exportHtmlToPdf(options: {
+    htmlFilePath?: string;
+    htmlContent?: string;
+    outputPdfPath?: string;
+    title?: string;
+  }): Promise<string> {
+    let outPath = options.outputPdfPath;
+    if (!outPath) {
+      outPath = path.join(getSystemDesktopDir(), `${options.title || '企业级报告'}.pdf`);
+    }
+    const resolved = this.resolveSafe(outPath);
+    try { this.onBeforeWrite?.(resolved); } catch {}
+    return await exportHtmlToPdf({
+      htmlFilePath: options.htmlFilePath ? this.resolveSafe(options.htmlFilePath) : undefined,
+      htmlContent: options.htmlContent,
+      outputPdfPath: resolved,
+      title: options.title
+    });
+  }
+
   runTerminalCommand(
     command: string,
     sessionId: string,
@@ -1220,6 +1276,9 @@ ${transcribedText}`;
             });
           }
         }
+
+        // 自动纠正 PowerShell 字符串中易引发解析异常的驱动器变量冲突（如 "$drive: " 纠正为 "${drive}: "）
+        sanitizedCommand = sanitizedCommand.replace(/\$([a-zA-Z_][a-zA-Z0-9_]*):(?!\w)/g, '${$1}:');
 
         // 使用临时 .ps1 脚本沙箱执行，彻底消除控制台长指令截断、引号转义失真及 UTF-8 编码乱码
         try {
@@ -2488,6 +2547,24 @@ ${rulesPrompt}
 {"id": "office_word_report"}
 \`\`\`
 
+22. export_html_to_pdf: 将现代富文本 HTML 报告原生无头打印为企业级高保真 PDF 文档（全量内置纯客户端无头打印通道，零外部 wkhtmltopdf 或 Node/Python 命令行依赖，完整高保真呈现 CSS3、Tailwind、Flex/Grid 卡片与 SVG 矢量图表，自适应 A4 页面）。调用格式：
+\`\`\`tool:export_html_to_pdf
+{"htmlFilePath": "~/Desktop/分析报告.html", "outputPdfPath": "~/Desktop/分析报告.pdf", "title": "项目迁移评估报告"}
+\`\`\`
+或直接传入 HTML 字符串：
+\`\`\`tool:export_html_to_pdf
+{"htmlContent": "<!DOCTYPE html><html><body><h1>现代风格分析报告</h1></body></html>", "outputPdfPath": "~/Desktop/分析报告.pdf"}
+\`\`\`
+
+23. system_fast_scan: 系统级零依赖极速并发项目特征扫描器（针对 Windows/macOS 多盘符开发工程检索，全量内置非阻塞并发遍历，内置黑名单自动跳过系统目录与 node_modules，3~5 秒内毫秒级检索 C/D/E 盘，识别 package.json/requirements.txt/pom.xml/Cargo.toml 等特征并输出结构化表格或导出 CSV）。调用格式：
+\`\`\`tool:system_fast_scan
+{"roots": ["C:\\", "D:\\", "E:\\"], "maxDepth": 4, "format": "markdown"}
+\`\`\`
+或导出为 CSV/JSON 文件：
+\`\`\`tool:system_fast_scan
+{"roots": ["C:\\", "D:\\", "E:\\"], "maxDepth": 4, "outputPath": "~/Desktop/project_scan_results.csv", "format": "csv"}
+\`\`\`
+
 ${memoryContextPrompt}
 ${mcpPrompts ? `【已启用的 MCP 扩展工具】\n${mcpPrompts}\n` : ''}
 ${microSkillIndex ? `${microSkillIndex}\n\n` : ''}${activatedSkillPrompts ? `【已精准按需激活的专属 Skill 规约 (Active Skills)】\n${activatedSkillPrompts}\n` : ''}
@@ -2502,7 +2579,7 @@ ${modeInstruction}
 
 【执行规范与即时工具调用纪律】
 - 如果用户只是普通的咨询、闲聊或理论探讨，直接给出详尽解答即可，无需强行调用工具。
-- 【工具调用即时性（极度重要）】：如果你需要执行系统操作、运行命令、读写文件或生成文档，在给出分步规划思考（Plan）后，**必须在同一个回复中紧接着立即输出第一个工具调用块**（例如 \`\`\`tool:run_terminal_command ... \`\`\`）！**绝对严禁**只列出计划或说“开始执行：”却不输出工具调用块就停止回复！如果你不输出工具调用块，执行引擎将判定任务提前终止。
+- 【工具调用即时性（极度重要）】：如果你需要执行系统操作、运行命令、读写文件或生成文档，在给出分步规划思考（Plan）后，**必须在同一个回复中紧接着立即输出第一个工具调用块**（例如 \`\`\`tool:run_terminal_command ... \`\`\` 或 \`\`\`tool:system_fast_scan ... \`\`\`）！**绝对严禁**只列出计划或说“开始执行：”却不输出工具调用块就停止回复！如果你不输出工具调用块，执行引擎将判定任务提前终止。
 - 【严禁虚构修改事实】：如果用户要求修改文件，你必须通过实际调用 write_file 工具完成！如果之前尝试读取（如 view_file）发生异常（例如 File not found），【绝对严禁】在总结答复中谎称“已成功添加/修改了文件”！若文件不存在或未实际写入，必须如实向用户反馈文件未找到或未写入。
 - 完成任务后，请给出客观详细的总结并说明真实生成的文件路径或命令输出。`;
 
@@ -2512,7 +2589,7 @@ ${modeInstruction}
     ];
 
     let currentStepIndex = 0;
-    const maxIterations = 8;
+    const maxIterations = 16;
     let iteration = 0;
     let finalSummary = '';
 
@@ -2560,12 +2637,13 @@ ${modeInstruction}
       // Match tool calls (supports ```tool:xxx```, <tool_call> JSON, and <function=xxx> XML)
       const toolCall = extractToolCall(stepResponse);
       if (!toolCall) {
-        // v1.8.0 核心：触发交付制品底层物理探针硬门禁 (Artifact Verification Gate)
+        // v1.10.0 核心：触发交付制品底层物理探针与强意图契约硬门禁 (Artifact & Contract Verification Gate)
         const gateReport = artifactVerifier.inspectDeliveryGate(
           stepResponse,
           sessionStartTime,
           trackedArtifacts,
-          config.workspacePath
+          config.workspacePath,
+          userText
         );
 
         if (!gateReport.passed) {
@@ -2894,6 +2972,33 @@ ${modeInstruction}
           observation = await tools.generateEmbedding({
             input,
             model: toolArgs.model
+          });
+        } else if (toolName === 'export_html_to_pdf') {
+          let targetPath = toolArgs.outputPdfPath || toolArgs.filePath || toolArgs.path;
+          if (!targetPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            targetPath = secondary.outputPdfPath || secondary.filePath || secondary.path;
+          }
+          if (!targetPath) {
+            targetPath = path.join(getSystemDesktopDir(), `${toolArgs.title || '企业级调研分析报告'}.pdf`);
+          }
+          trackedArtifacts.push(targetPath);
+          observation = await tools.exportHtmlToPdf({
+            ...toolArgs,
+            outputPdfPath: targetPath
+          });
+        } else if (toolName === 'system_fast_scan') {
+          let outPath = toolArgs.outputPath || toolArgs.filePath;
+          if (!outPath && toolArgs.raw) {
+            const secondary = parseToolArgs(toolArgs.raw);
+            outPath = secondary.outputPath || secondary.filePath;
+          }
+          if (outPath) {
+            trackedArtifacts.push(outPath);
+          }
+          observation = await tools.systemFastScan({
+            ...toolArgs,
+            outputPath: outPath
           });
         } else if (toolName === 'generate_pdf') {
           let targetPath = toolArgs.filePath || toolArgs.path || toolArgs.file;

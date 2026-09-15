@@ -1234,10 +1234,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.9.6)
+                ASTeam Agent (v1.10.0)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>🧩 内置统一 Skill & MCP 深度融合演化</strong>、<strong>⚡ 实时极客运行时 (Terminal & Safe Sandbox)</strong> 与 <strong>📑 原生 Office 排版套件</strong>。
+                内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 零依赖全盘极速扫描</strong>、<strong>📄 原生无头 HTML-to-PDF 打印引擎</strong>、<strong>🛡️ 交付物强契约硬门禁</strong> 与 <strong>📑 开箱即用全能 Office 套件</strong>。
               </p>
             </div>
 

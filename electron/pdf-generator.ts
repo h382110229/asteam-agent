@@ -292,3 +292,116 @@ export async function readPdfDocument(filePath: string): Promise<ReadPdfResult> 
     markdownContent: markdownParts.join('\n')
   };
 }
+
+export interface HtmlToPdfOptions {
+  htmlFilePath?: string;
+  htmlContent?: string;
+  outputPdfPath: string;
+  title?: string;
+  landscape?: boolean;
+}
+
+/**
+ * 现代富文本 HTML 转 PDF 原生打印引擎
+ * 优先调用 Electron 内置 Chromium 无头打印通道 (webContents.printToPDF)，零外部环境依赖
+ * 在无 GUI/Node 单测环境下自动平滑降级至纯 JS 物理渲染引擎
+ */
+export async function exportHtmlToPdf(options: HtmlToPdfOptions): Promise<string> {
+  let html = options.htmlContent || '';
+  if (!html && options.htmlFilePath) {
+    if (!fs.existsSync(options.htmlFilePath)) {
+      throw new Error(`HTML 源文件不存在: ${options.htmlFilePath}`);
+    }
+    html = fs.readFileSync(options.htmlFilePath, 'utf-8');
+  }
+
+  if (!html || !html.trim()) {
+    throw new Error('exportHtmlToPdf 参数错误: 未提供有效的 HTML 内容或文件路径');
+  }
+
+  const outputPdfPath = options.outputPdfPath;
+  const targetDir = path.dirname(outputPdfPath);
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  // 1. 尝试使用 Electron 主进程内置 Chromium 无头打印通道
+  try {
+    const electron = await import('electron');
+    const { BrowserWindow } = (electron as any).default || electron;
+
+    if (BrowserWindow && typeof BrowserWindow === 'function') {
+      const win = new BrowserWindow({
+        show: false,
+        width: 1200,
+        height: 1600,
+        webPreferences: {
+          offscreen: true,
+          nodeIntegration: false,
+          contextIsolation: true
+        }
+      });
+
+      try {
+        let loadUrl = '';
+        if (options.htmlFilePath && fs.existsSync(options.htmlFilePath)) {
+          loadUrl = `file://${path.resolve(options.htmlFilePath).replace(/\\/g, '/')}`;
+        } else {
+          loadUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+        }
+
+        await win.loadURL(loadUrl);
+        // 等待页面样式渲染稳定
+        await new Promise(r => setTimeout(r, 600));
+
+        const pdfBuffer = await win.webContents.printToPDF({
+          printBackground: true,
+          pageSize: 'A4',
+          landscape: !!options.landscape,
+          margins: {
+            marginType: 'default'
+          }
+        });
+
+        win.destroy();
+        const writeRes = safeWriteFileSync(outputPdfPath, Buffer.from(pdfBuffer));
+        return `[HTML-to-PDF 原生无头打印成功] 已成功将现代风格 HTML 渲染为企业级 PDF: "${writeRes.actualPath}" (${pdfBuffer.length} 字节)${writeRes.isFallback ? ` [写入新版本: ${writeRes.actualPath}]` : ''}`;
+      } catch (printErr: any) {
+        try { win.destroy(); } catch {}
+        console.warn('[PDFGenerator] Chromium printToPDF encountered error, falling back to pure JS renderer:', printErr?.message || printErr);
+      }
+    }
+  } catch (modErr) {
+    // 非完整 Electron 运行环境，进入纯 JS 降级渲染管道
+  }
+
+  // 2. 纯 JS 降级物理渲染管道 (基于 pdf-lib 将 HTML 提取排版)
+  // 清洗 HTML 标签转换为排版 Markdown 文本
+  let title = options.title || '企业级调研分析报告';
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/i) || html.match(/<h1[^>]*>([^<]+)<\/h1>/i);
+  if (titleMatch) {
+    title = titleMatch[1].trim();
+  }
+
+  let textContent = html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '\n# $1\n')
+    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '\n## $1\n')
+    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '\n### $1\n')
+    .replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1\n')
+    .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+  return await createPdfDocument({
+    filePath: outputPdfPath,
+    title,
+    subtitle: '基于 ASTeam Agent 内置现代无头打印引擎导出',
+    markdownContent: textContent
+  });
+}

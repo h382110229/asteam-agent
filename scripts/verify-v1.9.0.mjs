@@ -1069,6 +1069,7 @@ const proc = spawn(command, args, { windowsHide: true });
 
     // Mock HTTP server implementing ASTeam Server v1 protocol
     let tamperSha256 = false;
+    let use302Redirect = false;
     mockServerInstance = http.createServer((req, res) => {
       const reqUrl = new URL(req.url, `http://127.0.0.1:${MOCK_SERVER_PORT}`);
       const pathname = reqUrl.pathname;
@@ -1076,6 +1077,9 @@ const proc = spawn(command, args, { windowsHide: true });
       if (pathname === '/api/v1/update/check') {
         const clientVer = reqUrl.searchParams.get('current_version');
         const hashToReturn = tamperSha256 ? '0000000000000000000000000000000000000000000000000000000000000000' : realSha256;
+        const dlUrl = use302Redirect 
+          ? `/api/v1/update/download-redirect/${testInstallerName}`
+          : `/api/v1/update/download/${testInstallerName}`;
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
           code: 200,
@@ -1091,7 +1095,7 @@ const proc = spawn(command, args, { windowsHide: true });
             assets: {
               installer: {
                 fileName: testInstallerName,
-                downloadUrl: `/api/v1/update/download/${testInstallerName}`,
+                downloadUrl: dlUrl,
                 fileSize: Buffer.byteLength(testBinaryContent),
                 sha256: hashToReturn
               }
@@ -1101,7 +1105,17 @@ const proc = spawn(command, args, { windowsHide: true });
         return;
       }
 
-      if (pathname === `/api/v1/update/download/${testInstallerName}`) {
+      // 302 Redirection simulation (Origin -> Cloudflare R2 CDN)
+      if (pathname === `/api/v1/update/download-redirect/${testInstallerName}`) {
+        res.writeHead(302, {
+          'Location': `http://127.0.0.1:${MOCK_SERVER_PORT}/cdn-storage/${testInstallerName}`,
+          'X-Distribution-Channel': 'Cloudflare-R2-CDN'
+        });
+        res.end();
+        return;
+      }
+
+      if (pathname === `/cdn-storage/${testInstallerName}` || pathname === `/api/v1/update/download/${testInstallerName}`) {
         res.writeHead(200, {
           'Content-Type': 'application/octet-stream',
           'Content-Length': Buffer.byteLength(testBinaryContent),
@@ -1146,6 +1160,17 @@ const proc = spawn(command, args, { windowsHide: true });
     assert(typeof updater.installAndRestart === 'function', 'installAndRestart method exists');
     const invalidInstallRes = updater.installAndRestart();
     assert(invalidInstallRes.success === false, 'installAndRestart blocks installation when state is not downloaded');
+
+    // 13.9 Cloudflare R2 CDN 302 Redirection & Resilient Download
+    tamperSha256 = false;
+    use302Redirect = true;
+    const r2UpdateResult = await updater.checkForUpdates(`http://127.0.0.1:${MOCK_SERVER_PORT}`);
+    assert(r2UpdateResult !== null, 'R2 redirect update manifest returned non-null');
+    assert(r2UpdateResult.assets.installer.downloadUrl.includes('download-redirect'), 'Download URL routes through redirect simulation');
+    const r2DownloadRes = await updater.startDownload();
+    assert(r2DownloadRes.success === true, 'startDownload followed 302 redirect to CDN and succeeded');
+    assert(fs.existsSync(r2DownloadRes.filePath), 'CDN downloaded file physically exists on disk');
+    assert(updater.getStatus().status === 'downloaded', 'Updater state transitioned to downloaded via CDN redirect');
 
     unsubscribe();
   } catch (err) {

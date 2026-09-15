@@ -177,20 +177,60 @@ export class ArtifactVerifier {
   }
 
   /**
+   * 从用户输入中提取强契约要求的交付物格式扩展名 (如 ['pdf', 'html', 'docx', 'xlsx'])
+   */
+  public extractRequiredDeliverablesFromPrompt(userPrompt?: string): string[] {
+    if (!userPrompt || !userPrompt.trim()) return [];
+    const lower = userPrompt.toLowerCase();
+    const required = new Set<string>();
+
+    // 匹配词：生成/给出/输出/导出/提供/制作 + 格式或报告
+    const wantsAction = /(?:生成|给出|输出|导出|提供|制作|写一份|写一个|输出为|保存为|转换|排版|整理成|交付)/i.test(lower) ||
+      /(?:报告|方案|文档|表格|白皮书|ppt|演示文稿|总结)/i.test(lower);
+
+    if (wantsAction) {
+      if (/\bpdf\b|pdf(?:版本|报告|格式|文件)?/i.test(lower)) {
+        required.add('pdf');
+      }
+      if (/\bhtml\b|html(?:版本|报告|格式|网页|文件)?/i.test(lower)) {
+        required.add('html');
+      }
+      if (/\bdocx\b|\bword\b|word(?:版本|报告|文档|格式)?/i.test(lower)) {
+        required.add('docx');
+      }
+      if (/\bxlsx\b|\bexcel\b|excel(?:表格|工作簿|清单)?/i.test(lower)) {
+        required.add('xlsx');
+      }
+      if (/\bpptx\b|\bppt\b|ppt(?:演示|幻灯片|文稿)?/i.test(lower)) {
+        required.add('pptx');
+      }
+      if (/\bzip\b|zip(?:压缩包|归档)?/i.test(lower)) {
+        required.add('zip');
+      }
+    }
+
+    return Array.from(required);
+  }
+
+  /**
    * 对大模型最终答复进行交付物探针总门禁审查
    */
   public inspectDeliveryGate(
     responseText: string,
     sessionStartTimeMs: number,
     trackedGeneratedPaths: string[],
-    workspacePath?: string | null
+    workspacePath?: string | null,
+    userPrompt?: string
   ): GateInspectionReport {
     // 合并模型文本中提到的路径和会话执行过程中工具真实调用产生的目标路径
     const claimedPaths = this.extractClaimedArtifactPaths(responseText);
     const allPathsToCheck = Array.from(new Set([...claimedPaths, ...trackedGeneratedPaths]));
 
-    // 若本轮无任何交付物声明且工具无生成，直接放行
-    if (allPathsToCheck.length === 0) {
+    // 提取用户意图强契约要求（如必须包含 PDF / HTML / Word 等）
+    const requiredExts = this.extractRequiredDeliverablesFromPrompt(userPrompt);
+
+    // 若本轮无任何交付物声明且工具无生成，且用户未强要求交付物，直接放行
+    if (allPathsToCheck.length === 0 && requiredExts.length === 0) {
       return {
         passed: true,
         checkedArtifacts: [],
@@ -202,6 +242,7 @@ export class ArtifactVerifier {
     const badges: string[] = [];
     let hasFailedClaim = false;
     let blockingReasons: string[] = [];
+    const verifiedExtensions = new Set<string>();
 
     for (const p of allPathsToCheck) {
       // 忽略临时文件或 node_modules
@@ -214,19 +255,36 @@ export class ArtifactVerifier {
       if (!res.verified) {
         hasFailedClaim = true;
         blockingReasons.push(`- 交付物 "${p}": ${res.failureReason}`);
-      } else if (res.badge) {
-        badges.push(res.badge);
+      } else {
+        if (res.badge) {
+          badges.push(res.badge);
+        }
+        const ext = path.extname(res.filePath).toLowerCase().replace(/^\./, '');
+        if (ext) verifiedExtensions.add(ext);
       }
+    }
+
+    // 检查用户强契约要求的交付物格式是否已全部就绪
+    const missingRequiredExts: string[] = [];
+    for (const reqExt of requiredExts) {
+      if (!verifiedExtensions.has(reqExt)) {
+        missingRequiredExts.push(reqExt.toUpperCase());
+      }
+    }
+
+    if (missingRequiredExts.length > 0) {
+      hasFailedClaim = true;
+      blockingReasons.push(`- 【强交付物契约缺失】任务指令中明确要求交付 [${missingRequiredExts.join(', ')}] 文件，但当前磁盘尚未检测到对应类型且新鲜落盘的物理交付制品！`);
     }
 
     if (hasFailedClaim) {
       const blockingMessage = `【物理探针门禁拦截警告 (Artifact Verification Failed)】
-内核底层物理探针拦截到未经验收合格的交付物声明！
-严禁在纯文本中伪造交付或认领未落盘/历史旧文件！
+内核底层物理探针拦截到未经验收合格的交付物声明或存在未完成的强契约产物！
+严禁在纯文本中伪造交付或遗漏用户明确要求的交付格式！
 未通过探针明细：
 ${blockingReasons.join('\n')}
 
-请立即调用具体的本地原生生成工具（如 generate_docx, generate_excel, write_file）完成真实的物理落盘，然后再向用户汇报！`;
+请立即调用具体的本地原生生成工具（如 export_html_to_pdf, write_file, generate_docx, generate_excel 等）完成真实的物理落盘，然后再向用户汇报！`;
 
       return {
         passed: false,
