@@ -138,6 +138,7 @@ const api: ElectronAPI = {
   installSkillFromContent: (data) => ipcRenderer.invoke('skills:installFromContent', data),
   installSkillFromUrl: (url) => ipcRenderer.invoke('skills:installFromUrl', url),
   deleteSkill: (skillId) => ipcRenderer.invoke('skills:delete', skillId),
+  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array) => ipcRenderer.invoke('office:extractDocument', fileName, uint8Array),
 
   startAgent: (sessionId, config, history) => ipcRenderer.invoke('agent:start', { sessionId, config, history }),
   stopAgent: (sessionId) => ipcRenderer.invoke('agent:stop', sessionId),

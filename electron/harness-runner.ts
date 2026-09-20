@@ -1435,6 +1435,33 @@ function providerSupportsVision(p: SingleProviderTarget): boolean {
   );
 }
 
+/**
+ * 动态计算针对当前服务商环境的最佳兜底多模态模型：
+ * 优选用户指定的 mimo-x-pro-preview -> 次选 mimo-v2.5 -> 再次 gemini-2.5-flash
+ */
+function resolveFallbackModel(provider: SingleProviderTarget): string | null {
+  const currentModel = (provider.model || '').toLowerCase();
+  const baseUrl = (provider.baseUrl || '').toLowerCase();
+  const providerName = (provider.name || '').toLowerCase();
+
+  let candidatePool: string[] = [];
+
+  // 若为 ASTeam 统一网关 (LLMAPI)
+  if (baseUrl.includes('ashawk') || baseUrl.includes('llmapi') || providerName.includes('asteam')) {
+    candidatePool = ['mimo-x-pro-preview', 'mimo-v2.5', 'gemini-2.5-flash', 'mimo-v2.5-pro'];
+  } else if (baseUrl.includes('deepseek')) {
+    candidatePool = ['deepseek-chat', 'deepseek-reasoner'];
+  } else if (baseUrl.includes('openai')) {
+    candidatePool = ['gpt-4o', 'gpt-4o-mini'];
+  } else {
+    candidatePool = ['mimo-x-pro-preview', 'mimo-v2.5', 'gemini-2.5-flash', 'gpt-4o-mini'];
+  }
+
+  // 挑选第一个与当前模型不同的有效候选
+  const target = candidatePool.find(m => m.toLowerCase() !== currentModel);
+  return target || null;
+}
+
 async function executeSingleProviderCall(
   provider: SingleProviderTarget,
   messages: ChatMessage[],
@@ -1468,9 +1495,11 @@ async function executeSingleProviderCall(
     // 高可用动态故障转移 (Failover Retry)：
     // 若网关在动态路由调度特定子模型时遇到了临时的 410 (如分发池中某个特定节点退役)
     if (response.status === 410 || errText.includes('end of life') || errText.includes('no longer available')) {
-      if (provider.model !== 'deepseek-chat') {
+      const fallback = resolveFallbackModel(provider);
+      if (fallback) {
+        onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型已退役，正在自动调度高可用多模态模型 (${fallback}) 重新执行...\n\n`);
         return await executeSingleProviderCall(
-          { ...provider, model: 'deepseek-chat' },
+          { ...provider, model: fallback },
           messages,
           abortSignal,
           useStream,
@@ -1524,10 +1553,11 @@ async function executeSingleProviderCall(
     }
     const combined = (content || reasoning || '').trim();
     if (!combined) {
-      if (provider.model === 'Auto' || (provider.model && provider.model !== 'deepseek-chat')) {
-        onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型 (${provider.model}) 响应为空，正在自动调度高可用基础线路 (deepseek-chat) 重新执行...\n\n`);
+      const fallback = resolveFallbackModel(provider);
+      if (fallback) {
+        onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型 (${provider.model || 'Auto'}) 响应为空，正在自动调度高可用多模态模型 (${fallback}) 重新执行...\n\n`);
         return await executeSingleProviderCall(
-          { ...provider, model: 'deepseek-chat' },
+          { ...provider, model: fallback },
           messages,
           abortSignal,
           useStream,
@@ -1601,10 +1631,11 @@ async function executeSingleProviderCall(
   }
 
   if (!fullText.trim()) {
-    if (provider.model === 'Auto' || (provider.model && provider.model !== 'deepseek-chat')) {
-      onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型 (${provider.model}) 响应为空，正在自动调度高可用基础线路 (deepseek-chat) 重新执行...\n\n`);
+    const fallback = resolveFallbackModel(provider);
+    if (fallback) {
+      onSystemNotice?.(`\n\n> 🔄 **[服务商动态调度]** 上游模型 (${provider.model || 'Auto'}) 响应为空，正在自动调度高可用多模态模型 (${fallback}) 重新执行...\n\n`);
       return await executeSingleProviderCall(
-        { ...provider, model: 'deepseek-chat' },
+        { ...provider, model: fallback },
         messages,
         abortSignal,
         useStream,
@@ -1663,13 +1694,15 @@ export async function callLLMStream(
   if (config.fallbackProviders && config.fallbackProviders.length > 0) {
     for (const fb of config.fallbackProviders) {
       if (fb.enabled && fb.baseUrl && fb.baseUrl.trim()) {
-        rawProviderQueue.push({
+        const fbTarget: SingleProviderTarget = {
           name: fb.name || '备用线路',
           baseUrl: fb.baseUrl.trim(),
           apiKey: fb.apiKey || '',
-          model: fb.model || 'deepseek-chat',
+          model: fb.model || '',
           capabilities: fb.capabilities
-        });
+        };
+        fbTarget.model = fb.model || resolveFallbackModel(fbTarget) || 'mimo-x-pro-preview';
+        rawProviderQueue.push(fbTarget);
       }
     }
   }

@@ -2158,7 +2158,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="text-right">
                     <span className="rounded-full bg-[var(--primary)]/15 px-2.5 py-1 text-xs font-mono font-semibold text-[var(--primary)]">
-                      v1.11.1 (当前版本)
+                      v1.11.2 (当前版本)
                     </span>
                     <p className="text-[10px] text-[var(--muted-foreground)] mt-1">
                       通道: 企业私有云端中枢 (Stable)
@@ -2243,7 +2243,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       } else if (res) {
                         setUpdateCheckMsg({
                           type: 'info',
-                          text: `当前已是最新版本 (v${res.currentVersion || '1.11.1'})。`
+                          text: `当前已是最新版本 (v${res.currentVersion || '1.11.2'})。`
                         });
                       } else {
                         setUpdateCheckMsg({

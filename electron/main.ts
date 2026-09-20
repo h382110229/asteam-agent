@@ -14,6 +14,7 @@ import { enterpriseHubManager } from './enterprise-hub-manager';
 import { knowledgeGraphManager } from './knowledge-graph-manager';
 import { securityFenceManager } from './security-fence-manager';
 import { autoUpdaterManager } from './auto-updater';
+import { extractOfficeDocumentContent } from './office-extractor';
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -375,6 +376,22 @@ function setupIPC() {
 
   ipcMain.handle('skills:delete', async (_event, skillId: string) => {
     return skillManager.deleteCustomSkill(skillId);
+  });
+
+  // Office & Document Text Extractor IPC (v1.11.2)
+  ipcMain.handle('office:extractDocument', async (_event, fileName: string, uint8Array: Uint8Array) => {
+    try {
+      const buffer = Buffer.from(uint8Array);
+      return await extractOfficeDocumentContent(fileName, buffer);
+    } catch (err: any) {
+      console.error('[OfficeExtractor] Error in office:extractDocument:', err);
+      return {
+        text: `（文档结构化解析异常: ${err.message}）`,
+        summary: '解析异常',
+        charCount: 0,
+        type: 'unknown'
+      };
+    }
   });
 
   // Storage Hub IPC (v1.3.0)

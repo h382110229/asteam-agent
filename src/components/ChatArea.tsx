@@ -1009,12 +1009,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const processFiles = (fileList: File[]) => {
     fileList.forEach(file => {
       const isImage = file.type.startsWith('image/');
+      const isOfficeDoc = /\.(docx|pptx|xlsx|xls|pdf)$/i.test(file.name);
       const isText = file.type.startsWith('text/') ||
         /\.(ts|tsx|js|jsx|json|md|py|go|rs|c|cpp|h|css|html|xml|yaml|yml|sh|env|sql|csv)$/i.test(file.name);
 
-      const reader = new FileReader();
-
       if (isImage) {
+        const reader = new FileReader();
         reader.onload = (ev) => {
           const content = ev.target?.result as string;
           setAttachments(prev => [...prev, {
@@ -1025,7 +1025,32 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
           }]);
         };
         reader.readAsDataURL(file);
+      } else if (isOfficeDoc && window.electronAPI?.extractOfficeDocument) {
+        // v1.11.2: Office (Word/PPT/Excel) 与 PDF 智能脱壳轻量化提取，避免几兆 Base64 撑爆上下文
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          try {
+            const arrayBuffer = ev.target?.result as ArrayBuffer;
+            const res = await window.electronAPI.extractOfficeDocument(file.name, new Uint8Array(arrayBuffer));
+            setAttachments(prev => [...prev, {
+              name: file.name,
+              size: file.size,
+              type: `document/${file.name.split('.').pop()?.toLowerCase()}`,
+              content: res.text
+            }]);
+          } catch (err: any) {
+            console.warn('Failed to extract office document:', err);
+            setAttachments(prev => [...prev, {
+              name: file.name,
+              size: file.size,
+              type: 'application/octet-stream',
+              content: ''
+            }]);
+          }
+        };
+        reader.readAsArrayBuffer(file);
       } else if (isText && file.size < 512 * 1024) {
+        const reader = new FileReader();
         reader.onload = (ev) => {
           const content = ev.target?.result as string;
           setAttachments(prev => [...prev, {
@@ -1037,16 +1062,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         };
         reader.readAsText(file);
       } else {
-        reader.onload = (ev) => {
-          const content = ev.target?.result as string;
-          setAttachments(prev => [...prev, {
-            name: file.name,
-            size: file.size,
-            type: file.type || 'application/octet-stream',
-            content
-          }]);
-        };
-        reader.readAsDataURL(file);
+        // 未知二进制或大文件：仅记录文件元数据，绝不将庞大的 Base64 塞入上下文
+        setAttachments(prev => [...prev, {
+          name: file.name,
+          size: file.size,
+          type: file.type || 'application/octet-stream',
+          content: ''
+        }]);
       }
     });
   };
@@ -1276,7 +1298,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.11.1)
+                ASTeam Agent (v1.11.2)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
                 内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 零依赖全盘极速扫描</strong>、<strong>📄 原生无头 HTML-to-PDF 打印引擎</strong>、<strong>🛡️ 交付物强契约硬门禁</strong> 与 <strong>📑 开箱即用全能 Office 套件</strong>。
@@ -1837,13 +1859,21 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 >
                   {file.type?.startsWith('image/') && file.content ? (
                     <img src={file.content} alt={file.name} className="h-4 w-4 rounded object-cover" />
+                  ) : file.type?.startsWith('document/') ? (
+                    <FileText className="h-3 w-3 text-indigo-500" />
                   ) : (
                     <FileText className="h-3 w-3 text-[var(--primary)]" />
                   )}
                   <span className="max-w-[140px] truncate font-mono">{file.name}</span>
-                  <span className="text-[9px] text-[var(--muted-foreground)]">
-                    ({Math.round(file.size / 1024)} KB)
-                  </span>
+                  {file.type?.startsWith('document/') ? (
+                    <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/15 text-indigo-500 font-medium">
+                      已智能脱壳
+                    </span>
+                  ) : (
+                    <span className="text-[9px] text-[var(--muted-foreground)]">
+                      ({Math.round(file.size / 1024)} KB)
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => removeAttachment(idx)}

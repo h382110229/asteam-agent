@@ -253,9 +253,9 @@ export const App: React.FC = () => {
   const [runStartTime, setRunStartTime] = useState<number>(0);
   const [updateWelcomeToast, setUpdateWelcomeToast] = useState<string | null>(null);
 
-  // v1.11.1: 版本更新后欢迎提示与版本记忆
+  // v1.11.2: 版本更新后欢迎提示与版本记忆
   useEffect(() => {
-    const CURRENT_VERSION = '1.11.1';
+    const CURRENT_VERSION = '1.11.2';
     try {
       const prevVer = localStorage.getItem('asteam_installed_version');
       if (prevVer && prevVer !== CURRENT_VERSION) {
@@ -703,11 +703,14 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         if (att.type?.startsWith('image/') && att.content) {
           return `\n\n【用户附件图片: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n![${att.name}](${att.content})`;
         }
-        if (att.content) {
+        if (att.type?.startsWith('document/') && att.content) {
+          return `\n\n【用户附件文档: ${att.name} (已智能脱壳解析正文与大纲，原文件 ${Math.round(att.size / 1024)} KB)】:\n---\n${att.content}\n---`;
+        }
+        if (att.content && !att.content.startsWith('data:')) {
           const ext = att.name.split('.').pop() || '';
           return `\n\n【附件代码/文件: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n\`\`\`${ext}\n${att.content}\n\`\`\``;
         }
-        return `\n\n【附件文件: ${att.name} (${Math.round(att.size / 1024)} KB)】`;
+        return `\n\n【附件文件: ${att.name} (${Math.round(att.size / 1024)} KB)】\n*(注: 该二进制文件建议通过工具或针对性脚本直接读取)*`;
       }).join('');
       fullContent = fullContent ? `${fullContent}\n${attachSnippets}` : attachSnippets.trim();
     }

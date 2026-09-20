@@ -24,6 +24,12 @@ export interface ElectronAPI {
   installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
   installSkillFromUrl: (url: string) => Promise<any>;
   deleteSkill: (skillId: string) => Promise<boolean>;
+  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array) => Promise<{
+    text: string;
+    summary: string;
+    charCount: number;
+    type: 'word' | 'excel' | 'powerpoint' | 'pdf' | 'unknown';
+  }>;
 
   // Agent Harness
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
