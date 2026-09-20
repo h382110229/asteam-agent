@@ -235,7 +235,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 当前客户端已是最新版本
               </h3>
               <p className="text-xs text-[var(--muted-foreground)] max-w-xs">
-                当前版本为 v{updateInfo?.currentVersion || '1.10.0'}，已包含最新的零依赖极速扫描、HTML-to-PDF 无头打印引擎与交付物强契约门禁。
+                当前版本为 v{updateInfo?.currentVersion || '1.11.1'}，已全面支持直接选择文件夹免压缩导入、内置 Skill Generator 自动生成技能与 @ 快捷挂载联动。
               </p>
               <button
                 type="button"

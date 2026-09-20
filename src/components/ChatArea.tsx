@@ -71,7 +71,7 @@ interface ChatAreaProps {
   messages: ChatMessageItem[];
   isRunning: boolean;
   isWaitingForUser?: boolean;
-  onSendMessage: (text: string, mode: ExecutionMode, attachments?: FileAttachment[]) => void;
+  onSendMessage: (text: string, mode: ExecutionMode, attachments?: FileAttachment[], activeSkillIds?: string[]) => void;
   onStopAgent: () => void;
   onReplyQuestion: (questionId: string, answer: string) => void;
   workspacePath: string | null;
@@ -102,6 +102,7 @@ const SLASH_COMMANDS = [
   { cmd: '/terminal', title: '交互式控制台大屏', desc: '在右侧工作台展开大屏级实时终端' },
   { cmd: '/review', title: 'Code Review 走查', desc: '调用 Code Review 专家技能审查当前修改与安全基线' },
   { cmd: '/test', title: '单测生成与运行', desc: '寻找测试套件，为核心函数生成并执行测试用例' },
+  { cmd: '/skill', title: '智能生成与固化技能 (Skill Generator)', desc: '调用技能架构师，根据当前对话与使用偏好自动设计、生成并安装专属 Skill' },
   { cmd: '/grill-me', title: 'Grill-me 互动问答', desc: '进入采访决策模式：Agent 逐一向您抛出架构选型卡片' }
 ];
 
@@ -514,6 +515,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     checkpoint: CheckpointItem | null;
   }>({ isOpen: false, checkpoint: null });
 
+  // 技能动态挂载与快速勾选状态 (v1.11.0 / v1.11.1)
+  const [mountedSkillIds, setMountedSkillIds] = useState<string[]>([]);
+  const [showSkillPicker, setShowSkillPicker] = useState(false);
+  const [skillPickerSearch, setSkillPickerSearch] = useState('');
+  const [isImportingFolder, setIsImportingFolder] = useState(false);
+
   // Token & Context Window Monitor calculation (v1.5.0 / v1.6.0 dynamic 1M / 128k)
   const totalEstimatedTokens = useMemo(() => {
     return messages.reduce((acc, m) => {
@@ -590,6 +597,30 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       isMounted = false;
     };
   }, [workspacePath]);
+
+  // v1.11.1: 直接选择本地文件夹导入技能并即时勾选挂载
+  const handleImportFolder = async () => {
+    if (!window.electronAPI?.installSkillFromFolder) return;
+    try {
+      setIsImportingFolder(true);
+      const installed = await window.electronAPI.installSkillFromFolder();
+      if (installed) {
+        // 重新拉取所有最新技能
+        if (window.electronAPI.getAllSkills) {
+          const updated = await window.electronAPI.getAllSkills(workspacePath || null);
+          if (Array.isArray(updated)) {
+            setAvailableSkills(updated);
+          }
+        }
+        // 自动将新技能加入已挂载列表
+        setMountedSkillIds(prev => Array.from(new Set([...prev, installed.id])));
+      }
+    } catch (err: any) {
+      console.warn('Failed to import skill from folder:', err);
+    } finally {
+      setIsImportingFolder(false);
+    }
+  };
 
   interface ContextMentionItem {
     type: 'file' | 'git' | 'skill';
@@ -678,6 +709,12 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       const prefix = match.startsWith(' ') ? ' ' : '';
       return `${prefix}${item.insertText}`;
     });
+
+    if (item.type === 'skill') {
+      if (!mountedSkillIds.includes(item.id)) {
+        setMountedSkillIds(prev => [...prev, item.id]);
+      }
+    }
 
     const newInput = replacedBefore + textAfterCursor;
     setInput(newInput);
@@ -866,6 +903,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       textToSend = trimmed.replace('/review', '').trim() || '请按照 Code Review 专家标准走查当前工作区的代码安全性与规范。';
     } else if (trimmed.startsWith('/test')) {
       textToSend = trimmed.replace('/test', '').trim() || '请为工作区核心模块生成单元测试并尝试在本地运行验证。';
+    } else if (trimmed.startsWith('/skill')) {
+      textToSend = trimmed.replace('/skill', '').trim() || '请根据我们刚才的对话、交互过程以及我的工作习惯，提炼并生成一个标准化的 Skill 技能，并指导或保存到技能目录。';
+      if (!mountedSkillIds.includes('skill_generator')) {
+        setMountedSkillIds(prev => [...prev, 'skill_generator']);
+      }
     } else if (trimmed.startsWith('/grill-me')) {
       textToSend = trimmed.replace('/grill-me', '').trim() || '请开启 Grill-me 采访交互模式，针对当前项目逐一向我提问关键决策。';
     }
@@ -899,7 +941,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       }
     }
 
-    onSendMessage(textToSend, mode, attachments);
+    onSendMessage(textToSend, mode, attachments, mountedSkillIds);
     setInput('');
     setAttachments([]);
     setShowSlashMenu(false);
@@ -1234,7 +1276,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.10.0)
+                ASTeam Agent (v1.11.1)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
                 内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 零依赖全盘极速扫描</strong>、<strong>📄 原生无头 HTML-to-PDF 打印引擎</strong>、<strong>🛡️ 交付物强契约硬门禁</strong> 与 <strong>📑 开箱即用全能 Office 套件</strong>。
@@ -1814,6 +1856,52 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           )}
 
+          {/* Active Mounted Skills Chips Bar (v1.11.0) */}
+          {mountedSkillIds.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs animate-in fade-in-50">
+              <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 mr-1 shrink-0">
+                <Zap className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
+                <span>已挂载技能 ({mountedSkillIds.length})</span>
+              </span>
+              {mountedSkillIds.map(id => {
+                const s = availableSkills.find(item => item.id === id);
+                const isFolder = s?.isFolderSkill;
+                const cleanName = s ? s.name.replace(/^\[.*?\]\s*/, '') : id.replace(/^custom:(?:global|workspace|extra):/, '');
+                return (
+                  <span
+                    key={id}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-[var(--card)] border border-amber-500/30 text-[var(--foreground)] shadow-2xs group"
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${isFolder ? 'bg-indigo-500' : 'bg-amber-500'}`} />
+                    <span className="max-w-[140px] truncate" title={s?.description || id}>
+                      {cleanName}
+                    </span>
+                    {isFolder && (
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                        复合包
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setMountedSkillIds(prev => prev.filter(x => x !== id))}
+                      className="text-[var(--muted-foreground)] hover:text-rose-500 transition-colors ml-0.5 cursor-pointer"
+                      title="取消挂载此技能"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => setMountedSkillIds([])}
+                className="text-[10px] text-[var(--muted-foreground)] hover:text-rose-500 underline ml-auto cursor-pointer"
+              >
+                清除全部
+              </button>
+            </div>
+          )}
+
           {/* Vision Mismatch Defensive Hint */}
           {attachments.some(a => a.type?.startsWith('image/')) && !inferModelCapabilities(currentModel).includes('vision') && (
             <div className="flex items-center justify-between rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400 animate-in fade-in-50">
@@ -1877,6 +1965,197 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <Users className="h-3 w-3" />
                   <span>蜂群协同 (Swarm)</span>
                 </button>
+              </div>
+
+              {/* Skill Selector Popover Button & Modal (v1.11.0) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowSkillPicker(prev => !prev)}
+                  className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors border cursor-pointer ${
+                    mountedSkillIds.length > 0
+                      ? 'border-amber-500/40 bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold shadow-2xs'
+                      : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+                  }`}
+                  title="选择/勾选本轮要执行的技能包 (支持华讯 Excel/Word 复合技能与自定义包)"
+                >
+                  <Zap className={`h-3 w-3 ${mountedSkillIds.length > 0 ? 'fill-amber-500 text-amber-500' : 'text-[var(--muted-foreground)]'}`} />
+                  <span>技能挂载</span>
+                  {mountedSkillIds.length > 0 && (
+                    <span className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-0.5">
+                      {mountedSkillIds.length}
+                    </span>
+                  )}
+                </button>
+
+                {/* Popover Card */}
+                {showSkillPicker && (
+                  <div className="absolute bottom-full left-0 mb-2 w-84 sm:w-96 rounded-xl border border-[var(--border)] bg-[var(--card)]/98 backdrop-blur-md p-3 shadow-2xl z-50 flex flex-col gap-2 animate-in slide-in-from-bottom-2 select-none">
+                    <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
+                      <div className="flex items-center gap-1.5">
+                        <Zap className="h-4 w-4 text-amber-500 fill-amber-500" />
+                        <span className="font-semibold text-xs text-[var(--foreground)]">
+                          技能挂载与勾选调度面板
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowSkillPicker(false)}
+                        className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Search & Quick Actions */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={skillPickerSearch}
+                        onChange={e => setSkillPickerSearch(e.target.value)}
+                        placeholder="搜索技能名称、拼音或触发词..."
+                        className="flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={handleImportFolder}
+                        disabled={isImportingFolder}
+                        className="inline-flex items-center gap-1 rounded-md bg-teal-600 hover:bg-teal-700 text-white px-2 py-1 text-[10px] font-medium transition-colors shadow-2xs cursor-pointer shrink-0 disabled:opacity-50"
+                        title="无需手动打包压缩，直接选择包含 SKILL.md 或多个技能的本地文件夹导入"
+                      >
+                        {isImportingFolder ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <FolderOpen className="h-3 w-3" />
+                        )}
+                        <span>选择文件夹导入</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = availableSkills.map(s => s.id);
+                          setMountedSkillIds(mountedSkillIds.length === allIds.length ? [] : allIds);
+                        }}
+                        className="text-[10px] text-[var(--primary)] hover:underline shrink-0 cursor-pointer font-medium"
+                      >
+                        {mountedSkillIds.length === availableSkills.length ? '全部取消' : '全选'}
+                      </button>
+                    </div>
+
+                    {/* Skill List with Checkboxes */}
+                    <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 text-xs">
+                      {availableSkills
+                        .filter(s => {
+                          if (!skillPickerSearch.trim()) return true;
+                          const q = skillPickerSearch.toLowerCase();
+                          return (
+                            s.name.toLowerCase().includes(q) ||
+                            (s.description && s.description.toLowerCase().includes(q)) ||
+                            (s.triggers && s.triggers.some((t: string) => t.toLowerCase().includes(q))) ||
+                            s.id.toLowerCase().includes(q)
+                          );
+                        })
+                        .map(s => {
+                          const isChecked = mountedSkillIds.includes(s.id);
+                          const isFolder = s.isFolderSkill;
+                          return (
+                            <label
+                              key={s.id}
+                              className={`flex items-start gap-2.5 p-2 rounded-lg border transition-all cursor-pointer ${
+                                isChecked
+                                  ? 'border-amber-500/50 bg-amber-500/10 shadow-2xs'
+                                  : 'border-[var(--border)]/60 bg-[var(--background)]/50 hover:bg-[var(--muted)]/50'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setMountedSkillIds(prev =>
+                                    prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id]
+                                  );
+                                }}
+                                className="mt-0.5 rounded border-[var(--border)] text-amber-500 focus:ring-amber-500 cursor-pointer"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-semibold text-xs text-[var(--foreground)] truncate">
+                                    {s.name.replace(/^\[.*?\]\s*/, '')}
+                                  </span>
+                                  {isFolder ? (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-indigo-500/15 text-indigo-500 border border-indigo-500/30">
+                                      复合包 (含脚本/模板)
+                                    </span>
+                                  ) : s.id.startsWith('custom:workspace:') ? (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-teal-500/15 text-teal-500 border border-teal-500/30">
+                                      项目专属
+                                    </span>
+                                  ) : s.id.startsWith('custom:extra:') ? (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                                      外部仓库
+                                    </span>
+                                  ) : s.id.startsWith('custom:global:') ? (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                                      自定义
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-blue-500/15 text-blue-500 border border-blue-500/30">
+                                      官方内置
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-[11px] text-[var(--muted-foreground)] line-clamp-2 mt-0.5">
+                                  {s.description}
+                                </p>
+                                {s.scriptsDir && (
+                                  <p className="text-[10px] text-indigo-500 font-mono truncate mt-0.5" title={s.scriptsDir}>
+                                    ⚡ 脚本: {s.scriptsDir.split(/[\\/]/).pop()}
+                                  </p>
+                                )}
+                              </div>
+                            </label>
+                          );
+                        })}
+                    </div>
+
+                    {/* Smart Skill Generator Hint (v1.11.1) */}
+                    <div className="rounded-lg bg-[var(--primary)]/5 border border-[var(--primary)]/20 p-2 text-[11px] flex items-center justify-between text-[var(--muted-foreground)]">
+                      <span className="truncate">
+                        💡 键入 <strong className="text-[var(--primary)]">@创建技能</strong> 可根据使用习惯与对话自动生成专属 Skill
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowSkillPicker(false);
+                          setInputText(prev => (prev ? `${prev} @创建技能 ` : '@创建技能 '));
+                        }}
+                        className="text-[10px] text-[var(--primary)] hover:underline font-semibold shrink-0 cursor-pointer ml-1"
+                      >
+                        立即唤起
+                      </button>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="border-t border-[var(--border)] pt-2 flex items-center justify-between text-[11px]">
+                      <span className="text-[var(--muted-foreground)] text-[10px]">
+                        已勾选 <strong className="text-amber-500">{mountedSkillIds.length}</strong> 项
+                      </span>
+                      {onOpenSettings && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSkillPicker(false);
+                            onOpenSettings();
+                          }}
+                          className="text-[var(--primary)] hover:underline text-[10px] cursor-pointer"
+                        >
+                          管理与导入技能...
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
 
               <span className="text-[var(--border)]">•</span>

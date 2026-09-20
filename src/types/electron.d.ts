@@ -17,6 +17,10 @@ export interface ElectronAPI {
   // Skills
   getAllSkills: (workspacePath: string | null) => Promise<any[]>;
   installSkillFromFile: () => Promise<any>;
+  installSkillFromFolder: () => Promise<any>;
+  getExtraSkillDirs: () => Promise<string[]>;
+  addExtraSkillDir: () => Promise<{ success: boolean; dir?: string; extraDirs: string[] }>;
+  removeExtraSkillDir: (dirPath: string) => Promise<{ success: boolean; extraDirs: string[] }>;
   installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
   installSkillFromUrl: (url: string) => Promise<any>;
   deleteSkill: (skillId: string) => Promise<boolean>;

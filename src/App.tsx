@@ -253,9 +253,9 @@ export const App: React.FC = () => {
   const [runStartTime, setRunStartTime] = useState<number>(0);
   const [updateWelcomeToast, setUpdateWelcomeToast] = useState<string | null>(null);
 
-  // v1.10.0: 版本更新后欢迎提示与版本记忆
+  // v1.11.1: 版本更新后欢迎提示与版本记忆
   useEffect(() => {
-    const CURRENT_VERSION = '1.10.0';
+    const CURRENT_VERSION = '1.11.1';
     try {
       const prevVer = localStorage.getItem('asteam_installed_version');
       if (prevVer && prevVer !== CURRENT_VERSION) {
@@ -638,7 +638,7 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
   };
 
   // 7. Send message & start Agent
-  const handleSendMessage = async (text: string, mode: ExecutionMode, attachments?: any[]) => {
+  const handleSendMessage = async (text: string, mode: ExecutionMode, attachments?: any[], activeSkillIds?: string[]) => {
     if (isWaitingForUser) {
       const currentList = messagesMap[activeSessionId] || [];
       const lastMsg = currentList[currentList.length - 1];
@@ -768,6 +768,12 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           content: m.content
         }));
 
+      // 合并全局已启用技能与用户本轮勾选/挂载的技能 (v1.11.0)
+      const mergedSkills = Array.from(new Set([
+        ...(settings.enabledSkills || []),
+        ...(activeSkillIds || [])
+      ]));
+
       const runnerConfig = {
         baseUrl: settings.baseUrl,
         apiKey: settings.apiKey,
@@ -776,7 +782,7 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         workspacePath: currentWorkspacePath,
         enabledMcpTools: settings.enabledMcpTools,
         customMcpConfig: settings.customMcpConfig,
-        enabledSkills: settings.enabledSkills,
+        enabledSkills: mergedSkills,
         executionMode: execMode,
         fallbackProviders: settings.fallbackProviders,
         bypassSecurityFence: bypassFence

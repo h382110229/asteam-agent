@@ -7,6 +7,7 @@ export interface StorageHubConfig {
   dataRootDir: string;
   customized: boolean;
   lastMigratedAt?: number;
+  extraSkillDirs?: string[];
 }
 
 export interface StorageSubdirStat {
@@ -32,10 +33,12 @@ export interface StorageStats {
 export class StorageHub {
   private configFilePath: string;
   private currentRootDir: string;
+  private extraSkillDirs: string[] = [];
 
   constructor() {
     this.configFilePath = this.resolveConfigFilePath();
     this.currentRootDir = this.loadInitialRootDir();
+    this.extraSkillDirs = this.loadInitialExtraSkillDirs();
     this.ensureDirectoryStructure(this.currentRootDir);
   }
 
@@ -104,11 +107,71 @@ export class StorageHub {
     return path.join(os.homedir(), 'ASTeamData');
   }
 
+  private loadInitialExtraSkillDirs(): string[] {
+    const list: string[] = [];
+    // 1. 读取配置文件中的自定义外部技能目录
+    try {
+      if (fs.existsSync(this.configFilePath)) {
+        const raw = fs.readFileSync(this.configFilePath, 'utf-8');
+        const parsed: StorageHubConfig = JSON.parse(raw);
+        if (Array.isArray(parsed.extraSkillDirs)) {
+          for (const d of parsed.extraSkillDirs) {
+            if (typeof d === 'string' && d.trim() && !list.includes(path.normalize(d.trim()))) {
+              list.push(path.normalize(d.trim()));
+            }
+          }
+        }
+      }
+    } catch {}
+
+    // 2. 默认探测常见的外部技能目录（如 D:\ASTeamAIProject\Skills）
+    if (process.platform === 'win32') {
+      const candidates = [
+        'D:\\ASTeamAIProject\\Skills',
+        path.join(process.cwd(), 'skills')
+      ];
+      for (const cand of candidates) {
+        try {
+          const norm = path.normalize(cand);
+          if (fs.existsSync(norm) && !list.includes(norm)) {
+            list.push(norm);
+          }
+        } catch {}
+      }
+    }
+
+    return list;
+  }
+
+  private persistConfig() {
+    try {
+      const configDir = path.dirname(this.configFilePath);
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
+      }
+      const configData: StorageHubConfig = {
+        dataRootDir: this.currentRootDir,
+        customized: true,
+        extraSkillDirs: this.extraSkillDirs,
+        lastMigratedAt: Date.now()
+      };
+      fs.writeFileSync(this.configFilePath, JSON.stringify(configData, null, 2), 'utf-8');
+      const selfContainedConfig = path.join(this.currentRootDir, 'storage-config.json');
+      if (path.normalize(this.configFilePath) !== path.normalize(selfContainedConfig)) {
+        try {
+          fs.writeFileSync(selfContainedConfig, JSON.stringify(configData, null, 2), 'utf-8');
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('[StorageHub] Failed to persist config:', e);
+    }
+  }
+
   /**
-   * 确保数据中枢的核心 5 大模块子目录存在
+   * 确保数据中枢的核心子目录存在（包含解压缓存区 skills_extracted）
    */
   public ensureDirectoryStructure(rootDir: string) {
-    const subdirs = ['workspaces', 'skills', 'memory', 'artifacts', 'logs', 'enterprise_hub'];
+    const subdirs = ['workspaces', 'skills', 'skills_extracted', 'memory', 'artifacts', 'logs', 'enterprise_hub'];
     try {
       if (!fs.existsSync(rootDir)) {
         fs.mkdirSync(rootDir, { recursive: true });
@@ -144,6 +207,43 @@ export class StorageHub {
 
   public getSkillsDir(): string {
     return path.join(this.currentRootDir, 'skills');
+  }
+
+  public getExtractedSkillsDir(): string {
+    const dir = path.join(this.currentRootDir, 'skills_extracted');
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {}
+    }
+    return dir;
+  }
+
+  public getExtraSkillDirs(): string[] {
+    return [...this.extraSkillDirs];
+  }
+
+  public addExtraSkillDir(dirPath: string): boolean {
+    if (!dirPath || typeof dirPath !== 'string') return false;
+    const normalized = path.normalize(dirPath.trim());
+    if (!this.extraSkillDirs.includes(normalized)) {
+      this.extraSkillDirs.push(normalized);
+      this.persistConfig();
+      return true;
+    }
+    return false;
+  }
+
+  public removeExtraSkillDir(dirPath: string): boolean {
+    if (!dirPath || typeof dirPath !== 'string') return false;
+    const normalized = path.normalize(dirPath.trim());
+    const idx = this.extraSkillDirs.indexOf(normalized);
+    if (idx !== -1) {
+      this.extraSkillDirs.splice(idx, 1);
+      this.persistConfig();
+      return true;
+    }
+    return false;
   }
 
   public getMemoryDir(): string {
@@ -185,6 +285,7 @@ export class StorageHub {
       const configData: StorageHubConfig = {
         dataRootDir: normalized,
         customized: true,
+        extraSkillDirs: this.extraSkillDirs,
         lastMigratedAt: Date.now()
       };
       // 1. 持久化到应用级配置

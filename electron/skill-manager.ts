@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import AdmZip from 'adm-zip';
 import { storageHub } from './storage-hub';
 import { enterpriseHubManager } from './enterprise-hub-manager';
 import { mcpManager } from './mcp-manager';
@@ -17,6 +18,14 @@ export interface SkillItem {
   triggers?: string[];
   recommendedTools?: string[];
   rawFrontmatter?: Record<string, any>;
+  // 复合型与资源扩展属性 (v1.11.0)
+  isFolderSkill?: boolean;
+  skillDir?: string;
+  scriptsDir?: string;
+  assetsDir?: string;
+  referencesDir?: string;
+  examplesDir?: string;
+  isZipExtracted?: boolean;
 }
 
 export function parseSkillMarkdown(rawContent: string): {
@@ -316,6 +325,84 @@ const BUILTIN_SKILLS: SkillItem[] = [
      - 必须包含标准封面（华为云蓝色调、版本号、密级）、自动目录、动态页码（第 X 页 / 共 Y 页）；
      - 正文必须包含不少于 10~17 个结构化表格（资产清单、ECU折算对照、迁移风险矩阵、回退演练排期、网络专线与带宽预算）；
      - 表格使用深蓝表头与纯白文字，斑马纹交替底色。`
+  },
+  // 4. 技能架构与记忆固化专家 (Skill Generator & Memory Distiller)
+  {
+    id: 'skill_generator',
+    name: '技能架构师与自动生成专家 (Skill Generator & Memory Distiller)',
+    description: '根据用户使用习惯、工作流沉淀与上下文需求，自动生成标准化 Skill (含 Frontmatter、执行规约、物理路径规划并可一键写入生效)',
+    isBuiltin: true,
+    category: 'custom',
+    version: '1.11.1',
+    triggers: [
+      '创建技能',
+      '生成技能',
+      '新建技能',
+      '制作skill',
+      '制作技能',
+      'skill generator',
+      '编写技能',
+      '习惯固化',
+      '工作流固化',
+      '生成skill'
+    ],
+    recommendedTools: ['write_file', 'view_file', 'read_directory', 'run_terminal_command'],
+    prompt: `【激活官方技能：技能架构师与自动生成专家 (Skill Generator & Memory Distiller)】
+你是 ASTeam Agent 的高级技能架构师。你的核心职责是：根据用户的明确指令、当前对话的工作流成果、或用户的使用偏好习惯，自动设计并生成符合 ASTeam / Antigravity 工业级规范的 Skill（技能）。
+
+### 一、标准技能规范要求
+每个技能必须包含标准 YAML Frontmatter 与规范正文：
+\`\`\`markdown
+---
+name: 技能显示名称 (精准传达定位，如：华讯运营周报自动生成专家)
+description: 一句话核心作用说明 (包含触发场景、输入前提与最终产出)
+version: 1.0.0
+triggers:
+  - 核心关键词1
+  - 触发词2
+  - 英文关键词
+recommendedTools:
+  - write_file
+  - generate_docx
+---
+
+# 技能标题
+
+## 角色定位与设计目标
+[说明该技能的专业领域与预期解决的核心痛点]
+
+## 调度执行硬规约 (Execution Contract)
+1. 前置检查与输入解析：明确需要用户提供的数据、文件或参数；
+2. 核心工作流与分步指引：步骤清晰，逻辑闭环；
+3. 输出与交付物规范：明确格式、美学要求或表格规范；
+4. 容错与兜底机制：遇到异常时的处理方式。
+\`\`\`
+
+### 二、支持的技能形态与生成策略
+1. **单文件技能 (Single-file Markdown Skill)**:
+   - 适用于纯 Prompt 引导、格式转换、规范约束、报告撰写类任务；
+   - 生成后，主动指导或直接调用 \`write_file\` 工具将其写入用户技能库：
+     路径例如：\`D:\\\\ASTeamData\\\\skills\\\\<skill_id>.md\`。写入后系统会自动热加载，用户即可通过 \`@技能名称\` 唤起使用。
+2. **复合型资源技能 (Folder Skill)**:
+   - 适用于需要配合 Python 执行脚本、Excel/Word 模板文件的场景；
+   - 规划标准目录结构：
+     - \`<skill_id>/SKILL.md\` (核心描述与契约)
+     - \`<skill_id>/scripts/\` (存放具体的执行脚本，如数据处理、API 调用脚本)
+     - \`<skill_id>/assets/\` (存放模板、图标等资源)
+     - \`<skill_id>/references/\` (参考规范与文档)
+   - 在 \`SKILL.md\` 中遵循 ASTeam 物理路径约定，使用提供的绝对路径占位符进行调用。
+
+### 三、基于习惯与记忆的自动提炼流程
+1. **需求诊断与习惯洞察**：
+   - 若用户表示“把我们刚刚做的工作流变成一个技能”或“记住我的这个偏好生成技能”，回顾上下文中的输入格式、处理逻辑、输出文件排版样式及特定约束；
+   - 提取出用户偏好的语言风格、数据校验规则或固定模板。
+2. **自动起草与优化**：
+   - 命名力求直观专业；
+   - 挑选 5~8 个最常用、不易与系统其他技能冲突的精准 \`triggers\`；
+   - 推荐最精准的 \`recommendedTools\`。
+3. **落地交付与确认**：
+   - 完整展示生成的 Markdown 内容；
+   - 询问或主动使用文件写入工具将其持久化至 \`skills/\` 目录，并告知用户“已成功生成并安装，现在你可以在输入框输入 @ 或在技能面板中直接勾选它”。`
   }
 ];
 
@@ -334,47 +421,341 @@ export class SkillManager {
     return BUILTIN_SKILLS;
   }
 
+  /**
+   * 将一个复合型技能目录 (包含 SKILL.md 或 skill.md) 解析为 SkillItem
+   */
+  private buildSkillFromFolder(
+    folderPath: string,
+    scope: 'global' | 'workspace' | 'extra',
+    isZipExtracted = false
+  ): SkillItem | null {
+    try {
+      if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+        return null;
+      }
+
+      // 寻找入口 Markdown 文件 (SKILL.md > skill.md > README.md)
+      const candidates = ['SKILL.md', 'skill.md', 'README.md'];
+      let entryFile: string | null = null;
+      for (const cand of candidates) {
+        const p = path.join(folderPath, cand);
+        if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+          // 如果是 README.md，必须包含 frontmatter 才能认定为技能定义
+          if (cand === 'README.md') {
+            const sample = fs.readFileSync(p, 'utf-8').trim();
+            if (!sample.startsWith('---')) continue;
+          }
+          entryFile = p;
+          break;
+        }
+      }
+
+      if (!entryFile) return null;
+
+      const content = fs.readFileSync(entryFile, 'utf-8');
+      const parsed = parseSkillMarkdown(content);
+      const folderBaseName = path.basename(folderPath);
+      const rawName = parsed.name || folderBaseName;
+      const cleanId = (parsed.frontmatter?.name || folderBaseName).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+
+      // 探测复合资源子目录
+      const scriptsDirCandidate = path.join(folderPath, 'scripts');
+      const assetsDirCandidate = path.join(folderPath, 'assets');
+      const referencesDirCandidate = path.join(folderPath, 'references');
+      const examplesDirCandidate = path.join(folderPath, 'examples');
+
+      const scriptsDir = fs.existsSync(scriptsDirCandidate) && fs.statSync(scriptsDirCandidate).isDirectory()
+        ? scriptsDirCandidate
+        : undefined;
+      const assetsDir = fs.existsSync(assetsDirCandidate) && fs.statSync(assetsDirCandidate).isDirectory()
+        ? assetsDirCandidate
+        : undefined;
+      const referencesDir = fs.existsSync(referencesDirCandidate) && fs.statSync(referencesDirCandidate).isDirectory()
+        ? referencesDirCandidate
+        : undefined;
+      const examplesDir = fs.existsSync(examplesDirCandidate) && fs.statSync(examplesDirCandidate).isDirectory()
+        ? examplesDirCandidate
+        : undefined;
+
+      // 结构化注入物理绝对路径，彻底保障 Agent 执行脚本时不迷路
+      let physicalSection = '';
+      if (scriptsDir || assetsDir || referencesDir || examplesDir) {
+        physicalSection = `\n\n【复合技能本地物理资源映射 (Composite Skill Physical Resources)】\n` +
+          `- 技能物理根目录 (Skill Root): ${folderPath}\n` +
+          (scriptsDir ? `- 脚本执行目录 (Scripts Dir): ${scriptsDir}\n` : '') +
+          (assetsDir ? `- 模板与资产目录 (Assets Dir): ${assetsDir}\n` : '') +
+          (referencesDir ? `- 规范与参考目录 (References Dir): ${referencesDir}\n` : '') +
+          (examplesDir ? `- 样例示范目录 (Examples Dir): ${examplesDir}\n` : '') +
+          `- 调度执行硬规范: 当需要执行 Python 脚本、预检依赖或读取 Word/Excel 模板时，必须使用上述绝对物理路径直接调用，严禁臆测相对路径！\n`;
+      }
+
+      const scopeTag = scope === 'workspace' ? '项目专属' : scope === 'extra' ? '外部技能' : '自定义';
+      const prompt = `【激活${scopeTag}技能：${rawName}】${physicalSection}\n${parsed.body || content}`;
+
+      return {
+        id: `custom:${scope}:${cleanId}`,
+        name: `[${scopeTag}] ${rawName}`,
+        description: parsed.description || `复合型本地技能 (${folderBaseName})`,
+        isBuiltin: false,
+        category: 'custom',
+        filePath: entryFile,
+        version: parsed.version || '1.0.0',
+        triggers: parsed.triggers,
+        recommendedTools: parsed.recommendedTools,
+        rawFrontmatter: parsed.frontmatter,
+        isFolderSkill: true,
+        skillDir: folderPath,
+        scriptsDir,
+        assetsDir,
+        referencesDir,
+        examplesDir,
+        isZipExtracted,
+        prompt
+      };
+    } catch (e) {
+      console.warn(`[SkillManager] Failed to build skill from folder ${folderPath}:`, e);
+      return null;
+    }
+  }
+
+  /**
+   * 解压并提取 ZIP 打包技能包
+   */
+  private extractAndLoadZip(zipFilePath: string, scope: 'global' | 'workspace' | 'extra'): SkillItem[] {
+    try {
+      if (!fs.existsSync(zipFilePath)) return [];
+      const zipBaseName = path.basename(zipFilePath, '.zip');
+      const extractedBaseDir = storageHub.getExtractedSkillsDir();
+      const targetDir = path.join(extractedBaseDir, zipBaseName);
+
+      // 若尚未解压或 zip 有更新，则执行解包
+      let shouldExtract = !fs.existsSync(targetDir);
+      if (!shouldExtract) {
+        try {
+          const zipMtime = fs.statSync(zipFilePath).mtimeMs;
+          const targetMtime = fs.statSync(targetDir).mtimeMs;
+          if (zipMtime > targetMtime) {
+            shouldExtract = true;
+          }
+        } catch {}
+      }
+
+      if (shouldExtract) {
+        try {
+          if (!fs.existsSync(targetDir)) {
+            fs.mkdirSync(targetDir, { recursive: true });
+          }
+          const zip = new AdmZip(zipFilePath);
+          zip.extractAllTo(targetDir, true);
+        } catch (err) {
+          console.warn(`[SkillManager] Failed to extract zip ${zipFilePath}:`, err);
+          return [];
+        }
+      }
+
+      const result: SkillItem[] = [];
+
+      // 1. 尝试直接从解压根目录加载
+      const rootSkill = this.buildSkillFromFolder(targetDir, scope, true);
+      if (rootSkill) {
+        result.push(rootSkill);
+        return result;
+      }
+
+      // 2. 若根目录下无 SKILL.md，探测解压目录内部的一级子目录 (常见于 zip 包内包含外层同名文件夹)
+      try {
+        const subEntries = fs.readdirSync(targetDir, { withFileTypes: true });
+        for (const sub of subEntries) {
+          if (sub.isDirectory() && !sub.name.startsWith('.') && sub.name !== '__MACOSX') {
+            const subSkill = this.buildSkillFromFolder(path.join(targetDir, sub.name), scope, true);
+            if (subSkill) {
+              result.push(subSkill);
+            }
+          }
+        }
+      } catch {}
+
+      return result;
+    } catch (e) {
+      console.warn(`[SkillManager] extractAndLoadZip error on ${zipFilePath}:`, e);
+      return [];
+    }
+  }
+
+  /**
+   * 递归深度扫描目标目录：
+   * - 递归解析复合型技能文件夹 (含 SKILL.md / skill.md)
+   * - 识别并自动解包加载 .zip 技能
+   * - 穿透 dist 目录寻找 zip 技能包
+   * - 兼容单文件 .md 技能 (排除纯文档 README.md)
+   */
+  public scanDirectoryForSkills(
+    dir: string,
+    scope: 'global' | 'workspace' | 'extra',
+    seenIds: Set<string>
+  ): SkillItem[] {
+    if (!fs.existsSync(dir)) return [];
+    const skillMap = new Map<string, SkillItem>();
+
+    const registerSkill = (item: SkillItem) => {
+      // 标准化比较 key (例如 huaxun-excel-generator)
+      const baseKey = (item.rawFrontmatter?.name || path.basename(item.filePath || item.id, '.md'))
+        .toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      if (!skillMap.has(baseKey)) {
+        skillMap.set(baseKey, item);
+        seenIds.add(item.id.toLowerCase());
+      } else {
+        const existing = skillMap.get(baseKey)!;
+        // 关键升级策略：若新技能具备真实脚本或资产物理路径，而旧技能没有，则升级替换旧技能！
+        const newScore = (item.isFolderSkill ? 10 : 0) + (item.scriptsDir ? 20 : 0) + (item.assetsDir ? 10 : 0);
+        const oldScore = (existing.isFolderSkill ? 10 : 0) + (existing.scriptsDir ? 20 : 0) + (existing.assetsDir ? 10 : 0);
+        if (newScore > oldScore) {
+          skillMap.set(baseKey, item);
+          seenIds.add(item.id.toLowerCase());
+        }
+      }
+    };
+
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        // A. 探测 .zip 压缩技能包
+        if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+          const zipSkills = this.extractAndLoadZip(fullPath, scope);
+          for (const s of zipSkills) {
+            registerSkill(s);
+          }
+          continue;
+        }
+
+        // B. 探测单文件 Markdown 技能
+        if (entry.isFile() && entry.name.toLowerCase().endsWith('.md')) {
+          // 纯说明性质的 README.md 若无 frontmatter 则不当作独立技能
+          if (entry.name.toLowerCase() === 'readme.md') {
+            const content = fs.readFileSync(fullPath, 'utf-8').trim();
+            if (!content.startsWith('---')) continue;
+          }
+
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const parsed = parseSkillMarkdown(content);
+          const skillId = (parsed.frontmatter?.name || entry.name.replace(/\.md$/i, '')).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+          const name = parsed.name || skillId;
+          const scopeTag = scope === 'workspace' ? '项目专属' : scope === 'extra' ? '外部技能' : '自定义';
+
+          registerSkill({
+            id: `custom:${scope}:${skillId}`,
+            name: `[${scopeTag}] ${name}`,
+            description: parsed.description || `单文件技能 (${entry.name})`,
+            isBuiltin: false,
+            category: 'custom',
+            filePath: fullPath,
+            version: parsed.version || '1.0.0',
+            triggers: parsed.triggers,
+            recommendedTools: parsed.recommendedTools,
+            rawFrontmatter: parsed.frontmatter,
+            prompt: `【激活${scopeTag}技能：${name}】\n${parsed.body || content}`
+          });
+          continue;
+        }
+
+        // C. 探测子目录
+        if (entry.isDirectory()) {
+          // 排除系统及内部保留目录
+          if (
+            entry.name.startsWith('.') ||
+            entry.name === 'node_modules' ||
+            entry.name === '__MACOSX' ||
+            entry.name === 'skills_extracted'
+          ) {
+            continue;
+          }
+
+          // 若子目录为 dist，穿透扫描里面的 .zip 文件
+          if (entry.name.toLowerCase() === 'dist') {
+            try {
+              const distFiles = fs.readdirSync(fullPath, { withFileTypes: true });
+              for (const df of distFiles) {
+                if (df.isFile() && df.name.toLowerCase().endsWith('.zip')) {
+                  const zipSkills = this.extractAndLoadZip(path.join(fullPath, df.name), scope);
+                  for (const s of zipSkills) {
+                    registerSkill(s);
+                  }
+                }
+              }
+            } catch {}
+            continue;
+          }
+
+          // 尝试将子目录解析为复合技能
+          const folderSkill = this.buildSkillFromFolder(fullPath, scope);
+          if (folderSkill) {
+            registerSkill(folderSkill);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn(`[SkillManager] Error scanning directory ${dir}:`, err);
+    }
+
+    return Array.from(skillMap.values());
+  }
+
   loadGlobalSkills(): SkillItem[] {
     const primaryDir = this.getGlobalSkillsDir();
-    const dirsToScan = [primaryDir];
+    const extractedDir = storageHub.getExtractedSkillsDir();
+    const extraDirs = storageHub.getExtraSkillDirs();
 
-    const result: SkillItem[] = [];
+    const globalMap = new Map<string, SkillItem>();
     const seenIds = new Set<string>();
 
-    for (const dir of dirsToScan) {
-      if (!fs.existsSync(dir)) continue;
+    const mergeSkills = (skills: SkillItem[]) => {
+      for (const item of skills) {
+        const baseKey = (item.rawFrontmatter?.name || path.basename(item.filePath || item.id, '.md'))
+          .toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (!globalMap.has(baseKey)) {
+          globalMap.set(baseKey, item);
+        } else {
+          const existing = globalMap.get(baseKey)!;
+          const newScore = (item.isFolderSkill ? 10 : 0) + (item.scriptsDir ? 20 : 0) + (item.assetsDir ? 10 : 0);
+          const oldScore = (existing.isFolderSkill ? 10 : 0) + (existing.scriptsDir ? 20 : 0) + (existing.assetsDir ? 10 : 0);
+          if (newScore > oldScore) {
+            globalMap.set(baseKey, item);
+          }
+        }
+      }
+    };
+
+    // 1. 扫描外部技能目录 (如 D:\ASTeamAIProject\Skills) - 具备真实复合资源，优先级高
+    for (const extraDir of extraDirs) {
+      if (!fs.existsSync(extraDir)) continue;
+      const extraSkills = this.scanDirectoryForSkills(extraDir, 'extra', seenIds);
+      mergeSkills(extraSkills);
+    }
+
+    // 2. 扫描解压缓存区目录
+    if (fs.existsSync(extractedDir)) {
       try {
-        const files = fs.readdirSync(dir);
-        for (const file of files) {
-          if (file.endsWith('.md')) {
-            const skillId = file.replace(/\.md$/, '');
-            if (seenIds.has(skillId)) continue;
-            seenIds.add(skillId);
-
-            const filePath = path.join(dir, file);
-            const content = fs.readFileSync(filePath, 'utf-8');
-            const parsed = parseSkillMarkdown(content);
-            const name = parsed.name || skillId;
-            const description = parsed.description || `全局已安装技能 (${file})`;
-
-            result.push({
-              id: `custom:global:${skillId}`,
-              name: `[自定义] ${name}`,
-              description,
-              isBuiltin: false,
-              category: 'custom',
-              filePath,
-              version: parsed.version || '1.0.0',
-              triggers: parsed.triggers,
-              recommendedTools: parsed.recommendedTools,
-              rawFrontmatter: parsed.frontmatter,
-              prompt: `【激活全局自定义技能：${name}】\n${parsed.body || content}`
-            });
+        const extractedEntries = fs.readdirSync(extractedDir, { withFileTypes: true });
+        for (const e of extractedEntries) {
+          if (e.isDirectory() && !e.name.startsWith('.')) {
+            const folderSkill = this.buildSkillFromFolder(path.join(extractedDir, e.name), 'global', true);
+            if (folderSkill) {
+              mergeSkills([folderSkill]);
+            }
           }
         }
       } catch {}
     }
-    return result;
+
+    // 3. 扫描主全局技能目录
+    const primarySkills = this.scanDirectoryForSkills(primaryDir, 'global', seenIds);
+    mergeSkills(primarySkills);
+
+    return Array.from(globalMap.values());
   }
 
   loadCustomWorkspaceSkills(workspacePath: string | null): SkillItem[] {
@@ -383,36 +764,8 @@ export class SkillManager {
     const skillsDir = path.join(workspacePath, '.asteam', 'skills');
     if (!fs.existsSync(skillsDir)) return [];
 
-    const result: SkillItem[] = [];
-    try {
-      const files = fs.readdirSync(skillsDir);
-      for (const file of files) {
-        if (file.endsWith('.md')) {
-          const filePath = path.join(skillsDir, file);
-          const content = fs.readFileSync(filePath, 'utf-8');
-          const skillId = file.replace(/\.md$/, '');
-          const parsed = parseSkillMarkdown(content);
-          const name = parsed.name || skillId;
-          const description = parsed.description || `位于工作区 .asteam/skills/${file}`;
-
-          result.push({
-            id: `custom:workspace:${skillId}`,
-            name: `[项目专属] ${name}`,
-            description,
-            isBuiltin: false,
-            category: 'custom',
-            filePath,
-            version: parsed.version || '1.0.0',
-            triggers: parsed.triggers,
-            recommendedTools: parsed.recommendedTools,
-            rawFrontmatter: parsed.frontmatter,
-            prompt: `【激活工作区专属技能：${name}】\n${parsed.body || content}`
-          });
-        }
-      }
-    } catch {}
-
-    return result;
+    const seenIds = new Set<string>();
+    return this.scanDirectoryForSkills(skillsDir, 'workspace', seenIds);
   }
 
   loadEnterpriseSkills(): SkillItem[] {
@@ -478,26 +831,53 @@ export class SkillManager {
   findSkill(query: string, workspacePath: string | null): SkillItem | undefined {
     if (!query) return undefined;
     const clean = query.trim().toLowerCase();
-    const cleanBase = path.basename(clean, '.md').replace(/^(?:custom_global_|custom:global:|custom_workspace_|custom:workspace:|mcp_prompt:)/i, '');
+    const cleanBase = path.basename(clean, '.md')
+      .replace(/^(?:custom_global_|custom:global:|custom_workspace:|custom:workspace:|custom_extra_|custom:extra:|mcp_prompt:)/i, '');
+    const cleanNormalized = cleanBase.replace(/[^a-z0-9]/g, '');
     const all = this.getAllAvailableSkills(workspacePath);
 
-    return all.find(s => {
+    // Stage 1: 精确 ID 匹配 (最高优先级，严禁被普通 triggers 截胡)
+    const exactIdMatch = all.find(s => {
       const sId = s.id.toLowerCase();
-      const sIdBase = sId.replace(/^(?:custom:global:|custom:workspace:|mcp_prompt:)/i, '');
-      const sName = s.name.toLowerCase();
+      const sIdBase = sId.replace(/^(?:custom:global:|custom:workspace:|custom:extra:|mcp_prompt:)/i, '');
+      const sIdNorm = sIdBase.replace(/[^a-z0-9]/g, '');
+      return sId === clean || sIdBase === clean || sIdBase === cleanBase || sIdNorm === cleanNormalized;
+    });
+    if (exactIdMatch) return exactIdMatch;
+
+    // Stage 2: 文件夹或文件名精确匹配
+    const fileDirMatch = all.find(s => {
       const sFileName = s.filePath ? path.basename(s.filePath, '.md').toLowerCase() : '';
-
-      const matchTriggers = (s.triggers || []).some(t => clean.includes(t.toLowerCase()) || t.toLowerCase().includes(clean));
-
+      const sDirName = s.skillDir ? path.basename(s.skillDir).toLowerCase() : '';
       return (
-        sId === clean ||
-        sIdBase === clean ||
-        sIdBase === cleanBase ||
         sFileName === cleanBase ||
-        sName === clean ||
-        sName.includes(cleanBase) ||
-        matchTriggers
+        sDirName === cleanBase ||
+        (sDirName && sDirName.replace(/[^a-z0-9]/g, '') === cleanNormalized)
       );
+    });
+    if (fileDirMatch) return fileDirMatch;
+
+    // Stage 3: 技能标题/名称精确匹配
+    const exactNameMatch = all.find(s => {
+      const sName = s.name.toLowerCase();
+      const sNameNorm = sName.replace(/[^a-z0-9]/g, '');
+      return sName === clean || sNameNorm === cleanNormalized;
+    });
+    if (exactNameMatch) return exactNameMatch;
+
+    // Stage 4: 技能名称包含关键词匹配
+    const partialNameMatch = all.find(s => {
+      const sName = s.name.toLowerCase();
+      return sName.includes(cleanBase) || sName.includes(clean);
+    });
+    if (partialNameMatch) return partialNameMatch;
+
+    // Stage 5: Triggers 触发词兜底回退匹配
+    return all.find(s => {
+      return (s.triggers || []).some(t => {
+        const tLower = t.toLowerCase();
+        return clean.includes(tLower) || tLower.includes(clean);
+      });
     });
   }
 
@@ -546,8 +926,104 @@ export class SkillManager {
 
   installSkillFromFile(sourcePath: string): SkillItem {
     if (!fs.existsSync(sourcePath)) {
-      throw new Error(`文件不存在: ${sourcePath}`);
+      throw new Error(`文件或目录不存在: ${sourcePath}`);
     }
+
+    const stat = fs.statSync(sourcePath);
+
+    // 1. 如果导入的是 ZIP 压缩包
+    if (stat.isFile() && sourcePath.toLowerCase().endsWith('.zip')) {
+      const zipBaseName = path.basename(sourcePath, '.zip');
+      const targetDir = path.join(this.getGlobalSkillsDir(), zipBaseName);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+      const zip = new AdmZip(sourcePath);
+      zip.extractAllTo(targetDir, true);
+
+      // 探测解压后的技能包
+      const directSkill = this.buildSkillFromFolder(targetDir, 'global');
+      if (directSkill) return directSkill;
+
+      // 检查是否包含子文件夹
+      const subEntries = fs.readdirSync(targetDir, { withFileTypes: true });
+      for (const sub of subEntries) {
+        if (sub.isDirectory() && !sub.name.startsWith('.')) {
+          const subSkill = this.buildSkillFromFolder(path.join(targetDir, sub.name), 'global');
+          if (subSkill) return subSkill;
+        }
+      }
+      throw new Error(`ZIP 包中未找到包含 SKILL.md 或有效技能元数据的入口`);
+    }
+
+    // 2. 如果导入的是文件夹
+    if (stat.isDirectory()) {
+      const folderName = path.basename(sourcePath);
+      const targetDir = path.join(this.getGlobalSkillsDir(), folderName);
+
+      // 优先探测该文件夹本身是否为包含 SKILL.md / skill.md 的单一复合技能
+      let hasRootSkill = false;
+      const candidates = ['SKILL.md', 'skill.md', 'README.md'];
+      for (const cand of candidates) {
+        if (fs.existsSync(path.join(sourcePath, cand))) {
+          hasRootSkill = true;
+          break;
+        }
+      }
+
+      if (hasRootSkill) {
+        if (path.normalize(sourcePath) !== path.normalize(targetDir)) {
+          fs.cpSync(sourcePath, targetDir, { recursive: true });
+        }
+        const folderSkill = this.buildSkillFromFolder(targetDir, 'global');
+        if (folderSkill) return folderSkill;
+      }
+
+      // 若根目录没有直接包含 SKILL.md，探测其子目录是否包含复合技能 (例如选择的是外部合集仓库目录，如 D:\ASTeamAIProject\Skills)
+      try {
+        const subEntries = fs.readdirSync(sourcePath, { withFileTypes: true });
+        const foundSubSkills: SkillItem[] = [];
+        for (const sub of subEntries) {
+          if (
+            sub.isDirectory() &&
+            !sub.name.startsWith('.') &&
+            sub.name !== 'node_modules' &&
+            sub.name !== '__MACOSX' &&
+            sub.name !== 'dist'
+          ) {
+            const subPath = path.join(sourcePath, sub.name);
+            const subSkill = this.buildSkillFromFolder(subPath, 'extra');
+            if (subSkill) {
+              foundSubSkills.push(subSkill);
+            }
+          }
+        }
+
+        if (foundSubSkills.length > 0) {
+          // 智能关联为外部技能仓库，持久化进 extraSkillDirs，令其永久有效
+          storageHub.addExtraSkillDir(sourcePath);
+          return foundSubSkills[0];
+        }
+      } catch (scanErr) {
+        console.warn(`[SkillManager] Error scanning subfolders in ${sourcePath}:`, scanErr);
+      }
+
+      // 兜底策略：若无任何 SKILL.md，但用户明确选中了该文件夹作为技能，自动为其生成基础 SKILL.md 骨架并注册
+      if (path.normalize(sourcePath) !== path.normalize(targetDir)) {
+        fs.cpSync(sourcePath, targetDir, { recursive: true });
+      }
+      const scaffoldSkillMd = path.join(targetDir, 'SKILL.md');
+      if (!fs.existsSync(scaffoldSkillMd)) {
+        const defaultContent = `---\nname: ${folderName}\ndescription: 本地导入技能文件夹 (${folderName})\nversion: 1.0.0\ntriggers:\n  - ${folderName.toLowerCase()}\n---\n\n# ${folderName}\n\n【已激活本地文件夹技能：${folderName}】\n- 本技能由本地文件夹自动解析导入。\n`;
+        fs.writeFileSync(scaffoldSkillMd, defaultContent, 'utf-8');
+      }
+      const scaffoldSkill = this.buildSkillFromFolder(targetDir, 'global');
+      if (scaffoldSkill) return scaffoldSkill;
+
+      throw new Error(`所选目录中未找到有效技能入口`);
+    }
+
+    // 3. 如果导入的是单文件 Markdown
     const content = fs.readFileSync(sourcePath, 'utf-8');
     const baseName = path.basename(sourcePath, '.md');
     const parsed = parseSkillMarkdown(content);
@@ -563,12 +1039,35 @@ export class SkillManager {
 
   deleteCustomSkill(skillId: string): boolean {
     const dir = this.getGlobalSkillsDir();
-    const cleanId = skillId.replace(/^custom:(global|workspace):/, '');
+    const cleanId = skillId.replace(/^custom:(global|workspace|extra):/, '');
+
+    // 1. 尝试删除 md 文件
     const targetFile = path.join(dir, `${cleanId}.md`);
     if (fs.existsSync(targetFile)) {
-      fs.unlinkSync(targetFile);
-      return true;
+      try {
+        fs.unlinkSync(targetFile);
+        return true;
+      } catch {}
     }
+
+    // 2. 尝试删除文件夹技能
+    const targetFolder = path.join(dir, cleanId);
+    if (fs.existsSync(targetFolder) && fs.statSync(targetFolder).isDirectory()) {
+      try {
+        fs.rmSync(targetFolder, { recursive: true, force: true });
+        return true;
+      } catch {}
+    }
+
+    // 3. 尝试从解压缓存区删除
+    const extractedFolder = path.join(storageHub.getExtractedSkillsDir(), cleanId);
+    if (fs.existsSync(extractedFolder)) {
+      try {
+        fs.rmSync(extractedFolder, { recursive: true, force: true });
+        return true;
+      } catch {}
+    }
+
     return false;
   }
 

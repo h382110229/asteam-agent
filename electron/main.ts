@@ -312,12 +312,47 @@ function setupIPC() {
   ipcMain.handle('skills:installFromFile', async () => {
     if (!mainWindow) return null;
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: '选择 Skill Markdown 文件 (.md)',
+      title: '选择 Skill 文件 (.md, .zip 或压缩包)',
       properties: ['openFile'],
-      filters: [{ name: 'Markdown Skill', extensions: ['md'] }]
+      filters: [
+        { name: 'Skill 技能包 (*.md, *.zip)', extensions: ['md', 'zip'] },
+        { name: 'Markdown Skill (*.md)', extensions: ['md'] },
+        { name: 'ZIP 技能归档 (*.zip)', extensions: ['zip'] },
+        { name: '所有文件 (*.*)', extensions: ['*'] }
+      ]
     });
     if (canceled || filePaths.length === 0) return null;
     return skillManager.installSkillFromFile(filePaths[0]);
+  });
+
+  ipcMain.handle('skills:installFromFolder', async () => {
+    if (!mainWindow) return null;
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: '选择包含 SKILL.md 的技能文件夹',
+      properties: ['openDirectory']
+    });
+    if (canceled || filePaths.length === 0) return null;
+    return skillManager.installSkillFromFile(filePaths[0]);
+  });
+
+  ipcMain.handle('skills:getExtraDirs', async () => {
+    return storageHub.getExtraSkillDirs();
+  });
+
+  ipcMain.handle('skills:addExtraDir', async () => {
+    if (!mainWindow) return null;
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: '选择外部技能仓库根目录 (如 D:\\ASTeamAIProject\\Skills)',
+      properties: ['openDirectory']
+    });
+    if (canceled || filePaths.length === 0) return null;
+    const added = storageHub.addExtraSkillDir(filePaths[0]);
+    return { success: added, dir: filePaths[0], extraDirs: storageHub.getExtraSkillDirs() };
+  });
+
+  ipcMain.handle('skills:removeExtraDir', async (_event, dirPath: string) => {
+    const removed = storageHub.removeExtraSkillDir(dirPath);
+    return { success: removed, extraDirs: storageHub.getExtraSkillDirs() };
   });
 
   ipcMain.handle('skills:installFromContent', async (_event, { id, name, description, prompt }) => {

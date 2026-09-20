@@ -19,6 +19,10 @@ export interface ElectronAPI {
   // Skills
   getAllSkills: (workspacePath: string | null) => Promise<any[]>;
   installSkillFromFile: () => Promise<any>;
+  installSkillFromFolder: () => Promise<any>;
+  getExtraSkillDirs: () => Promise<string[]>;
+  addExtraSkillDir: () => Promise<{ success: boolean; dir?: string; extraDirs: string[] }>;
+  removeExtraSkillDir: (dirPath: string) => Promise<{ success: boolean; extraDirs: string[] }>;
   installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
   installSkillFromUrl: (url: string) => Promise<any>;
   deleteSkill: (skillId: string) => Promise<boolean>;
@@ -127,6 +131,10 @@ const api: ElectronAPI = {
 
   getAllSkills: (workspacePath: string | null) => ipcRenderer.invoke('skills:getAll', workspacePath),
   installSkillFromFile: () => ipcRenderer.invoke('skills:installFromFile'),
+  installSkillFromFolder: () => ipcRenderer.invoke('skills:installFromFolder'),
+  getExtraSkillDirs: () => ipcRenderer.invoke('skills:getExtraDirs'),
+  addExtraSkillDir: () => ipcRenderer.invoke('skills:addExtraDir'),
+  removeExtraSkillDir: (dirPath: string) => ipcRenderer.invoke('skills:removeExtraDir', dirPath),
   installSkillFromContent: (data) => ipcRenderer.invoke('skills:installFromContent', data),
   installSkillFromUrl: (url) => ipcRenderer.invoke('skills:installFromUrl', url),
   deleteSkill: (skillId) => ipcRenderer.invoke('skills:delete', skillId),

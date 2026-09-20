@@ -177,11 +177,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setForm(prev => ({ ...prev, customMcpConfig: newConfig }));
   };
 
+  const [extraSkillDirs, setExtraSkillDirs] = useState<string[]>([]);
+
+  const refreshExtraSkillDirs = async () => {
+    if (window.electronAPI?.getExtraSkillDirs) {
+      try {
+        const dirs = await window.electronAPI.getExtraSkillDirs();
+        setExtraSkillDirs(dirs || []);
+      } catch {}
+    }
+  };
+
   const refreshSkills = async () => {
     if (window.electronAPI) {
       try {
         const skills = await window.electronAPI.getAllSkills(workspacePath);
         setAllSkills(skills);
+        await refreshExtraSkillDirs();
       } catch {}
     }
   };
@@ -615,6 +627,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       }
     } catch (err: any) {
       setSkillInstallMsg({ type: 'error', text: `安装失败: ${err.message}` });
+    }
+  };
+
+  const handleInstallFromFolder = async () => {
+    if (!window.electronAPI?.installSkillFromFolder) return;
+    try {
+      const installed = await window.electronAPI.installSkillFromFolder();
+      if (installed) {
+        await refreshSkills();
+        setForm(prev => ({
+          ...prev,
+          enabledSkills: [...(prev.enabledSkills || []), installed.id]
+        }));
+        setSkillInstallMsg({ type: 'success', text: `成功导入复合文件夹技能: ${installed.name}` });
+        setTimeout(() => {
+          setShowInstallSkillModal(false);
+          setSkillInstallMsg(null);
+        }, 1200);
+      }
+    } catch (err: any) {
+      setSkillInstallMsg({ type: 'error', text: `导入文件夹技能失败: ${err.message}` });
+    }
+  };
+
+  const handleAddExtraSkillDir = async () => {
+    if (!window.electronAPI?.addExtraSkillDir) return;
+    try {
+      const res = await window.electronAPI.addExtraSkillDir();
+      if (res?.success) {
+        await refreshExtraSkillDirs();
+        await refreshSkills();
+      }
+    } catch (err: any) {
+      console.warn('添加外部技能目录失败:', err);
+    }
+  };
+
+  const handleRemoveExtraSkillDir = async (dirPath: string) => {
+    if (!window.electronAPI?.removeExtraSkillDir) return;
+    try {
+      const res = await window.electronAPI.removeExtraSkillDir(dirPath);
+      if (res?.success) {
+        await refreshExtraSkillDirs();
+        await refreshSkills();
+      }
+    } catch (err: any) {
+      console.warn('移除外部技能目录失败:', err);
     }
   };
 
@@ -1397,11 +1456,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowInstallSkillModal(true)}
-                    className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors"
+                    className="inline-flex items-center space-x-1 rounded-lg bg-[var(--primary)]/10 px-2.5 py-1 text-[11px] font-semibold text-[var(--primary)] hover:bg-[var(--primary)] hover:text-white transition-colors cursor-pointer"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>安装 / 导入新技能</span>
                   </button>
+                </div>
+
+                {/* External Skill Repositories Card (v1.11.0) */}
+                <div className="rounded-xl border border-[var(--border)] p-3 bg-[var(--background)]/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5 font-medium text-[var(--foreground)]">
+                      <FolderOpen className="h-4 w-4 text-amber-500" />
+                      <span>已关联外部技能仓库目录 ({extraSkillDirs.length})</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddExtraSkillDir}
+                      className="inline-flex items-center space-x-1 rounded px-2 py-0.5 text-[10px] font-semibold bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" />
+                      <span>关联外部技能目录</span>
+                    </button>
+                  </div>
+                  {extraSkillDirs.length === 0 ? (
+                    <p className="text-[11px] text-[var(--muted-foreground)]">
+                      尚未关联外部技能目录。您可以点击右上方按钮将含有多个技能的文件夹（如 <code>D:\ASTeamAIProject\Skills</code>）一键关联，系统将自动扫描并加载所有复合技能与 zip 包。
+                    </p>
+                  ) : (
+                    <div className="space-y-1">
+                      {extraSkillDirs.map(dir => (
+                        <div key={dir} className="flex items-center justify-between p-1.5 rounded-lg bg-[var(--card)] border border-[var(--border)] text-xs">
+                          <span className="font-mono text-[11px] text-[var(--foreground)] truncate max-w-[400px]" title={dir}>
+                            📂 {dir}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveExtraSkillDir(dir)}
+                            className="text-[var(--muted-foreground)] hover:text-rose-500 text-[10px] ml-2 px-1 cursor-pointer"
+                            title="解除关联"
+                          >
+                            移除
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Subgroup: Office & 文档类技能 */}
@@ -1482,11 +1582,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {customSkills.length > 0 && (
                   <div className="space-y-1.5 pt-1">
                     <span className="text-[11px] font-semibold text-[var(--muted-foreground)] block">
-                      🧩 已安装的自定义技能库
+                      🧩 已安装与外部关联的技能库 ({customSkills.length})
                     </span>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {customSkills.map(skill => {
                         const isEnabled = form.enabledSkills.includes(skill.id);
+                        const isFolder = skill.isFolderSkill;
                         return (
                           <div
                             key={skill.id}
@@ -1499,17 +1600,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           >
                             <div className="flex items-start space-x-2 truncate pr-1">
                               <div className="mt-0.5"><Sparkles className="h-4 w-4 text-[var(--primary)]" /></div>
-                              <div className="space-y-0.5 truncate">
-                                <span className="font-semibold text-[var(--foreground)] block truncate">{skill.name}</span>
+                              <div className="space-y-0.5 truncate flex-1 min-w-0">
+                                <div className="flex items-center gap-1 flex-wrap">
+                                  <span className="font-semibold text-[var(--foreground)] truncate">{skill.name}</span>
+                                  {isFolder && (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-indigo-500/15 text-indigo-500 border border-indigo-500/30 shrink-0">
+                                      复合包
+                                    </span>
+                                  )}
+                                  {skill.scriptsDir && (
+                                    <span className="text-[9px] font-medium px-1 rounded bg-teal-500/15 text-teal-500 border border-teal-500/30 shrink-0">
+                                      含脚本
+                                    </span>
+                                  )}
+                                </div>
                                 <p className="text-[10px] text-[var(--muted-foreground)] truncate">{skill.description}</p>
+                                {skill.skillDir && (
+                                  <p className="text-[9px] text-[var(--muted-foreground)]/70 font-mono truncate" title={skill.skillDir}>
+                                    📁 {skill.skillDir}
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center space-x-1 shrink-0 mt-0.5">
                               <button
                                 type="button"
                                 onClick={(e) => handleDeleteSkill(e, skill.id)}
-                                title="删除自定义技能"
-                                className="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--muted-foreground)] hover:text-[var(--error)]"
+                                title="删除此技能"
+                                className="opacity-0 group-hover:opacity-100 p-0.5 text-[var(--muted-foreground)] hover:text-[var(--error)] cursor-pointer"
                               >
                                 <Trash2 className="h-3 w-3" />
                               </button>
@@ -1517,7 +1635,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 type="checkbox"
                                 checked={isEnabled}
                                 onChange={() => {}}
-                                className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                                className="h-3.5 w-3.5 rounded border-[var(--input)] text-[var(--primary)] focus:ring-[var(--primary)] cursor-pointer"
                               />
                             </div>
                           </div>
@@ -2040,7 +2158,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="text-right">
                     <span className="rounded-full bg-[var(--primary)]/15 px-2.5 py-1 text-xs font-mono font-semibold text-[var(--primary)]">
-                      v1.10.0 (当前版本)
+                      v1.11.1 (当前版本)
                     </span>
                     <p className="text-[10px] text-[var(--muted-foreground)] mt-1">
                       通道: 企业私有云端中枢 (Stable)
@@ -2125,7 +2243,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       } else if (res) {
                         setUpdateCheckMsg({
                           type: 'info',
-                          text: `当前已是最新版本 (v${res.currentVersion || '1.10.0'})。`
+                          text: `当前已是最新版本 (v${res.currentVersion || '1.11.1'})。`
                         });
                       } else {
                         setUpdateCheckMsg({
@@ -2245,19 +2363,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <div className="rounded-xl border border-dashed border-[var(--border)] p-6 bg-[var(--background)]/50 space-y-2">
                     <FolderOpen className="h-8 w-8 text-[var(--primary)] mx-auto" />
                     <p className="font-medium text-[var(--foreground)]">
-                      选择本地现有的 Skill Markdown 文件 (.md)
+                      选择本地现有的 Skill 文件或复合文件夹
                     </p>
                     <p className="text-[11px] text-[var(--muted-foreground)]">
-                      系统将自动解析标题并将其安全安装至 ASTeam 专属技能中枢 <code>{storageStats?.dataRootDir ? `${storageStats.dataRootDir}/skills` : 'ASTeamData/skills'}</code>
+                      支持导入单文件 <code>.md</code>、ZIP 压缩包 <code>.zip</code> 或完整的复合技能文件夹（含 <code>scripts/</code> 与 <code>assets/</code> 模板）。系统将自动解压并注册至技能中枢。
                     </p>
-                    <button
-                      type="button"
-                      onClick={handleInstallFromFile}
-                      className="inline-flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors shadow-xs"
-                    >
-                      <Upload className="h-3.5 w-3.5" />
-                      <span>选择并导入 .md 文件</span>
-                    </button>
+                    <div className="flex items-center justify-center gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={handleInstallFromFile}
+                        className="inline-flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] px-4 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-hover)] transition-colors shadow-xs cursor-pointer"
+                      >
+                        <Upload className="h-3.5 w-3.5" />
+                        <span>导入 .md / .zip 文件</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleInstallFromFolder}
+                        className="inline-flex items-center space-x-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 px-4 py-2 text-xs font-semibold text-white transition-colors shadow-xs cursor-pointer"
+                      >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        <span>导入技能文件夹</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
