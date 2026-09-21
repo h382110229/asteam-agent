@@ -704,7 +704,15 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           return `\n\n【用户附件图片: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n![${att.name}](${att.content})`;
         }
         if (att.type?.startsWith('document/') && att.content) {
-          return `\n\n【用户附件文档: ${att.name} (已智能脱壳解析正文与大纲，原文件 ${Math.round(att.size / 1024)} KB)】:\n---\n${att.content}\n---`;
+          let docSnippet = `\n\n【用户附件文档: ${att.name} (已智能脱壳解析正文与大纲，原文件 ${Math.round(att.size / 1024)} KB)】:\n---\n${att.content}\n---`;
+          if (att.extractedImages && att.extractedImages.length > 0) {
+            docSnippet += `\n\n【该文档内嵌关键架构/拓扑图 (${att.extractedImages.length} 项，已精准原位定位还原)】:\n` +
+              att.extractedImages.map((img: any, idx: number) => {
+                const diskNotice = `- 图表 ${idx + 1}: ${img.name}（位置: ${img.locationHint || '正文'}，本地路径: \`${img.localPath}\`）`;
+                return img.base64 ? `${diskNotice}\n![${img.name}](${img.base64})` : diskNotice;
+              }).join('\n');
+          }
+          return docSnippet;
         }
         if (att.content && !att.content.startsWith('data:')) {
           const ext = att.name.split('.').pop() || '';

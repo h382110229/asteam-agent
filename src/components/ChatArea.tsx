@@ -51,6 +51,15 @@ export interface FileAttachment {
   size: number;
   type: string;
   content?: string;
+  extractedImages?: Array<{
+    id: string;
+    name: string;
+    localPath: string;
+    mimeType: string;
+    size: number;
+    base64?: string;
+    locationHint?: string;
+  }>;
 }
 
 export interface ChatMessageItem {
@@ -1036,7 +1045,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               name: file.name,
               size: file.size,
               type: `document/${file.name.split('.').pop()?.toLowerCase()}`,
-              content: res.text
+              content: res.text,
+              extractedImages: res.extractedImages
             }]);
           } catch (err: any) {
             console.warn('Failed to extract office document:', err);
@@ -1298,7 +1308,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.11.2)
+                ASTeam Agent (v1.11.3)
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
                 内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 零依赖全盘极速扫描</strong>、<strong>📄 原生无头 HTML-to-PDF 打印引擎</strong>、<strong>🛡️ 交付物强契约硬门禁</strong> 与 <strong>📑 开箱即用全能 Office 套件</strong>。
@@ -1866,8 +1876,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   )}
                   <span className="max-w-[140px] truncate font-mono">{file.name}</span>
                   {file.type?.startsWith('document/') ? (
-                    <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/15 text-indigo-500 font-medium">
-                      已智能脱壳
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/15 text-indigo-500 font-medium flex items-center gap-1">
+                      <span>已智能脱壳</span>
+                      {file.extractedImages && file.extractedImages.length > 0 && (
+                        <span className="text-amber-500 font-normal">· 🖼️ {file.extractedImages.length} 张图表已就位</span>
+                      )}
                     </span>
                   ) : (
                     <span className="text-[9px] text-[var(--muted-foreground)]">

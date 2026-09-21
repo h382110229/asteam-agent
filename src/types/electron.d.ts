@@ -29,6 +29,15 @@ export interface ElectronAPI {
     summary: string;
     charCount: number;
     type: 'word' | 'excel' | 'powerpoint' | 'pdf' | 'unknown';
+    extractedImages?: Array<{
+      id: string;
+      name: string;
+      localPath: string;
+      mimeType: string;
+      size: number;
+      base64?: string;
+      locationHint?: string;
+    }>;
   }>;
 
   // Agent Harness

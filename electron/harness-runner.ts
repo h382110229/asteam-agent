@@ -1462,6 +1462,88 @@ function resolveFallbackModel(provider: SingleProviderTarget): string | null {
   return target || null;
 }
 
+function buildProviderMessagesPayload(provider: SingleProviderTarget, messages: ChatMessage[]): any[] {
+  const supportsVision = providerSupportsVision(provider);
+  if (!supportsVision) {
+    return messages;
+  }
+
+  return messages.map(msg => {
+    if (msg.role !== 'user' || typeof msg.content !== 'string') {
+      return msg;
+    }
+
+    const contentStr = msg.content;
+    const hasDataImage = contentStr.includes('data:image/');
+    const hasFileImage = contentStr.includes('file:///') && /\.(?:png|jpe?g|webp|gif)/i.test(contentStr);
+
+    if (!hasDataImage && !hasFileImage) {
+      return msg;
+    }
+
+    const parts: any[] = [];
+    let textOnly = contentStr;
+
+    // 1. 抽取 data:image/ Base64 图片 (至多提取 5 张)
+    const base64Regex = /!\[([^\]]*)\]\((data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+)\)/g;
+    let b64Match: RegExpExecArray | null;
+    while ((b64Match = base64Regex.exec(contentStr)) !== null && parts.length < 5) {
+      const b64Url = b64Match[2];
+      parts.push({
+        type: 'image_url',
+        image_url: { url: b64Url, detail: 'high' }
+      });
+    }
+
+    // 2. 抽取本地 file:/// 架构图并转 Base64 (至多提取 5 张)
+    if (parts.length < 5 && hasFileImage) {
+      const fileRegex = /!\[([^\]]*)\]\(file:\/\/\/([^\)]+)\)/g;
+      let fileMatch: RegExpExecArray | null;
+      while ((fileMatch = fileRegex.exec(contentStr)) !== null && parts.length < 5) {
+        let localDiskPath = decodeURIComponent(fileMatch[2]);
+        if (/^\/[a-zA-Z]:/.test(localDiskPath)) {
+          localDiskPath = localDiskPath.slice(1);
+        }
+        if (fs.existsSync(localDiskPath)) {
+          try {
+            const stat = fs.statSync(localDiskPath);
+            if (stat.size > 0 && stat.size <= 4 * 1024 * 1024) {
+              const buf = fs.readFileSync(localDiskPath);
+              const ext = path.extname(localDiskPath).toLowerCase();
+              let mime = 'image/png';
+              if (ext === '.jpg' || ext === '.jpeg') mime = 'image/jpeg';
+              else if (ext === '.webp') mime = 'image/webp';
+              else if (ext === '.gif') mime = 'image/gif';
+
+              parts.push({
+                type: 'image_url',
+                image_url: { url: `data:${mime};base64,${buf.toString('base64')}`, detail: 'high' }
+              });
+            }
+          } catch {}
+        }
+      }
+    }
+
+    if (parts.length === 0) {
+      return msg;
+    }
+
+    // 清洗掉正文中重复冗长的超长 Base64，防止 prompt 重复冗余
+    textOnly = textOnly.replace(/!\[([^\]]*)\]\(data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+\)/g, (match, alt) => {
+      return `![${alt}](多模态图像已接入视界)`;
+    });
+
+    return {
+      role: msg.role,
+      content: [
+        { type: 'text', text: textOnly },
+        ...parts
+      ]
+    };
+  });
+}
+
 async function executeSingleProviderCall(
   provider: SingleProviderTarget,
   messages: ChatMessage[],
@@ -1478,12 +1560,14 @@ async function executeSingleProviderCall(
     headers['Authorization'] = `Bearer ${provider.apiKey}`;
   }
 
+  const payloadMessages = buildProviderMessagesPayload(provider, messages);
+
   const response = await safeFetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       model: provider.model || 'Auto',
-      messages,
+      messages: payloadMessages,
       stream: useStream,
       temperature: 0.3
     }),
@@ -2290,12 +2374,26 @@ export async function runHarnessAgent(
       return;
     }
 
-    const initialPlanSteps: AgentStep[] = [
-      { id: 'step-1', title: isHostMode ? '分析宿主任务与操作意图' : '分析工作区与任务意图', status: 'running' },
-      { id: 'step-2', title: isHostMode ? '准备执行环境或检视目标' : '检索并检视关键文件', status: 'pending' },
-      { id: 'step-3', title: isHostMode ? '生成文档或执行本机命令' : '制定并执行修改/命令', status: 'pending' },
-      { id: 'step-4', title: '验证并生成交付总结', status: 'pending' }
-    ];
+    const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+    const userText = (lastUserMsg && typeof lastUserMsg.content === 'string') ? lastUserMsg.content : '';
+
+    const isGitRepo = hasWorkspace && fs.existsSync(path.join(effectiveWorkspace, '.git'));
+    const isDocOrConsultTask = /(?:文档|方案|架构|拓扑|报告|白皮书|查看|分析|有哪些文件|目录|清单|总结|审阅|审核|设计|word|docx|ppt|pptx|excel|xlsx|pdf)/i.test(userText) &&
+      !/(?:git\s+commit|git\s+push|提交代码|创建分支|解决冲突|发版|\bpr\b|\bmr\b)/i.test(userText);
+
+    const initialPlanSteps: AgentStep[] = isDocOrConsultTask
+      ? [
+          { id: 'step-1', title: '分析需求意图与目标范围', status: 'running' },
+          { id: 'step-2', title: '扫描工作区与提取文档/图文内容', status: 'pending' },
+          { id: 'step-3', title: '方案要素深度分析与架构论证', status: 'pending' },
+          { id: 'step-4', title: '汇总交付详尽分析报告与结论', status: 'pending' }
+        ]
+      : [
+          { id: 'step-1', title: isHostMode ? '分析宿主任务与操作意图' : '分析工作区与任务意图', status: 'running' },
+          { id: 'step-2', title: isHostMode ? '准备执行环境或检视目标' : '检索并检视关键文件', status: 'pending' },
+          { id: 'step-3', title: isHostMode ? '生成文档或执行本机命令' : '制定并执行修改/命令', status: 'pending' },
+          { id: 'step-4', title: '验证并生成交付总结', status: 'pending' }
+        ];
     callbacks.onPlan(initialPlanSteps);
 
     if (config.customMcpConfig) {
@@ -2306,13 +2404,14 @@ export async function runHarnessAgent(
       }
     }
 
-    const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || ['web_search', 'web_fetch', 'git_operations', 'system_inspector']);
+    const defaultMcpTools = isGitRepo
+      ? ['web_search', 'web_fetch', 'git_operations', 'system_inspector']
+      : ['web_search', 'web_fetch', 'system_inspector'];
+    const mcpPrompts = mcpManager.getEnabledToolPrompts(config.enabledMcpTools || defaultMcpTools);
 
     // P1: 两阶段轻量索引与按需渐进式动态激活
     // 阶段一：动态侦测并强制激活用户在输入中通过 @ 显式提及的技能
     const userMentionedSkills: string[] = [];
-    const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
-    const userText = (lastUserMsg && typeof lastUserMsg.content === 'string') ? lastUserMsg.content : '';
 
     if (userText) {
       const mentionMatches = Array.from(userText.matchAll(/@([a-zA-Z0-9_\-:]+)/g));
@@ -2325,8 +2424,11 @@ export async function runHarnessAgent(
       }
     }
 
+    const defaultSkills = isGitRepo
+      ? ['office_word_report', 'office_excel_master', 'code_review', 'unit_test', 'git_commit_helper']
+      : ['office_word_report', 'office_excel_master', 'code_review', 'unit_test'];
     const effectiveEnabledSkills = Array.from(new Set([
-      ...(config.enabledSkills || ['office_word_report', 'office_excel_master', 'code_review', 'unit_test', 'git_commit_helper']),
+      ...(config.enabledSkills || defaultSkills),
       ...userMentionedSkills
     ]));
 
@@ -2418,6 +2520,9 @@ ${isHostMode
 你拥有对本机的自主执行能力，可以帮用户生成/编辑文档报告、运行系统命令诊断环境、批量处理文件以及调用 MCP 工具。`
   : `【当前运行模式：本地工作区项目】
 - 项目目录：${config.workspacePath}
+${isGitRepo
+  ? `【版本控制：Git 代码仓库】\n当前目录已关联 Git 版本控制。`
+  : `【重要项目属性：非 Git 代码仓库 / 方案与文档型项目】\n当前目录没有 Git 仓库（无 .git 目录），主要承载技术方案、Office 文档、配置文件或数据资料。严禁在思考和分析中联想或提及 Git 状态、Git 提交记录、分支回退等代码仓库特有概念！请纯粹聚焦于文档内容分析、架构逻辑梳理、技术方案审核与文件目录结构！`}
 若用户需求是生成方案、报告到桌面，请直接使用上述提供的桌面绝对路径或 "~/Desktop/..."；若需求是修改项目代码，使用相对项目路径。`
 }
 ${rulesPrompt}
@@ -2701,19 +2806,52 @@ ${modeInstruction}
             callbacks.onToken(badgeBlock, 'assistant');
           }
         }
-        // 检测是否属于“制定了计划但未调用工具直接悬挂停顿”的情况 (Plan-Execution Decoupling)
+        // 核心强化：智能防早退与内核自驱动判定 (Auto-Driving Completion Guard)
+        // 彻底根治“只说一句我先查看目录/我来扫描，然后直接退出”的假执行 Bug
         const trimmed = stepResponse.trim();
-        const isHangingPlan = iteration === 1 && (
-          trimmed.endsWith('：') || trimmed.endsWith(':') ||
-          trimmed.includes('开始执行') || trimmed.includes('执行计划') ||
-          (trimmed.length < 400 && (trimmed.includes('运行 `') || trimmed.includes('执行以下操作') || trimmed.includes('依次执行')))
+        const hasExecutedAnyTool = initialPlanSteps.some(s => s.tool);
+        const isActionRequested = /(?:查看|列出|有哪些|检索|扫描|分析|检查|查找|生成|创建|修改|统计|读取|找一下|帮我)/i.test(userText);
+
+        // 识别明显的未完成准备短句、过渡说明或口头回复（例如“我先查看当前项目目录的文件列表。”、“我现在重新完整扫描...”）
+        const isTransitionStatement = (
+          trimmed.length < 350 && (
+            /^(?:我先|我来|我现在|首先|准备|正在|下面将|接下来|稍等|马上|抱歉|好的)/.test(trimmed) ||
+            /(?:我先查看|重新完整扫描|重新扫描|我先列出|现在开始|先来检视|先看下|先查看)/.test(trimmed) ||
+            trimmed.endsWith('：') || trimmed.endsWith(':') ||
+            trimmed.includes('开始执行') || trimmed.includes('执行计划') ||
+            trimmed.includes('运行 `') || trimmed.includes('执行以下操作') || trimmed.includes('依次执行')
+          )
         );
 
-        if (isHangingPlan) {
-          callbacks.onToken(`\n\n⚙️ **[内核自驱动]** 检测到规划制定完毕，正在自动触发工具调用链...\n`, 'thought');
+        // 场景 1：用户提出了明确行动指令，但尚未执行过任何工具，且模型仅输出了过渡说明或字数较少（无结构化结果）
+        const shouldDriveToolExecution = (
+          (!hasExecutedAnyTool && isActionRequested && isTransitionStatement) ||
+          (iteration <= 2 && isTransitionStatement && !trimmed.includes('---') && !trimmed.includes('```') && !trimmed.includes('1.') && !trimmed.includes('- '))
+        );
+
+        if (shouldDriveToolExecution) {
+          callbacks.onToken(`\n\n⚙️ **[内核自驱动唤醒]** 检测到当前仅输出了准备意图，尚未实际调用工具获取数据。正在强制驱动工具执行...\n`, 'thought');
+
+          let hintContent = '【内核自驱动执行要求】你刚才仅给出了说明或口头意图，并未实际调用工具获取真实数据！\n';
+          if (/(?:文件|目录|有哪些|列表|project|结构)/i.test(userText)) {
+            hintContent += '请在当前回复中**立即输出工具调用块**查看目录（例如：\n```tool:list_directory\n{"dirPath": "."}\n```\n），严禁只输出纯文本说明！';
+          } else {
+            hintContent += '请立即使用 ```tool:工具名 {"参数": "..."}``` 代码块格式调用对应的工具开始执行，严禁只输出说明文本！';
+          }
+
           messages.push({
             role: 'user',
-            content: '请立即使用 ```tool:工具名 {"参数": "..."}``` 代码块格式调用对应的工具开始执行上述操作，严禁只输出说明文本。'
+            content: hintContent
+          });
+          continue;
+        }
+
+        // 场景 2：已经执行过工具（已有真实结果返回），但模型在给出答复时又只输出了简短过渡句而没有给出详尽结论
+        if (hasExecutedAnyTool && isTransitionStatement && iteration < maxIterations - 1) {
+          callbacks.onToken(`\n\n⚙️ **[内核自驱动推进]** 工具执行结果已就绪，正在驱动生成最终分析报告与详尽结论...\n`, 'thought');
+          messages.push({
+            role: 'user',
+            content: '【内核驱动交付】工具执行结果已返回，请结合真实数据直接给出结构化、详尽的分析报告与最终结论，严禁再次输出口头准备过渡句！'
           });
           continue;
         }
@@ -3112,10 +3250,22 @@ ${modeInstruction}
       });
     }
 
-    // Mark remaining steps as completed
+    // 真实步骤状态结算：杜绝虚假全打对勾
+    // 仅当实际调用过工具或输出了有效实质答复时，才将对应步骤与收尾步骤标记为 completed；未执行的步骤绝不虚假冒充完成
+    const executedAnyTool = initialPlanSteps.some(s => s.tool && (s.status === 'completed' || s.result));
+    const hasMeaningfulOutput = finalSummary.length >= 200 || trackedArtifacts.length > 0;
+
     for (const step of initialPlanSteps) {
-      if (step.status === 'pending' || step.status === 'running') {
+      if (step.id === 'step-1') {
         step.status = 'completed';
+        callbacks.onStepUpdate({ ...step });
+      } else if (step.id === 'step-4') {
+        if (executedAnyTool || hasMeaningfulOutput) {
+          step.status = 'completed';
+          callbacks.onStepUpdate({ ...step });
+        }
+      } else if (step.status === 'running') {
+        step.status = (executedAnyTool || hasMeaningfulOutput) ? 'completed' : 'pending';
         callbacks.onStepUpdate({ ...step });
       }
     }
@@ -3129,7 +3279,7 @@ ${modeInstruction}
     // v1.8.0 核心：Hermes 式自省微型复盘与记忆自动沉淀
     try {
       const reflectRes = memoryManager.autoReflectAndPersist({
-        userPrompt: prompt,
+        userPrompt: userText,
         stepsCount: currentStepIndex + 1,
         toolsUsed: Array.from(new Set(initialPlanSteps.map(s => s.tool).filter(Boolean) as string[])),
         artifactsGenerated: trackedArtifacts,

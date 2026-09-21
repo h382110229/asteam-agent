@@ -792,8 +792,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--primary)] text-white text-xs font-bold">
               A
             </span>
-            <h2 className="text-base font-semibold text-[var(--foreground)]">
-              ASTeam Agent 设置
+            <h2 className="text-base font-semibold text-[var(--foreground)] flex items-center space-x-2">
+              <span>ASTeam Agent 设置</span>
+              <span className="text-xs font-normal text-[var(--muted-foreground)]">v1.11.3</span>
             </h2>
           </div>
           <button
