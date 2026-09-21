@@ -2214,11 +2214,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <button
                     type="button"
                     onClick={onOpenGitDiff}
-                    className="flex items-center space-x-1 text-[var(--primary)] font-medium hover:underline"
+                    className="flex items-center space-x-1 text-[var(--foreground)] font-medium hover:text-[var(--primary)] transition-colors"
                   >
-                    <FolderGit2 className="h-3 w-3" />
+                    <Folder className="h-3 w-3 text-amber-500" />
                     <span className="truncate max-w-[160px]" title={workspacePath}>
-                      {workspaceName} (Git Diff)
+                      {workspaceName}
                     </span>
                   </button>
 
