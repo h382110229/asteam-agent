@@ -22,6 +22,14 @@ export interface SecurityFenceAuditRecord {
   blockReason?: string;
 }
 
+export interface CustomerAssetConfig {
+  enabled: boolean;
+  customerNames: string[];        // 客户名称与全称列表 (如: ["招商银行", "中国移动"])
+  projectCodes: string[];         // 内部项目代号列表 (如: ["Project-Apollo", "核心骨干改造"])
+  sensitiveLogoPatterns: string[];// 敏感 Logo 文件关键词 (如: ["*logo*", "*badge*"])
+  bidirectionalMapping: boolean; // 是否开启交付物自动逆向翻译还原 (网关/模型接收保真脱敏别名，交付物恢复真实名称与IP)
+}
+
 export interface SecurityFenceConfig {
   mode: SecurityFenceMode;
   enabledRules: {
@@ -30,7 +38,9 @@ export interface SecurityFenceConfig {
     dbConnections: boolean;
     privateKeys: boolean;
     phoneNumbers: boolean;
+    customerAssets: boolean;
   };
+  customerAssets: CustomerAssetConfig;
   whitelistPatterns: string[];
 }
 
@@ -40,6 +50,8 @@ export class SecurityFenceManager {
   private auditLogFilePath: string;
   private config: SecurityFenceConfig;
   private auditLogs: SecurityFenceAuditRecord[] = [];
+  // 运行时双向保真映射字典 (Obfuscated Alias -> Original Secret)
+  private sessionMapping: Map<string, string> = new Map();
 
   private constructor() {
     this.configFilePath = path.join(storageHub.getDataRootDir(), 'security_fence_config.json');
@@ -63,7 +75,15 @@ export class SecurityFenceManager {
         privateIps: true,
         dbConnections: true,
         privateKeys: true,
-        phoneNumbers: true
+        phoneNumbers: true,
+        customerAssets: true
+      },
+      customerAssets: {
+        enabled: true,
+        customerNames: [],
+        projectCodes: [],
+        sensitiveLogoPatterns: ['*logo*', '*client_badge*'],
+        bidirectionalMapping: true
       },
       whitelistPatterns: ['127.0.0.1', 'localhost', '0.0.0.0']
     };
@@ -125,7 +145,7 @@ export class SecurityFenceManager {
     const redactedMap: Map<string, RedactedItemDetail> = new Map();
     let placeholderCounter = 1;
 
-    const recordRedaction = (original: string, type: string, placeholderPrefix: string): string => {
+    const recordRedaction = (original: string, type: string, placeholderPrefix: string, customPlaceholder?: string): string => {
       // 检查白名单
       for (const white of this.config.whitelistPatterns) {
         if (original.includes(white)) return original;
@@ -133,9 +153,10 @@ export class SecurityFenceManager {
 
       let item = redactedMap.get(original);
       if (!item) {
-        const placeholder = `<${placeholderPrefix}_REDACTED_${placeholderCounter++}>`;
+        const placeholder = customPlaceholder || `<${placeholderPrefix}_REDACTED_${placeholderCounter++}>`;
         item = { type, original, placeholder, count: 1 };
         redactedMap.set(original, item);
+        this.sessionMapping.set(placeholder, original);
       } else {
         item.count++;
       }
@@ -151,14 +172,24 @@ export class SecurityFenceManager {
       sanitized = sanitized.replace(/AKIA[0-9A-Z]{16}/g, m => recordRedaction(m, 'AWS Access Key', 'AWS_KEY'));
     }
 
-    // 2. Private IP Addresses
+    // 2. Private IP Addresses (支持保真网络拓扑映射，避免破坏路由规划)
     if (this.config.enabledRules.privateIps) {
-      // 10.x.x.x
-      sanitized = sanitized.replace(/\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, m => recordRedaction(m, '内网私有 IP (10.x)', 'PRIVATE_IP'));
-      // 172.16-31.x.x
-      sanitized = sanitized.replace(/\b(172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})\b/g, m => recordRedaction(m, '内网私有 IP (172.x)', 'PRIVATE_IP'));
-      // 192.168.x.x
-      sanitized = sanitized.replace(/\b(192\.168\.\d{1,3}\.\d{1,3})\b/g, m => recordRedaction(m, '内网私有 IP (192.168.x)', 'PRIVATE_IP'));
+      const isBiMap = this.config.customerAssets?.bidirectionalMapping;
+      // 10.x.x.x -> 101.2.x.x (保持子网掩码与主机拓扑)
+      sanitized = sanitized.replace(/\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, m => {
+        const mapped = isBiMap ? `101.2.${m.split('.')[2]}.${m.split('.')[3]}` : undefined;
+        return recordRedaction(m, '内网私有 IP (10.x)', 'PRIVATE_IP', mapped);
+      });
+      // 172.16-31.x.x -> 172.100.x.x
+      sanitized = sanitized.replace(/\b(172\.(?:1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})\b/g, m => {
+        const mapped = isBiMap ? `172.100.${m.split('.')[2]}.${m.split('.')[3]}` : undefined;
+        return recordRedaction(m, '内网私有 IP (172.x)', 'PRIVATE_IP', mapped);
+      });
+      // 192.168.x.x -> 192.200.x.x
+      sanitized = sanitized.replace(/\b(192\.168\.\d{1,3}\.\d{1,3})\b/g, m => {
+        const mapped = isBiMap ? `192.200.${m.split('.')[2]}.${m.split('.')[3]}` : undefined;
+        return recordRedaction(m, '内网私有 IP (192.168.x)', 'PRIVATE_IP', mapped);
+      });
     }
 
     // 3. Database Connection Credentials
@@ -179,6 +210,46 @@ export class SecurityFenceManager {
     // 5. Phone numbers
     if (this.config.enabledRules.phoneNumbers) {
       sanitized = sanitized.replace(/\b(1[3-9]\d{9})\b/g, m => recordRedaction(m, '手机号 (PII)', 'PHONE'));
+    }
+
+    // 6. 企业客户名称与内部项目代号 (Customer Names & Project Codes)
+    if (this.config.enabledRules.customerAssets && this.config.customerAssets?.enabled) {
+      const isBiMap = this.config.customerAssets?.bidirectionalMapping;
+      const names = this.config.customerAssets.customerNames || [];
+      for (let i = 0; i < names.length; i++) {
+        const rawName = names[i]?.trim();
+        if (!rawName) continue;
+        const alias = isBiMap ? `客户${i + 1}` : `<CUSTOMER_NAME_${i + 1}>`;
+        if (sanitized.includes(rawName)) {
+          const count = sanitized.split(rawName).length - 1;
+          sanitized = sanitized.split(rawName).join(alias);
+          this.sessionMapping.set(alias, rawName);
+          redactedMap.set(rawName, {
+            type: '企业客户名称 (Customer Name)',
+            original: rawName,
+            placeholder: alias,
+            count
+          });
+        }
+      }
+
+      const codes = this.config.customerAssets.projectCodes || [];
+      for (let i = 0; i < codes.length; i++) {
+        const rawCode = codes[i]?.trim();
+        if (!rawCode) continue;
+        const alias = isBiMap ? `项目${String.fromCharCode(65 + i)}` : `<PROJECT_CODE_${i + 1}>`;
+        if (sanitized.includes(rawCode)) {
+          const count = sanitized.split(rawCode).length - 1;
+          sanitized = sanitized.split(rawCode).join(alias);
+          this.sessionMapping.set(alias, rawCode);
+          redactedMap.set(rawCode, {
+            type: '企业项目代号 (Project Code)',
+            original: rawCode,
+            placeholder: alias,
+            count
+          });
+        }
+      }
     }
 
     const items = Array.from(redactedMap.values());
@@ -282,6 +353,33 @@ export class SecurityFenceManager {
       isBlocked,
       blockReason
     };
+  }
+
+  /**
+   * 交付物写入前合规检测与占位执行
+   */
+  public inspectAndEnforce(text: string, bypass: boolean = false): { blocked: boolean; blockReason?: string; sanitizedText: string } {
+    if (bypass || this.config.mode === 'disabled') {
+      return { blocked: false, sanitizedText: text };
+    }
+    const res = this.sanitizeText(text);
+    return {
+      blocked: res.isBlocked,
+      blockReason: res.blockReason,
+      sanitizedText: res.sanitized
+    };
+  }
+
+  /**
+   * 交付物双向保真翻译还原：将出境脱敏时生成的 IP 拓扑别名、客户别名等还原为真实企业资产
+   */
+  public restoreDeliverableText(text: string): string {
+    if (!text || this.sessionMapping.size === 0) return text;
+    let restored = text;
+    for (const [alias, original] of this.sessionMapping.entries()) {
+      restored = restored.split(alias).join(original);
+    }
+    return restored;
   }
 }
 

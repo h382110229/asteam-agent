@@ -81,7 +81,7 @@ export const AgentTrajectory: React.FC<AgentTrajectoryProps> = ({
             <GitCommit className="h-4 w-4 text-[var(--primary)]" />
           )}
           <span className="font-semibold text-xs">
-            deepseek-harness 任务规划与执行轨迹
+            ASTeam Agent 2.0 任务规划与执行轨迹 (自研 Harness)
           </span>
           <span className="rounded-full bg-[var(--muted)] px-2 py-0.5 text-[10px] text-[var(--muted-foreground)]">
             {completedCount} / {steps.length} 步骤

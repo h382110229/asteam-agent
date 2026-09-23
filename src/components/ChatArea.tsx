@@ -6,6 +6,7 @@ import {
   Bot,
   User,
   FolderGit2,
+  Folder,
   Cpu,
   Clock,
   Zap,
@@ -15,6 +16,7 @@ import {
   X,
   FileText,
   FileCode,
+  FileUp,
   Image as ImageIcon,
   Eye,
   Terminal,
@@ -51,6 +53,7 @@ export interface FileAttachment {
   size: number;
   type: string;
   content?: string;
+  localPath?: string;
   extractedImages?: Array<{
     id: string;
     name: string;
@@ -74,6 +77,11 @@ export interface ChatMessageItem {
   timestamp: number;
   durationMs?: number;
   estimatedTokens?: number;
+  tokenStats?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
 }
 
 interface ChatAreaProps {
@@ -98,6 +106,7 @@ interface ChatAreaProps {
   onCompactSession?: () => void;
   onOpenScheduler?: () => void;
   onOpenSwarm?: () => void;
+  enabledSkills?: string[];
 }
 
 const SLASH_COMMANDS = [
@@ -353,6 +362,50 @@ export function extractPreviewableArtifact(content: string, steps?: AgentStep[])
   return null;
 }
 
+/**
+ * Grill-me & 结构化问卷智能提取器 (v1.8.2 / v2.0.1 兜底保活)
+ * 当大模型未显式调用 ask_question 工具而是在正文中输出带有编号的选项问卷时，自动提取并渲染交互卡片
+ */
+function extractQuestionsFromText(raw: string): { intro: string; questions: Array<{ question: string; options: string[] }> } | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const regex = /(?:^|[\r\n]+|[:：；;]|\s{2,}|\s)(?:(\d+)[\.、\)]|Q(\d+)[:：])\s*(?!\d)/gi;
+  const matches: Array<{ index: number; digit: number }> = [];
+  let match;
+  while ((match = regex.exec(raw)) !== null) {
+    const digitStr = match[1] || match[2];
+    const digit = parseInt(digitStr, 10);
+    const digitOffset = match[0].indexOf(digitStr);
+    matches.push({
+      index: match.index + digitOffset,
+      digit
+    });
+  }
+  if (matches.length <= 1) return null;
+  if (matches[0].digit !== 1) return null;
+  for (let i = 1; i < matches.length; i++) {
+    if (matches[i].digit !== matches[i - 1].digit + 1) return null;
+  }
+  const intro = raw.slice(0, matches[0].index).trim();
+  const slices: string[] = [];
+  for (let i = 0; i < matches.length; i++) {
+    const start = matches[i].index;
+    const end = (i + 1 < matches.length) ? matches[i + 1].index : raw.length;
+    slices.push(raw.slice(start, end).trim());
+  }
+  const questions = slices.map(s => {
+    const cleaned = s.replace(/^(?:\d+[\.、\)]|Q\d+[:：])\s*/, '').trim();
+    const parts = cleaned.split(/(?:\r?\n\s*[-•–*]\s*|\s+[-•–*]\s+)/);
+    if (parts.length > 1) {
+      return {
+        question: parts[0].trim().replace(/[:：\s]+$/, ''),
+        options: parts.slice(1).map(o => o.replace(/^[-•–*\s]+/, '').trim()).filter(Boolean)
+      };
+    }
+    return { question: cleaned, options: [] };
+  });
+  return { intro, questions };
+}
+
 function renderContentWithMedia(content: string, onOpenPreview?: (data: PreviewData) => void) {
   if (!content) return null;
 
@@ -510,7 +563,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   onOpenRules,
   onCompactSession,
   onOpenScheduler,
-  onOpenSwarm
+  onOpenSwarm,
+  enabledSkills
 }) => {
   const [input, setInput] = useState('');
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('auto_edit');
@@ -524,11 +578,27 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     checkpoint: CheckpointItem | null;
   }>({ isOpen: false, checkpoint: null });
 
-  // 技能动态挂载与快速勾选状态 (v1.11.0 / v1.11.1)
+  // 技能动态挂载与快速勾选状态 (v1.11.0 / v1.11.1 / v2.0.2)
   const [mountedSkillIds, setMountedSkillIds] = useState<string[]>([]);
   const [showSkillPicker, setShowSkillPicker] = useState(false);
   const [skillPickerSearch, setSkillPickerSearch] = useState('');
   const [isImportingFolder, setIsImportingFolder] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>('2.0.2');
+
+  useEffect(() => {
+    if (window.electronAPI?.getAppVersion) {
+      window.electronAPI.getAppVersion().then(v => {
+        if (v) setAppVersion(v);
+      }).catch(() => {});
+    }
+  }, []);
+
+  // 同步全局启用的技能列表至当前会话挂载状态
+  useEffect(() => {
+    if (enabledSkills && Array.isArray(enabledSkills) && enabledSkills.length > 0) {
+      setMountedSkillIds(prev => Array.from(new Set([...prev, ...enabledSkills])));
+    }
+  }, [enabledSkills]);
 
   // Token & Context Window Monitor calculation (v1.5.0 / v1.6.0 dynamic 1M / 128k)
   const totalEstimatedTokens = useMemo(() => {
@@ -607,7 +677,81 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     };
   }, [workspacePath]);
 
-  // v1.11.1: 直接选择本地文件夹导入技能并即时勾选挂载
+  // 技能标准化 Canonical ID 提取工具 (消除 custom:global/extra 前缀与大小写/连字符差异)
+  const getCanonicalSkillId = (id: string): string => {
+    return (id || '')
+      .replace(/^custom:(?:global|workspace|extra):/, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '');
+  };
+
+  // v2.0.2: 监听主进程技能库变更广播 (skills:changed)，实时热更新前端技能列表
+  useEffect(() => {
+    if (!window.electronAPI?.onSkillsChanged) return;
+    const unsubscribe = window.electronAPI.onSkillsChanged(() => {
+      if (window.electronAPI?.getAllSkills) {
+        window.electronAPI.getAllSkills(workspacePath || null).then(skills => {
+          if (Array.isArray(skills)) {
+            setAvailableSkills(skills);
+          }
+        }).catch(() => {});
+      }
+    });
+    return unsubscribe;
+  }, [workspacePath]);
+
+  // v1.11.1 / v2.0.2: 直接选择本地文件夹或 ZIP/文件导入技能并即时自动挂载与反馈
+  const [isImportingFile, setIsImportingFile] = useState(false);
+  const [isSyncingSkills, setIsSyncingSkills] = useState(false);
+  const [skillNotification, setSkillNotification] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleSyncSkills = async () => {
+    if (!window.electronAPI?.getAllSkills) return;
+    try {
+      setIsSyncingSkills(true);
+      const skills = await window.electronAPI.getAllSkills(workspacePath || null);
+      if (Array.isArray(skills)) {
+        setAvailableSkills(skills);
+        setSkillNotification({ type: 'success', text: `🔄 技能库已完成热同步，当前可用 ${skills.length} 个技能` });
+        setTimeout(() => setSkillNotification(null), 2500);
+      }
+    } catch (err: any) {
+      setSkillNotification({ type: 'error', text: `同步失败: ${err.message}` });
+      setTimeout(() => setSkillNotification(null), 2500);
+    } finally {
+      setIsSyncingSkills(false);
+    }
+  };
+
+  const handleImportFile = async () => {
+    if (!window.electronAPI?.installSkillFromFile) return;
+    try {
+      setIsImportingFile(true);
+      const installed = await window.electronAPI.installSkillFromFile();
+      if (installed) {
+        if (window.electronAPI.getAllSkills) {
+          const updated = await window.electronAPI.getAllSkills(workspacePath || null);
+          if (Array.isArray(updated)) {
+            setAvailableSkills(updated);
+          }
+        }
+        const newCanon = getCanonicalSkillId(installed.id);
+        setMountedSkillIds(prev => {
+          const filtered = prev.filter(x => !newCanon || getCanonicalSkillId(x) !== newCanon);
+          return [...filtered, installed.id];
+        });
+        setSkillNotification({ type: 'success', text: `🎉 成功安装并挂载技能: ${installed.name}` });
+        setTimeout(() => setSkillNotification(null), 3000);
+      }
+    } catch (err: any) {
+      console.warn('Failed to import skill from file:', err);
+      setSkillNotification({ type: 'error', text: `导入失败: ${err.message}` });
+      setTimeout(() => setSkillNotification(null), 3000);
+    } finally {
+      setIsImportingFile(false);
+    }
+  };
+
   const handleImportFolder = async () => {
     if (!window.electronAPI?.installSkillFromFolder) return;
     try {
@@ -621,11 +765,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             setAvailableSkills(updated);
           }
         }
-        // 自动将新技能加入已挂载列表
-        setMountedSkillIds(prev => Array.from(new Set([...prev, installed.id])));
+        // 自动将新技能加入已挂载列表，并替换历史旧变体
+        const newCanon = getCanonicalSkillId(installed.id);
+        setMountedSkillIds(prev => {
+          const filtered = prev.filter(x => !newCanon || getCanonicalSkillId(x) !== newCanon);
+          return [...filtered, installed.id];
+        });
+        setSkillNotification({ type: 'success', text: `🎉 成功导入并挂载技能: ${installed.name}` });
+        setTimeout(() => setSkillNotification(null), 3000);
       }
     } catch (err: any) {
       console.warn('Failed to import skill from folder:', err);
+      setSkillNotification({ type: 'error', text: `导入失败: ${err.message}` });
+      setTimeout(() => setSkillNotification(null), 3000);
     } finally {
       setIsImportingFolder(false);
     }
@@ -742,16 +894,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 动态侦测当前最新消息中是否有处于 running 状态的终端命令
   const lastMsg = messages[messages.length - 1];
-  const activeRunningTerminalStep = (() => {
-    if (!isRunning && !isWaitingForUser) return null;
-    if (lastMsg?.role === 'assistant' && lastMsg.steps) {
-      const step = lastMsg.steps.find(s => s.tool === 'run_terminal_command' && s.status === 'running');
-      if (step) return step;
-    }
-    return null;
-  })();
 
   // 查找最近一条包含规划执行步骤的消息（支持运行中实时追踪与执行完毕后的结果常驻查看）
   const latestMsgWithSteps = (() => {
@@ -769,9 +912,22 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const completedStepsCount = currentSteps.filter(s => s.status === 'completed').length;
   const isAllStepsCompleted = totalStepsCount > 0 && completedStepsCount === totalStepsCount;
 
+  // 以真实执行状态 isRunning 为单一真值来源，确保状态栏、执行轨迹和底部停止按钮完全对齐
+  const effectiveIsRunning = isRunning;
+
+  // 动态侦测当前最新消息中是否有处于 running 状态的终端命令
+  const activeRunningTerminalStep = (() => {
+    if (!effectiveIsRunning && !isWaitingForUser) return null;
+    if (lastMsg?.role === 'assistant' && lastMsg.steps) {
+      const step = lastMsg.steps.find(s => s.tool === 'run_terminal_command' && s.status === 'running');
+      if (step) return step;
+    }
+    return null;
+  })();
+
   // 实时捕获当前正在执行或等待的步骤，用于置顶任务进程看板
   const activeRunningStep = (() => {
-    if (!isRunning) return null;
+    if (!effectiveIsRunning) return null;
     if (currentSteps.length > 0) {
       const running = currentSteps.find(s => s.status === 'running');
       if (running) return running;
@@ -785,7 +941,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
   const [dismissedBannerMsgId, setDismissedBannerMsgId] = useState<string | null>(null);
 
   // 当任务处于运行中，或已有规划步骤且未被用户手动关闭时，始终常驻置顶展示进程看板（彻底根除被信息流刷掉找不到进程的痛点）
-  const shouldShowTopBanner = isRunning || (totalStepsCount > 0 && dismissedBannerMsgId !== latestMsgWithSteps?.id);
+  const shouldShowTopBanner = effectiveIsRunning || (totalStepsCount > 0 && dismissedBannerMsgId !== latestMsgWithSteps?.id);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -793,7 +949,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isRunning, isWaitingForUser]);
+  }, [messages, effectiveIsRunning, isWaitingForUser]);
 
   const handleCopyMessage = async (msgId: string, text: string) => {
     try {
@@ -868,7 +1024,17 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       return;
     }
 
-    if (isRunning && !isWaitingForUser) return;
+    // 若 Agent 当前正在执行中，用户的输入自动作为实时协作插话 (Steering) 注入并上屏
+    if (effectiveIsRunning && !isWaitingForUser) {
+      if (trimmed) {
+        onSendMessage(trimmed, executionMode, undefined, mountedSkillIds);
+        setInput('');
+        if (textareaRef.current) {
+          textareaRef.current.style.height = 'auto';
+        }
+      }
+      return;
+    }
 
     if (trimmed === '/diff') {
       onOpenGitDiff?.();
@@ -1017,6 +1183,33 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
   const processFiles = (fileList: File[]) => {
     fileList.forEach(file => {
+      const nativePath = (file as any).path || '';
+
+      // 智能感知：如果拖入的是 Skill 压缩包 (.skill, .skill.zip 或名称含 skill/pipeline/filter 的 zip)
+      const isSkillArchive = /\.skill(?:\.zip)?$/i.test(file.name) ||
+        (file.name.toLowerCase().endsWith('.zip') && (
+          file.name.toLowerCase().includes('skill') ||
+          file.name.toLowerCase().includes('pipeline') ||
+          file.name.toLowerCase().includes('filter')
+        ));
+
+      if (isSkillArchive && nativePath && window.electronAPI?.installSkillFromFile) {
+        window.electronAPI.installSkillFromFile(nativePath).then(async (installed) => {
+          if (installed) {
+            if (window.electronAPI?.getAllSkills) {
+              const updated = await window.electronAPI.getAllSkills(workspacePath || null);
+              if (Array.isArray(updated)) setAvailableSkills(updated);
+            }
+            setMountedSkillIds(prev => Array.from(new Set([...prev, installed.id])));
+            setSkillNotification({ type: 'success', text: `🎉 自动识别并成功安装技能包: ${installed.name}` });
+            setTimeout(() => setSkillNotification(null), 4000);
+          }
+        }).catch(err => {
+          console.warn('Failed to auto-install dropped skill:', err);
+        });
+        return;
+      }
+
       const isImage = file.type.startsWith('image/');
       const isOfficeDoc = /\.(docx|pptx|xlsx|xls|pdf)$/i.test(file.name);
       const isText = file.type.startsWith('text/') ||
@@ -1024,28 +1217,44 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
       if (isImage) {
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
           const content = ev.target?.result as string;
+          let localPath = nativePath;
+          if (!localPath && window.electronAPI?.saveAttachment) {
+            try {
+              const base64Data = content.split(',')[1];
+              if (base64Data) {
+                const binStr = atob(base64Data);
+                const bytes = new Uint8Array(binStr.length);
+                for (let i = 0; i < binStr.length; i++) bytes[i] = binStr.charCodeAt(i);
+                const res = await window.electronAPI.saveAttachment(file.name || `image_${Date.now()}.png`, bytes, workspacePath || undefined);
+                if (res?.success && res.localPath) localPath = res.localPath;
+              }
+            } catch {}
+          }
           setAttachments(prev => [...prev, {
             name: file.name || `image_${Date.now()}.png`,
             size: file.size,
             type: file.type || 'image/png',
-            content
+            content,
+            localPath
           }]);
         };
         reader.readAsDataURL(file);
       } else if (isOfficeDoc && window.electronAPI?.extractOfficeDocument) {
-        // v1.11.2: Office (Word/PPT/Excel) 与 PDF 智能脱壳轻量化提取，避免几兆 Base64 撑爆上下文
+        // v1.11.2 / v2.0.1: Office (Word/PPT/Excel) 与 PDF 智能脱壳并确保物理落盘
         const reader = new FileReader();
         reader.onload = async (ev) => {
           try {
             const arrayBuffer = ev.target?.result as ArrayBuffer;
-            const res = await window.electronAPI.extractOfficeDocument(file.name, new Uint8Array(arrayBuffer));
+            const res = await window.electronAPI.extractOfficeDocument(file.name, new Uint8Array(arrayBuffer), workspacePath || undefined);
+            const resolvedPath = nativePath || res.localPath || '';
             setAttachments(prev => [...prev, {
               name: file.name,
               size: file.size,
               type: `document/${file.name.split('.').pop()?.toLowerCase()}`,
               content: res.text,
+              localPath: resolvedPath,
               extractedImages: res.extractedImages
             }]);
           } catch (err: any) {
@@ -1054,31 +1263,54 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               name: file.name,
               size: file.size,
               type: 'application/octet-stream',
-              content: ''
+              content: '',
+              localPath: nativePath
             }]);
           }
         };
         reader.readAsArrayBuffer(file);
       } else if (isText && file.size < 512 * 1024) {
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
           const content = ev.target?.result as string;
+          let resolvedPath = nativePath;
+          if (!resolvedPath && window.electronAPI?.saveAttachment) {
+            try {
+              const enc = new TextEncoder();
+              const res = await window.electronAPI.saveAttachment(file.name, enc.encode(content), workspacePath || undefined);
+              if (res?.success && res.localPath) resolvedPath = res.localPath;
+            } catch {}
+          }
           setAttachments(prev => [...prev, {
             name: file.name,
             size: file.size,
             type: file.type || 'text/plain',
-            content
+            content,
+            localPath: resolvedPath
           }]);
         };
         reader.readAsText(file);
       } else {
-        // 未知二进制或大文件：仅记录文件元数据，绝不将庞大的 Base64 塞入上下文
-        setAttachments(prev => [...prev, {
-          name: file.name,
-          size: file.size,
-          type: file.type || 'application/octet-stream',
-          content: ''
-        }]);
+        // 未知二进制或大文件：物理落盘并记录元数据
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          let resolvedPath = nativePath;
+          try {
+            const arrayBuffer = ev.target?.result as ArrayBuffer;
+            if (!resolvedPath && arrayBuffer && window.electronAPI?.saveAttachment) {
+              const res = await window.electronAPI.saveAttachment(file.name, new Uint8Array(arrayBuffer), workspacePath || undefined);
+              if (res?.success && res.localPath) resolvedPath = res.localPath;
+            }
+          } catch {}
+          setAttachments(prev => [...prev, {
+            name: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            content: '',
+            localPath: resolvedPath
+          }]);
+        };
+        reader.readAsArrayBuffer(file);
       }
     });
   };
@@ -1144,7 +1376,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
         <div className="z-30 shrink-0 border-b border-[var(--primary)]/30 bg-[var(--card)]/95 shadow-sm backdrop-blur-md select-none transition-all">
           <div className="flex items-center justify-between px-4 py-2.5 text-xs">
             <div className="flex items-center space-x-2.5 min-w-0 flex-1 mr-3">
-              {isRunning ? (
+              {effectiveIsRunning ? (
                 <span className="relative flex h-2.5 w-2.5 shrink-0">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--primary)] opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[var(--primary)]"></span>
@@ -1157,13 +1389,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
               <div className="flex items-center space-x-2 min-w-0 truncate">
                 <span className="font-semibold text-xs text-[var(--foreground)] truncate">
-                  {isRunning
+                  {effectiveIsRunning
                     ? (activeRunningStep ? `正在执行: ${activeRunningStep.title}` : 'Agent 需求分析与自主调度中...')
-                    : `deepseek-harness 规划与执行已就绪 (${completedStepsCount}/${totalStepsCount} 步骤完成)`
+                    : `ASTeam 2.0 规划与执行已就绪 (${completedStepsCount}/${totalStepsCount} 步骤完成)`
                   }
                 </span>
 
-                {isRunning && activeRunningStep?.tool && (
+                {effectiveIsRunning && activeRunningStep?.tool && (
                   <span className="rounded bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20 px-1.5 py-0.5 text-[10px] font-mono shrink-0">
                     {activeRunningStep.tool}
                   </span>
@@ -1181,6 +1413,19 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <ScrollText className="h-3 w-3" />
                   <span>规约已激活 ({projectRules.ruleType === 'asteamrules' ? '.asteamrules' : 'ASTEAM.md'})</span>
                 </div>
+              )}
+
+              {/* Active Skill Indicator in top banner - v2.0.2 */}
+              {mountedSkillIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowSkillPicker(true)}
+                  className="flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 text-[10px] font-semibold hover:bg-amber-500/25 transition-colors cursor-pointer shrink-0"
+                  title="点击查看/配置当前已挂载执行的技能"
+                >
+                  <Zap className="h-3 w-3 fill-amber-500 text-amber-500" />
+                  <span>已就绪 {mountedSkillIds.length} 项技能</span>
+                </button>
               )}
 
               {/* Progress track */}
@@ -1225,7 +1470,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               )}
 
               {/* Stop button while running */}
-              {isRunning && (
+              {effectiveIsRunning && (
                 <button
                   type="button"
                   onClick={onStopAgent}
@@ -1237,7 +1482,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
               )}
 
               {/* Dismiss button when completed */}
-              {!isRunning && (
+              {!effectiveIsRunning && (
                 <button
                   type="button"
                   onClick={() => setDismissedBannerMsgId(latestMsgWithSteps?.id || 'dismissed')}
@@ -1308,10 +1553,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
 
             <div className="space-y-2">
               <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v1.11.3)
+                ASTeam Agent (v{appVersion})
               </h1>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                内核原生深度封装 <code className="font-semibold text-[var(--foreground)]">deepseek-harness</code>。全新支持 <strong>⚡ 零依赖全盘极速扫描</strong>、<strong>📄 原生无头 HTML-to-PDF 打印引擎</strong>、<strong>🛡️ 交付物强契约硬门禁</strong> 与 <strong>📑 开箱即用全能 Office 套件</strong>。
+                ASTeam 自研工业级 <code className="font-semibold text-[var(--foreground)]">Harness</code> 确定性状态机与企业级通用网关。全新支持 <strong>⚡ 确定性指令队列与协作插话</strong>、<strong>👁️ Office 金字塔多模态原位审图</strong>、<strong>🛡️ 交付物物理探针硬门禁</strong> 与 <strong>📑 全能 Office 排版套件</strong>。
               </p>
             </div>
 
@@ -1400,7 +1645,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 {msg.swarmState && (
                   <SwarmDashboard
                     swarmState={msg.swarmState}
-                    isRunning={isRunning && msg.id === messages[messages.length - 1]?.id}
+                    isRunning={effectiveIsRunning && msg.id === messages[messages.length - 1]?.id}
                     onOpenRightTab={onOpenSwarm}
                   />
                 )}
@@ -1415,17 +1660,45 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   />
                 )}
 
-                {/* Interactive Question Card if Agent prompted a question */}
-                {msg.question && (
-                  <InteractiveQuestionCard
-                    key={msg.question.questionId}
-                    data={msg.question}
-                    onSubmitAnswer={(qId, ans) => onReplyQuestion(qId, ans)}
-                  />
-                )}
-
-                {/* Main Message Content with Intelligent Error Card handling */}
+                {/* Interactive Question Card if Agent prompted a question or structured options extracted */}
                 {(() => {
+                  const activeQuestionData: QuestionCardData | null = msg.question || (() => {
+                    if (msg.role !== 'assistant' || !msg.content || effectiveIsRunning) return null;
+                    const extracted = extractQuestionsFromText(msg.content);
+                    if (extracted && extracted.questions.length > 0 && extracted.questions.some(q => q.options && q.options.length > 0)) {
+                      return {
+                        questionId: `extracted-${msg.id}`,
+                        question: extracted.intro || '请确认以下关键方案与偏好选择：',
+                        questions: extracted.questions,
+                        answered: false
+                      };
+                    }
+                    return null;
+                  })();
+
+                  if (!activeQuestionData) return null;
+
+                  return (
+                    <InteractiveQuestionCard
+                      key={activeQuestionData.questionId}
+                      data={activeQuestionData}
+                      onSubmitAnswer={(qId, ans) => onReplyQuestion(qId, ans)}
+                    />
+                  );
+                })()}
+
+                {/* Main Message Content with Intelligent Error Card handling & Running Placeholder */}
+                {(() => {
+                  const isLatestAssistant = msg.role === 'assistant' && msg.id === lastMsg?.id;
+                  if (effectiveIsRunning && isLatestAssistant && !msg.content?.trim() && (!msg.steps || msg.steps.length === 0)) {
+                    return (
+                      <div className="flex items-center space-x-2.5 py-3 px-1 text-xs text-[var(--muted-foreground)] animate-pulse select-none">
+                        <div className="h-2.5 w-2.5 rounded-full bg-[var(--primary)] animate-ping" />
+                        <span className="font-medium text-[var(--foreground)]">ASTeam Agent 正在思考与调用底层工具中...</span>
+                      </div>
+                    );
+                  }
+
                   const errorMarker = '⚠️ **执行遇到错误**:';
                   if (!msg.content.includes(errorMarker)) {
                     return renderContentWithMedia(msg.content, onOpenPreview);
@@ -1494,26 +1767,37 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 })()}
 
                 {/* 任务步骤里程碑快速回顾 (置底呈现，与交付制品并列，阅读完长文结论无需往上翻找) */}
-                {msg.role === 'assistant' && msg.steps && msg.steps.length > 0 && (
-                  <div className="mt-2 flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-3 py-2 text-xs select-none">
-                    <div className="flex items-center space-x-2">
-                      <CheckCircle2 className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
-                      <span className="font-semibold text-xs text-[var(--foreground)]">
-                        规划与执行轨迹归档 ({msg.steps.filter(s => s.status === 'completed').length} / {msg.steps.length} 步骤已通过)
-                      </span>
+                {msg.role === 'assistant' && msg.steps && msg.steps.length > 0 && (() => {
+                  const isMsgRunning = effectiveIsRunning && msg.id === messages[messages.length - 1]?.id;
+                  const completedCount = msg.steps.filter(s => s.status === 'completed').length;
+                  return (
+                    <div className="mt-2 flex items-center justify-between rounded-xl border border-[var(--border)] bg-[var(--muted)]/40 px-3 py-2 text-xs select-none">
+                      <div className="flex items-center space-x-2">
+                        {isMsgRunning ? (
+                          <Loader2 className="h-3.5 w-3.5 text-[var(--primary)] animate-spin shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
+                        )}
+                        <span className="font-semibold text-xs text-[var(--foreground)]">
+                          {isMsgRunning
+                            ? `任务规划与执行中 (${completedCount} / ${msg.steps.length} 步骤完成)`
+                            : `规划与执行轨迹归档 (${completedCount} / ${msg.steps.length} 步骤已通过)`
+                          }
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsTopStepsDropdownOpen(true);
+                        }}
+                        className="text-xs text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer font-medium"
+                      >
+                        <span>展开顶部步骤全貌</span>
+                        <ChevronDown className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsTopStepsDropdownOpen(true);
-                      }}
-                      className="text-xs text-[var(--primary)] hover:underline flex items-center space-x-1 cursor-pointer font-medium"
-                    >
-                      <span>展开顶部步骤全貌</span>
-                      <ChevronDown className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Multimodal Artifact Preview Card (置于结论最下方，突出交付物) */}
                 {msg.role === 'assistant' && (() => {
@@ -1540,7 +1824,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             type="button"
                             onClick={() => {
                               if (window.electronAPI?.showItemInFolder) {
-                                window.electronAPI.showItemInFolder(artifact.filePath!);
+                                const rawPath = artifact.filePath!;
+                                const isAbs = rawPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(rawPath);
+                                const fullPath = (isAbs || !workspacePath) ? rawPath : `${workspacePath.replace(/[\\/]+$/, '')}/${rawPath.replace(/^[\\/]+/, '')}`;
+                                window.electronAPI.showItemInFolder(fullPath);
                               }
                             }}
                             title="在系统文件资源管理器中定位"
@@ -1555,10 +1842,13 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                             type="button"
                             onClick={() => {
                               if (window.electronAPI?.openInBrowser) {
+                                const rawPath = artifact.filePath || '';
+                                const isAbs = rawPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(rawPath);
+                                const fullPath = (isAbs || !workspacePath) ? rawPath : `${workspacePath.replace(/[\\/]+$/, '')}/${rawPath.replace(/^[\\/]+/, '')}`;
                                 window.electronAPI.openInBrowser({
                                   content: artifact.content,
                                   title: artifact.title,
-                                  defaultPath: artifact.filePath
+                                  defaultPath: fullPath
                                 });
                               }
                             }}
@@ -1651,12 +1941,18 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <div className="flex items-center space-x-2 pt-1 border-t border-[var(--border)]/40 text-[10px] text-[var(--muted-foreground)] font-mono select-none">
                     <span className="flex items-center space-x-1">
                       <Clock className="h-2.5 w-2.5" />
-                      <span>{msg.durationMs ? `${(msg.durationMs / 1000).toFixed(1)}s` : '已完成'}</span>
+                      <span>{msg.durationMs ? `${(msg.durationMs / 1000).toFixed(1)}s` : (effectiveIsRunning && msg.id === messages[messages.length - 1]?.id ? '执行中...' : '已完成')}</span>
                     </span>
                     <span>•</span>
                     <span className="flex items-center space-x-1">
                       <Zap className="h-2.5 w-2.5 text-[var(--primary)]" />
-                      <span>Tokens: ~{Math.round(msg.content.length * 0.75)}</span>
+                      <span>
+                        {msg.tokenStats ? (
+                          `Tokens: ${(msg.tokenStats.totalTokens || 0).toLocaleString()} (输入: ${Math.round((msg.tokenStats.promptTokens || 0) / 100) / 10}k · 输出: ${Math.round((msg.tokenStats.completionTokens || 0) / 100) / 10}k)`
+                        ) : (
+                          `Tokens: ~${Math.round(msg.content.length * 0.75)}`
+                        )}
+                      </span>
                     </span>
                   </div>
                 )}
@@ -1887,6 +2183,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                       ({Math.round(file.size / 1024)} KB)
                     </span>
                   )}
+                  {file.localPath && (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-teal-500/15 text-teal-600 dark:text-teal-400 font-medium" title={`本地物理路径: ${file.localPath}`}>
+                      💾 物理就绪
+                    </span>
+                  )}
                   <button
                     type="button"
                     onClick={() => removeAttachment(idx)}
@@ -1899,7 +2200,28 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           )}
 
-          {/* Active Mounted Skills Chips Bar (v1.11.0) */}
+          {/* Prominent Global Skill Notification Banner (v2.0.2) */}
+          {skillNotification && (
+            <div className={`flex items-center justify-between p-2.5 rounded-lg text-xs font-semibold shadow-xs animate-in fade-in-50 slide-in-from-bottom-2 ${
+              skillNotification.type === 'success'
+                ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+            }`}>
+              <div className="flex items-center space-x-2">
+                <Zap className="h-4 w-4 fill-emerald-500 text-emerald-500 shrink-0" />
+                <span>{skillNotification.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSkillNotification(null)}
+                className="opacity-70 hover:opacity-100 p-0.5 cursor-pointer"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          {/* Active Mounted Skills Chips Bar (v1.11.0 / v2.0.2) */}
           {mountedSkillIds.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs animate-in fade-in-50">
               <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 mr-1 shrink-0">
@@ -1907,7 +2229,8 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                 <span>已挂载技能 ({mountedSkillIds.length})</span>
               </span>
               {mountedSkillIds.map(id => {
-                const s = availableSkills.find(item => item.id === id);
+                const idCanon = getCanonicalSkillId(id);
+                const s = availableSkills.find(item => item.id === id || (idCanon && getCanonicalSkillId(item.id) === idCanon));
                 const isFolder = s?.isFolderSkill;
                 const cleanName = s ? s.name.replace(/^\[.*?\]\s*/, '') : id.replace(/^custom:(?:global|workspace|extra):/, '');
                 return (
@@ -1926,7 +2249,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     )}
                     <button
                       type="button"
-                      onClick={() => setMountedSkillIds(prev => prev.filter(x => x !== id))}
+                      onClick={() => setMountedSkillIds(prev => prev.filter(x => x !== id && (!idCanon || getCanonicalSkillId(x) !== idCanon)))}
                       className="text-[var(--muted-foreground)] hover:text-rose-500 transition-colors ml-0.5 cursor-pointer"
                       title="取消挂载此技能"
                     >
@@ -2051,28 +2374,52 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                     </div>
 
                     {/* Search & Quick Actions */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                       <input
                         type="text"
                         value={skillPickerSearch}
                         onChange={e => setSkillPickerSearch(e.target.value)}
                         placeholder="搜索技能名称、拼音或触发词..."
-                        className="flex-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]"
+                        className="flex-1 min-w-[140px] rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] placeholder-[var(--muted-foreground)] focus:outline-none focus:border-[var(--primary)]"
                         autoFocus
                       />
+                      <button
+                        type="button"
+                        onClick={handleImportFile}
+                        disabled={isImportingFile}
+                        className="inline-flex items-center gap-1 rounded-md bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-2 py-1 text-[10px] font-medium transition-colors shadow-2xs cursor-pointer shrink-0 disabled:opacity-50"
+                        title="选择本地 .zip 压缩包或 .md 技能文件导入并立即自动挂载"
+                      >
+                        {isImportingFile ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <FileUp className="h-3 w-3" />
+                        )}
+                        <span>导入 ZIP/文件</span>
+                      </button>
                       <button
                         type="button"
                         onClick={handleImportFolder}
                         disabled={isImportingFolder}
                         className="inline-flex items-center gap-1 rounded-md bg-teal-600 hover:bg-teal-700 text-white px-2 py-1 text-[10px] font-medium transition-colors shadow-2xs cursor-pointer shrink-0 disabled:opacity-50"
-                        title="无需手动打包压缩，直接选择包含 SKILL.md 或多个技能的本地文件夹导入"
+                        title="选择包含 SKILL.md 的本地文件夹导入并立即自动挂载"
                       >
                         {isImportingFolder ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
                           <FolderOpen className="h-3 w-3" />
                         )}
-                        <span>选择文件夹导入</span>
+                        <span>文件夹导入</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSyncSkills}
+                        disabled={isSyncingSkills}
+                        className="inline-flex items-center gap-1 rounded-md bg-[var(--muted)] hover:bg-[var(--border)] text-[var(--foreground)] px-2 py-1 text-[10px] font-medium transition-colors shadow-2xs cursor-pointer shrink-0 disabled:opacity-50"
+                        title="立即从数据中枢和外部技能库热同步所有最新技能"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isSyncingSkills ? 'animate-spin text-[var(--primary)]' : ''}`} />
+                        <span>热同步</span>
                       </button>
                       <button
                         type="button"
@@ -2085,6 +2432,20 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         {mountedSkillIds.length === availableSkills.length ? '全部取消' : '全选'}
                       </button>
                     </div>
+
+                    {/* Skill Notification Banner (v2.0.1) */}
+                    {skillNotification && (
+                      <div className={`p-2 rounded-lg text-xs font-medium animate-in fade-in flex items-center justify-between ${
+                        skillNotification.type === 'success'
+                          ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                          : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                      }`}>
+                        <span>{skillNotification.text}</span>
+                        <button type="button" onClick={() => setSkillNotification(null)} className="opacity-70 hover:opacity-100">
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
 
                     {/* Skill List with Checkboxes */}
                     <div className="max-h-64 overflow-y-auto space-y-1.5 pr-1 text-xs">
@@ -2100,7 +2461,10 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                           );
                         })
                         .map(s => {
-                          const isChecked = mountedSkillIds.includes(s.id);
+                          const sCanon = getCanonicalSkillId(s.id);
+                          const isChecked = mountedSkillIds.some(
+                            mId => mId === s.id || (sCanon && getCanonicalSkillId(mId) === sCanon)
+                          );
                           const isFolder = s.isFolderSkill;
                           return (
                             <label
@@ -2115,9 +2479,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => {
-                                  setMountedSkillIds(prev =>
-                                    prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id]
-                                  );
+                                  setMountedSkillIds(prev => {
+                                    const has = prev.some(x => x === s.id || (sCanon && getCanonicalSkillId(x) === sCanon));
+                                    if (has) {
+                                      return prev.filter(x => x !== s.id && (!sCanon || getCanonicalSkillId(x) !== sCanon));
+                                    } else {
+                                      const cleanPrev = prev.filter(x => !sCanon || getCanonicalSkillId(x) !== sCanon);
+                                      return [...cleanPrev, s.id];
+                                    }
+                                  });
                                 }}
                                 className="mt-0.5 rounded border-[var(--border)] text-amber-500 focus:ring-amber-500 cursor-pointer"
                               />
@@ -2171,7 +2541,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                         type="button"
                         onClick={() => {
                           setShowSkillPicker(false);
-                          setInputText(prev => (prev ? `${prev} @创建技能 ` : '@创建技能 '));
+                          setInput(prev => (prev ? `${prev} @创建技能 ` : '@创建技能 '));
                         }}
                         className="text-[10px] text-[var(--primary)] hover:underline font-semibold shrink-0 cursor-pointer ml-1"
                       >
@@ -2323,15 +2693,28 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <span>发送至终端</span>
                 </button>
               </div>
-            ) : isRunning && !isWaitingForUser ? (
-              <button
-                type="button"
-                onClick={onStopAgent}
-                title="停止当前任务"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--error)] text-[var(--error-foreground)] hover:opacity-90 transition-opacity shadow-xs select-none"
-              >
-                <Square className="h-3.5 w-3.5 fill-current" />
-              </button>
+            ) : effectiveIsRunning && !isWaitingForUser ? (
+              <div className="flex items-center space-x-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={onStopAgent}
+                  title="停止当前任务"
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--error)] text-[var(--error-foreground)] hover:opacity-90 transition-opacity shadow-xs select-none cursor-pointer"
+                >
+                  <Square className="h-3.5 w-3.5 fill-current" />
+                </button>
+                {input.trim() && (
+                  <button
+                    type="button"
+                    onClick={handleSend}
+                    title="发送实时协作插话给当前运行的 Agent (Enter)"
+                    className="flex h-8 items-center space-x-1 px-2.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs shadow-xs transition-colors cursor-pointer select-none"
+                  >
+                    <CornerDownLeft className="h-3.5 w-3.5" />
+                    <span>实时插话</span>
+                  </button>
+                )}
+              </div>
             ) : (
               <button
                 type="button"

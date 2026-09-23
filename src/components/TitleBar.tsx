@@ -105,7 +105,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({
               {workspaceName}
             </span>
             <span className="rounded bg-[var(--primary)]/15 px-1 py-0.2 text-[9px] font-medium text-[var(--primary)]">
-              harness
+              ASTeam 内核
             </span>
           </div>
         ) : (

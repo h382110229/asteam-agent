@@ -18,23 +18,28 @@ export interface ElectronAPI {
 
   // Skills
   getAllSkills: (workspacePath: string | null) => Promise<any[]>;
-  installSkillFromFile: () => Promise<any>;
-  installSkillFromFolder: () => Promise<any>;
+  installSkillFromFile: (filePath?: string) => Promise<any>;
+  installSkillFromFolder: (folderPath?: string) => Promise<any>;
   getExtraSkillDirs: () => Promise<string[]>;
   addExtraSkillDir: () => Promise<{ success: boolean; dir?: string; extraDirs: string[] }>;
   removeExtraSkillDir: (dirPath: string) => Promise<{ success: boolean; extraDirs: string[] }>;
   installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
   installSkillFromUrl: (url: string) => Promise<any>;
   deleteSkill: (skillId: string) => Promise<boolean>;
+  onSkillsChanged: (callback: () => void) => () => void;
+  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array, workspacePath?: string) => Promise<any>;
+  saveAttachment: (fileName: string, uint8Array: Uint8Array, workspacePath?: string) => Promise<{ success: boolean; localPath?: string; error?: string }>;
 
   // Agent Harness
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
   stopAgent: (sessionId: string) => Promise<boolean>;
+  steerAgent: (sessionId: string, message: string) => Promise<boolean>;
   replyQuestion: (sessionId: string, response: string) => Promise<boolean>;
   sendTerminalInput: (sessionId: string, input: string) => Promise<boolean>;
   onAgentEvent: (callback: (data: { type: string; payload: any }) => void) => () => void;
 
   // App & System settings
+  getAppVersion: () => Promise<string>;
   getOpenAtLogin: () => Promise<boolean>;
   setOpenAtLogin: (openAtLogin: boolean) => Promise<boolean>;
 
@@ -130,18 +135,27 @@ const api: ElectronAPI = {
   getGitDiffSummary: (repoPath: string) => ipcRenderer.invoke('git:getDiffSummary', repoPath),
 
   getAllSkills: (workspacePath: string | null) => ipcRenderer.invoke('skills:getAll', workspacePath),
-  installSkillFromFile: () => ipcRenderer.invoke('skills:installFromFile'),
-  installSkillFromFolder: () => ipcRenderer.invoke('skills:installFromFolder'),
+  installSkillFromFile: (filePath?: string) => ipcRenderer.invoke('skills:installFromFile', filePath),
+  installSkillFromFolder: (folderPath?: string) => ipcRenderer.invoke('skills:installFromFolder', folderPath),
   getExtraSkillDirs: () => ipcRenderer.invoke('skills:getExtraDirs'),
   addExtraSkillDir: () => ipcRenderer.invoke('skills:addExtraDir'),
   removeExtraSkillDir: (dirPath: string) => ipcRenderer.invoke('skills:removeExtraDir', dirPath),
   installSkillFromContent: (data) => ipcRenderer.invoke('skills:installFromContent', data),
   installSkillFromUrl: (url) => ipcRenderer.invoke('skills:installFromUrl', url),
   deleteSkill: (skillId) => ipcRenderer.invoke('skills:delete', skillId),
-  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array) => ipcRenderer.invoke('office:extractDocument', fileName, uint8Array),
+  onSkillsChanged: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('skills:changed', subscription);
+    return () => {
+      ipcRenderer.removeListener('skills:changed', subscription);
+    };
+  },
+  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array, workspacePath?: string) => ipcRenderer.invoke('office:extractDocument', fileName, uint8Array, workspacePath),
+  saveAttachment: (fileName: string, uint8Array: Uint8Array, workspacePath?: string) => ipcRenderer.invoke('attachment:save', fileName, uint8Array, workspacePath),
 
   startAgent: (sessionId, config, history) => ipcRenderer.invoke('agent:start', { sessionId, config, history }),
   stopAgent: (sessionId) => ipcRenderer.invoke('agent:stop', sessionId),
+  steerAgent: (sessionId, message) => ipcRenderer.invoke('agent:steer', { sessionId, message }),
   replyQuestion: (sessionId, response) => ipcRenderer.invoke('agent:replyQuestion', { sessionId, response }),
   sendTerminalInput: (sessionId, input) => ipcRenderer.invoke('agent:sendTerminalInput', { sessionId, input }),
   onAgentEvent: (callback) => {
@@ -152,6 +166,7 @@ const api: ElectronAPI = {
     };
   },
 
+  getAppVersion: () => ipcRenderer.invoke('app:getVersion'),
   getOpenAtLogin: () => ipcRenderer.invoke('app:getOpenAtLogin'),
   setOpenAtLogin: (openAtLogin) => ipcRenderer.invoke('app:setOpenAtLogin', openAtLogin),
   popoutPreview: (data) => ipcRenderer.invoke('preview:popout', data),

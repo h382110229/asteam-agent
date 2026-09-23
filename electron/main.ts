@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, globalShortcut, dialog, clipboard, nativeImage, shell, net } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
-import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput } from './harness-runner';
+import { runHarnessAgent, abortExecution, submitUserResponse, submitTerminalInput, steerExecution } from './harness-runner';
 import { getGitStatus, getFileDiff, discardFileChange, getGitDiffSummary } from './git-manager';
 import { skillManager } from './skill-manager';
 import { storageHub } from './storage-hub';
@@ -306,34 +306,51 @@ function setupIPC() {
   });
 
   // Skills IPC
-  ipcMain.handle('skills:getAll', async (_event, workspacePath: string | null) => {
+  ipcMain.handle('app:getVersion', () => {
+    return app.getVersion();
+  });
+
+  ipcMain.handle('skills:getAll', async (_event, workspacePath: string | null = null) => {
     return skillManager.getAllAvailableSkills(workspacePath);
   });
 
-  ipcMain.handle('skills:installFromFile', async () => {
+  ipcMain.handle('skills:installFromFile', async (_event, customFilePath?: string) => {
+    if (customFilePath && typeof customFilePath === 'string' && fs.existsSync(customFilePath)) {
+      return skillManager.installSkillFromFile(customFilePath);
+    }
     if (!mainWindow) return null;
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-      title: '选择 Skill 文件 (.md, .zip 或压缩包)',
+      title: '选择 Skill 技能包 (.skill, .zip, .md 或文件夹)',
       properties: ['openFile'],
       filters: [
-        { name: 'Skill 技能包 (*.md, *.zip)', extensions: ['md', 'zip'] },
+        { name: 'Skill 技能包 (*.skill, *.zip, *.md)', extensions: ['skill', 'zip', 'md'] },
+        { name: 'Skill 专用归档 (*.skill)', extensions: ['skill'] },
+        { name: 'ZIP 压缩归档 (*.zip)', extensions: ['zip'] },
         { name: 'Markdown Skill (*.md)', extensions: ['md'] },
-        { name: 'ZIP 技能归档 (*.zip)', extensions: ['zip'] },
         { name: '所有文件 (*.*)', extensions: ['*'] }
       ]
     });
     if (canceled || filePaths.length === 0) return null;
-    return skillManager.installSkillFromFile(filePaths[0]);
+    const res = skillManager.installSkillFromFile(filePaths[0]);
+    mainWindow?.webContents.send('skills:changed');
+    return res;
   });
 
-  ipcMain.handle('skills:installFromFolder', async () => {
+  ipcMain.handle('skills:installFromFolder', async (_event, customFolderPath?: string) => {
+    if (customFolderPath && typeof customFolderPath === 'string' && fs.existsSync(customFolderPath)) {
+      const res = skillManager.installSkillFromFile(customFolderPath);
+      mainWindow?.webContents.send('skills:changed');
+      return res;
+    }
     if (!mainWindow) return null;
     const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
       title: '选择包含 SKILL.md 的技能文件夹',
       properties: ['openDirectory']
     });
     if (canceled || filePaths.length === 0) return null;
-    return skillManager.installSkillFromFile(filePaths[0]);
+    const res = skillManager.installSkillFromFile(filePaths[0]);
+    mainWindow?.webContents.send('skills:changed');
+    return res;
   });
 
   ipcMain.handle('skills:getExtraDirs', async () => {
@@ -348,16 +365,20 @@ function setupIPC() {
     });
     if (canceled || filePaths.length === 0) return null;
     const added = storageHub.addExtraSkillDir(filePaths[0]);
+    mainWindow?.webContents.send('skills:changed');
     return { success: added, dir: filePaths[0], extraDirs: storageHub.getExtraSkillDirs() };
   });
 
   ipcMain.handle('skills:removeExtraDir', async (_event, dirPath: string) => {
     const removed = storageHub.removeExtraSkillDir(dirPath);
+    mainWindow?.webContents.send('skills:changed');
     return { success: removed, extraDirs: storageHub.getExtraSkillDirs() };
   });
 
   ipcMain.handle('skills:installFromContent', async (_event, { id, name, description, prompt }) => {
-    return skillManager.installSkillFromContent(id, name, description, prompt);
+    const res = skillManager.installSkillFromContent(id, name, description, prompt);
+    mainWindow?.webContents.send('skills:changed');
+    return res;
   });
 
   ipcMain.handle('skills:installFromUrl', async (_event, url: string) => {
@@ -368,21 +389,25 @@ function setupIPC() {
       const urlFileName = url.split('/').pop()?.replace(/\.md$/, '') || 'remote_skill';
       const titleMatch = text.match(/^#\s+(.+)$/m);
       const name = titleMatch ? titleMatch[1].trim() : urlFileName;
-      return skillManager.installSkillFromContent(urlFileName, name, `从 URL 安装: ${url}`, text);
+      const installed = skillManager.installSkillFromContent(urlFileName, name, `从 URL 安装: ${url}`, text);
+      mainWindow?.webContents.send('skills:changed');
+      return installed;
     } catch (err: any) {
       throw new Error(`下载 Skill 失败: ${err.message}`);
     }
   });
 
   ipcMain.handle('skills:delete', async (_event, skillId: string) => {
-    return skillManager.deleteCustomSkill(skillId);
+    const res = skillManager.deleteCustomSkill(skillId);
+    mainWindow?.webContents.send('skills:changed');
+    return res;
   });
 
-  // Office & Document Text Extractor IPC (v1.11.2)
-  ipcMain.handle('office:extractDocument', async (_event, fileName: string, uint8Array: Uint8Array) => {
+  // Office & Document Text Extractor IPC (v1.11.2 / v2.0.1 物理落盘强化)
+  ipcMain.handle('office:extractDocument', async (_event, fileName: string, uint8Array: Uint8Array, workspacePath?: string) => {
     try {
       const buffer = Buffer.from(uint8Array);
-      return await extractOfficeDocumentContent(fileName, buffer);
+      return await extractOfficeDocumentContent(fileName, buffer, workspacePath);
     } catch (err: any) {
       console.error('[OfficeExtractor] Error in office:extractDocument:', err);
       return {
@@ -391,6 +416,33 @@ function setupIPC() {
         charCount: 0,
         type: 'unknown'
       };
+    }
+  });
+
+  // 通用物理附件落盘 IPC (v2.0.1)
+  ipcMain.handle('attachment:save', async (_event, fileName: string, uint8Array: Uint8Array, workspacePath?: string) => {
+    try {
+      const buffer = Buffer.from(uint8Array);
+      const attachmentsDir = path.join(storageHub.getDataRootDir(), 'attachments');
+      if (!fs.existsSync(attachmentsDir)) {
+        fs.mkdirSync(attachmentsDir, { recursive: true });
+      }
+      const safeName = `${Date.now()}_${path.basename(fileName)}`;
+      const savedPath = path.join(attachmentsDir, safeName);
+      fs.writeFileSync(savedPath, buffer);
+      let localPath = savedPath;
+
+      if (workspacePath && fs.existsSync(workspacePath)) {
+        try {
+          const wsPath = path.join(workspacePath, path.basename(fileName));
+          fs.writeFileSync(wsPath, buffer);
+          localPath = wsPath;
+        } catch {}
+      }
+      return { success: true, localPath };
+    } catch (err: any) {
+      console.error('[Attachment] Error saving attachment:', err);
+      return { success: false, error: err.message };
     }
   });
 
@@ -641,10 +693,10 @@ function setupIPC() {
           payload: { sessionId, error }
         });
       },
-      onDone: (summary) => {
+      onDone: (summary, tokenStats) => {
         mainWindow?.webContents.send('agent:event', {
           type: 'done',
-          payload: { sessionId, summary }
+          payload: { sessionId, summary, tokenStats }
         });
       },
       onQuestion: (data) => {
@@ -676,6 +728,10 @@ function setupIPC() {
 
   ipcMain.handle('agent:stop', (_event, sessionId: string) => {
     return abortExecution(sessionId);
+  });
+
+  ipcMain.handle('agent:steer', (_event, { sessionId, message }: { sessionId: string; message: string }) => {
+    return steerExecution(sessionId, message);
   });
 
   ipcMain.handle('agent:replyQuestion', (_event, { sessionId, response }: { sessionId: string; response: string }) => {

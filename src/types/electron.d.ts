@@ -16,19 +16,21 @@ export interface ElectronAPI {
 
   // Skills
   getAllSkills: (workspacePath: string | null) => Promise<any[]>;
-  installSkillFromFile: () => Promise<any>;
-  installSkillFromFolder: () => Promise<any>;
+  installSkillFromFile: (filePath?: string) => Promise<any>;
+  installSkillFromFolder: (folderPath?: string) => Promise<any>;
   getExtraSkillDirs: () => Promise<string[]>;
   addExtraSkillDir: () => Promise<{ success: boolean; dir?: string; extraDirs: string[] }>;
   removeExtraSkillDir: (dirPath: string) => Promise<{ success: boolean; extraDirs: string[] }>;
   installSkillFromContent: (data: { id: string; name: string; description: string; prompt: string }) => Promise<any>;
   installSkillFromUrl: (url: string) => Promise<any>;
   deleteSkill: (skillId: string) => Promise<boolean>;
-  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array) => Promise<{
+  onSkillsChanged: (callback: () => void) => () => void;
+  extractOfficeDocument: (fileName: string, uint8Array: Uint8Array, workspacePath?: string) => Promise<{
     text: string;
     summary: string;
     charCount: number;
     type: 'word' | 'excel' | 'powerpoint' | 'pdf' | 'unknown';
+    localPath?: string;
     extractedImages?: Array<{
       id: string;
       name: string;
@@ -39,10 +41,16 @@ export interface ElectronAPI {
       locationHint?: string;
     }>;
   }>;
+  saveAttachment: (fileName: string, uint8Array: Uint8Array, workspacePath?: string) => Promise<{
+    success: boolean;
+    localPath?: string;
+    error?: string;
+  }>;
 
   // Agent Harness
   startAgent: (sessionId: string, config: any, history: any[]) => Promise<void>;
   stopAgent: (sessionId: string) => Promise<boolean>;
+  steerAgent: (sessionId: string, message: string) => Promise<boolean>;
   replyQuestion: (sessionId: string, response: string) => Promise<boolean>;
   sendTerminalInput: (sessionId: string, input: string) => Promise<boolean>;
   onAgentEvent: (callback: (data: { type: string; payload: any }) => void) => () => void;
@@ -165,6 +173,7 @@ export interface ElectronAPI {
   checkForUpdates?: (customServerUrl?: string) => Promise<any>;
   startDownloadUpdate?: () => Promise<{ success: boolean; filePath?: string; error?: string }>;
   installAndRestartUpdate?: (silent?: boolean) => Promise<{ success: boolean; error?: string }>;
+  getAppVersion?: () => Promise<string>;
   onUpdateEvent?: (callback: (data: any) => void) => () => void;
 }
 

@@ -10,6 +10,7 @@ import {
   Key,
   Database,
   Smartphone,
+  Building2,
   CheckCircle2,
   AlertTriangle,
   History,
@@ -304,7 +305,7 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
                   跨工作区知识图谱与数据安全围栏 (Knowledge & Security Fence)
                 </h2>
                 <span className="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-800 dark:bg-purple-950 dark:text-purple-300">
-                  v1.7.1 出境防护与合规审计
+                  v2.0.2 出境防护与合规审计
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
@@ -409,7 +410,8 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
                     { key: 'privateIps', label: '企业内网私有 IPv4 地址 (10.x / 172.16-31.x / 192.168.x)', icon: Network },
                     { key: 'dbConnections', label: '数据库直连口令 (Postgres / MySQL / MongoDB / Redis)', icon: Database },
                     { key: 'privateKeys', label: 'RSA / ECC 证书私钥块 (BEGIN PRIVATE KEY)', icon: Lock },
-                    { key: 'phoneNumbers', label: '中国大陆手机号码 (PII 隐私防泄露)', icon: Smartphone }
+                    { key: 'phoneNumbers', label: '中国大陆手机号码 (PII 隐私防泄露)', icon: Smartphone },
+                    { key: 'customerAssets', label: '企业客户名称与内部项目代号 (Customer Names & Project Codes)', icon: Building2 }
                   ].map(rule => {
                     const Icon = rule.icon;
                     const checked = fenceConfig.enabledRules?.[rule.key] ?? true;
@@ -436,6 +438,81 @@ export const SecurityComplianceModal: React.FC<SecurityComplianceModalProps> = (
                       </label>
                     );
                   })}
+                </div>
+              </div>
+
+              {/* 企业客户敏感资产与双向保真映射配置 */}
+              <div className="rounded-xl border border-purple-200 bg-purple-50/50 p-4 dark:border-purple-900/40 dark:bg-purple-950/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                    <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                      企业客户敏感资产与方案双向保真映射
+                    </span>
+                  </div>
+                  <label className="flex items-center gap-2 text-xs cursor-pointer text-slate-700 dark:text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={fenceConfig.customerAssets?.bidirectionalMapping !== false}
+                      onChange={e =>
+                        setFenceConfig({
+                          ...fenceConfig,
+                          customerAssets: {
+                            ...(fenceConfig.customerAssets || { enabled: true, customerNames: [], projectCodes: [], sensitiveLogoPatterns: [] }),
+                            bidirectionalMapping: e.target.checked
+                          }
+                        })
+                      }
+                      className="rounded text-purple-600 focus:ring-purple-500"
+                    />
+                    <span className="font-medium">启用交付物自动逆向翻译还原</span>
+                  </label>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  出境时将客户真实名称替换为“客户1”、私网 IP 保真映射为“101.2.x.x”；大模型输出交付物时自动翻译还原回真实客户名称与 IP，保证方案拓扑与客户信息双赢。
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      客户主体名称列表 (以逗号分隔，如: 招商银行, 中国移动)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="招商银行, 中国移动, 某某集团"
+                      value={(fenceConfig.customerAssets?.customerNames || []).join(', ')}
+                      onChange={e =>
+                        setFenceConfig({
+                          ...fenceConfig,
+                          customerAssets: {
+                            ...(fenceConfig.customerAssets || { enabled: true, projectCodes: [], sensitiveLogoPatterns: [], bidirectionalMapping: true }),
+                            customerNames: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                          }
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-purple-500 focus:outline-hidden dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      内部项目代号列表 (以逗号分隔，如: Project-Apollo)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Project-Alpha, 核心骨干改造"
+                      value={(fenceConfig.customerAssets?.projectCodes || []).join(', ')}
+                      onChange={e =>
+                        setFenceConfig({
+                          ...fenceConfig,
+                          customerAssets: {
+                            ...(fenceConfig.customerAssets || { enabled: true, customerNames: [], sensitiveLogoPatterns: [], bidirectionalMapping: true }),
+                            projectCodes: e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+                          }
+                        })
+                      }
+                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-purple-500 focus:outline-hidden dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 font-mono"
+                    />
+                  </div>
                 </div>
               </div>
 

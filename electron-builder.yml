@@ -6,6 +6,7 @@ directories:
 files:
   - dist/**/*
   - dist-electron/**/*
+  - skills/**/*
   - build/icon.ico
   - build/icon.png
   - package.json

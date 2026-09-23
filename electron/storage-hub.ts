@@ -8,6 +8,8 @@ export interface StorageHubConfig {
   customized: boolean;
   lastMigratedAt?: number;
   extraSkillDirs?: string[];
+  uninstalledSkillIds?: string[];
+  removedExtraSkillDirs?: string[];
 }
 
 export interface StorageSubdirStat {
@@ -34,10 +36,14 @@ export class StorageHub {
   private configFilePath: string;
   private currentRootDir: string;
   private extraSkillDirs: string[] = [];
+  private uninstalledSkillIds: string[] = [];
+  private removedExtraSkillDirs: string[] = [];
 
   constructor() {
     this.configFilePath = this.resolveConfigFilePath();
     this.currentRootDir = this.loadInitialRootDir();
+    this.uninstalledSkillIds = this.loadInitialUninstalledSkills();
+    this.removedExtraSkillDirs = this.loadInitialRemovedExtraDirs();
     this.extraSkillDirs = this.loadInitialExtraSkillDirs();
     this.ensureDirectoryStructure(this.currentRootDir);
   }
@@ -107,6 +113,32 @@ export class StorageHub {
     return path.join(os.homedir(), 'ASTeamData');
   }
 
+  private loadInitialUninstalledSkills(): string[] {
+    try {
+      if (fs.existsSync(this.configFilePath)) {
+        const raw = fs.readFileSync(this.configFilePath, 'utf-8');
+        const parsed: StorageHubConfig = JSON.parse(raw);
+        if (Array.isArray(parsed.uninstalledSkillIds)) {
+          return parsed.uninstalledSkillIds.filter(id => typeof id === 'string' && id.trim());
+        }
+      }
+    } catch {}
+    return [];
+  }
+
+  private loadInitialRemovedExtraDirs(): string[] {
+    try {
+      if (fs.existsSync(this.configFilePath)) {
+        const raw = fs.readFileSync(this.configFilePath, 'utf-8');
+        const parsed: StorageHubConfig = JSON.parse(raw);
+        if (Array.isArray(parsed.removedExtraSkillDirs)) {
+          return parsed.removedExtraSkillDirs.map(d => path.normalize(d.trim()));
+        }
+      }
+    } catch {}
+    return [];
+  }
+
   private loadInitialExtraSkillDirs(): string[] {
     const list: string[] = [];
     // 1. 读取配置文件中的自定义外部技能目录
@@ -116,24 +148,30 @@ export class StorageHub {
         const parsed: StorageHubConfig = JSON.parse(raw);
         if (Array.isArray(parsed.extraSkillDirs)) {
           for (const d of parsed.extraSkillDirs) {
-            if (typeof d === 'string' && d.trim() && !list.includes(path.normalize(d.trim()))) {
-              list.push(path.normalize(d.trim()));
+            if (typeof d === 'string' && d.trim()) {
+              const norm = path.normalize(d.trim());
+              if (!list.includes(norm) && !this.removedExtraSkillDirs.includes(norm)) {
+                list.push(norm);
+              }
             }
           }
         }
       }
     } catch {}
 
-    // 2. 默认探测常见的外部技能目录（如 D:\ASTeamAIProject\Skills）
+    // 2. 默认探测常见的技能目录（如 D:\ASTeamAIProject\Skills、.asteam\skills 等）
     if (process.platform === 'win32') {
       const candidates = [
         'D:\\ASTeamAIProject\\Skills',
-        path.join(process.cwd(), 'skills')
+        path.join(process.cwd(), 'skills'),
+        path.resolve('skills'),
+        path.join(os.homedir(), '.asteam', 'skills'),
+        path.join(os.homedir(), '.claude', 'skills')
       ];
       for (const cand of candidates) {
         try {
           const norm = path.normalize(cand);
-          if (fs.existsSync(norm) && !list.includes(norm)) {
+          if (fs.existsSync(norm) && !list.includes(norm) && !this.removedExtraSkillDirs.includes(norm)) {
             list.push(norm);
           }
         } catch {}
@@ -153,6 +191,8 @@ export class StorageHub {
         dataRootDir: this.currentRootDir,
         customized: true,
         extraSkillDirs: this.extraSkillDirs,
+        uninstalledSkillIds: this.uninstalledSkillIds,
+        removedExtraSkillDirs: this.removedExtraSkillDirs,
         lastMigratedAt: Date.now()
       };
       fs.writeFileSync(this.configFilePath, JSON.stringify(configData, null, 2), 'utf-8');
@@ -240,10 +280,51 @@ export class StorageHub {
     const idx = this.extraSkillDirs.indexOf(normalized);
     if (idx !== -1) {
       this.extraSkillDirs.splice(idx, 1);
-      this.persistConfig();
-      return true;
     }
-    return false;
+    if (!this.removedExtraSkillDirs.includes(normalized)) {
+      this.removedExtraSkillDirs.push(normalized);
+    }
+    this.persistConfig();
+    return true;
+  }
+
+  public isSkillUninstalled(skillId: string): boolean {
+    if (!skillId) return false;
+    const clean = skillId.trim().toLowerCase().replace(/^custom:(global|workspace|extra):/, '');
+    const cleanNorm = clean.replace(/[^a-z0-9]/g, '');
+    return this.uninstalledSkillIds.some(id => {
+      const idClean = id.trim().toLowerCase().replace(/^custom:(global|workspace|extra):/, '');
+      const idNorm = idClean.replace(/[^a-z0-9]/g, '');
+      return id === skillId || idClean === clean || (cleanNorm.length >= 3 && idNorm === cleanNorm);
+    });
+  }
+
+  public recordUninstalledSkill(skillId: string): void {
+    if (!skillId) return;
+    const clean = skillId.trim().toLowerCase().replace(/^custom:(global|workspace|extra):/, '');
+    if (!this.uninstalledSkillIds.includes(skillId)) {
+      this.uninstalledSkillIds.push(skillId);
+    }
+    if (!this.uninstalledSkillIds.includes(clean)) {
+      this.uninstalledSkillIds.push(clean);
+    }
+    this.persistConfig();
+  }
+
+  public unrecordUninstalledSkill(skillId: string): void {
+    if (!skillId) return;
+    const clean = skillId.trim().toLowerCase().replace(/^custom:(global|workspace|extra):/, '');
+    const cleanNorm = clean.replace(/[^a-z0-9]/g, '');
+    this.uninstalledSkillIds = this.uninstalledSkillIds.filter(id => {
+      const idClean = id.trim().toLowerCase().replace(/^custom:(global|workspace|extra):/, '');
+      const idNorm = idClean.replace(/[^a-z0-9]/g, '');
+      return id !== skillId && idClean !== clean && (cleanNorm.length < 3 || idNorm !== cleanNorm);
+    });
+    this.persistConfig();
+  }
+
+  public getUninstalledSkillIds(): string[] {
+    return [...this.uninstalledSkillIds];
   }
 
   public getMemoryDir(): string {

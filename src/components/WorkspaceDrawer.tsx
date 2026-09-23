@@ -289,9 +289,18 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
     const items: ArtifactItem[] = [];
     const seenKeys = new Set<string>();
 
+    const getAssetKey = (type: string, title?: string, filePath?: string): string => {
+      if (filePath && filePath.trim()) {
+        const norm = filePath.trim().replace(/\\/g, '/').toLowerCase();
+        const base = norm.split('/').pop() || norm;
+        return `file:${base}`;
+      }
+      return `asset:${type}:${(title || '').trim().toLowerCase()}`;
+    };
+
     // 1. Current active previewData
     if (previewData) {
-      const key = `preview:${previewData.type}:${previewData.title || ''}:${previewData.filePath || ''}`;
+      const key = getAssetKey(previewData.type, previewData.title, previewData.filePath);
       if (!seenKeys.has(key)) {
         seenKeys.add(key);
         items.push({
@@ -322,7 +331,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
             const contentStr = typeof step.args.content === 'string' ? step.args.content : '';
 
             if (filePath.endsWith('.html') || filePath.endsWith('.htm')) {
-              const key = `file:${filePath || fileName}`;
+              const key = getAssetKey('html', fileName, filePath);
               if (!seenKeys.has(key)) {
                 seenKeys.add(key);
                 items.push({
@@ -517,7 +526,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
       // Check extracted previewable artifact from content/thought
       const artifact = extractPreviewableArtifact(msg.content || msg.thought || '', msg.steps);
       if (artifact) {
-        const key = `artifact:${artifact.type}:${artifact.title || ''}:${artifact.filePath || ''}`;
+        const key = getAssetKey(artifact.type, artifact.title, artifact.filePath);
         if (!seenKeys.has(key)) {
           seenKeys.add(key);
           items.push({
@@ -556,10 +565,13 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const handleOpenArtifactInBrowser = async (item: ArtifactItem) => {
     if (!item.content && !item.filePath) return;
     if (window.electronAPI?.openInBrowser) {
+      const rawPath = item.filePath || '';
+      const isAbs = rawPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(rawPath);
+      const fullPath = (isAbs || !workspacePath) ? rawPath : `${workspacePath.replace(/[\\/]+$/, '')}/${rawPath.replace(/^[\\/]+/, '')}`;
       await window.electronAPI.openInBrowser({
         content: item.content || '',
         title: item.title,
-        defaultPath: item.filePath
+        defaultPath: fullPath
       });
     } else if (item.content) {
       const blob = new Blob([item.content], { type: 'text/html' });

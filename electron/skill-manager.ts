@@ -18,7 +18,7 @@ export interface SkillItem {
   triggers?: string[];
   recommendedTools?: string[];
   rawFrontmatter?: Record<string, any>;
-  // 复合型与资源扩展属性 (v1.11.0)
+  // 复合型与资源扩展属性 (v1.11.0 / v2.0.2)
   isFolderSkill?: boolean;
   skillDir?: string;
   scriptsDir?: string;
@@ -26,6 +26,24 @@ export interface SkillItem {
   referencesDir?: string;
   examplesDir?: string;
   isZipExtracted?: boolean;
+  requirementsPath?: string;
+  requirements?: string[];
+  mtimeMs?: number;
+}
+
+export function compareSemver(v1?: string, v2?: string): number {
+  if (!v1 && !v2) return 0;
+  if (!v1) return -1;
+  if (!v2) return 1;
+  const p1 = v1.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+  const p2 = v2.replace(/^v/i, '').split('.').map(n => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(p1.length, p2.length); i++) {
+    const num1 = p1[i] || 0;
+    const num2 = p2[i] || 0;
+    if (num1 > num2) return 1;
+    if (num1 < num2) return -1;
+  }
+  return 0;
 }
 
 export function parseSkillMarkdown(rawContent: string): {
@@ -155,7 +173,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '融合 Anthropic 深度分析与 MiniMax 权威公文体系，撰写高水准技术方案白皮书、行政公文与深度研究报告',
     isBuiltin: true,
     category: 'office',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['公文', '方案', '白皮书', '报告', 'word', 'docx'],
     recommendedTools: ['generate_docx', 'view_file', 'write_file'],
     prompt: `【激活技能：公文方案与深度报告专家 (Anthropic & MiniMax 官方融合)】
@@ -176,7 +194,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '融合高级财务建模与 MiniMax 现代复杂动态数组公式 (XLOOKUP/LET/LAMBDA)，提供数据清洗与多维透视洞察',
     isBuiltin: true,
     category: 'office',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['表格', 'excel', 'xlsx', '数据建模', '透视表', '公式'],
     recommendedTools: ['generate_excel', 'read_excel'],
     prompt: `【激活技能：表格与数据建模大师 (Anthropic & MiniMax 官方融合)】
@@ -192,7 +210,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '融合 Anthropic 单页核心论点原则与 MiniMax 企划路演商业逻辑，生成逐页版式建议与讲者演说逐字稿',
     isBuiltin: true,
     category: 'office',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['ppt', 'pptx', '幻灯片', '路演', '商业提案', '演说'],
     recommendedTools: ['generate_pptx'],
     prompt: `【激活技能：商业提案与演说 PPT 架构师 (Anthropic & MiniMax 官方融合)】
@@ -212,7 +230,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '从杂乱讨论中快速萃取核心决议 (Decisions)、分歧争议与 RACI 敏捷行动项追踪矩阵',
     isBuiltin: true,
     category: 'office',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['会议纪要', '行动项', '决议', 'raci', 'meeting'],
     recommendedTools: ['write_file', 'generate_docx'],
     prompt: `【激活技能：智能会议纪要与行动清单 (Anthropic & MiniMax 官方融合)】
@@ -230,7 +248,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '设计符合 OpenAPI 3.0 / RESTful 最佳实践的高可用前后端接口契约与统一错误包装',
     isBuiltin: true,
     category: 'office',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['api', '接口设计', 'restful', 'openapi', '契约'],
     recommendedTools: ['write_file', 'view_file'],
     prompt: `【激活技能：API 架构与契约设计】
@@ -247,7 +265,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '严格按企业级标准（OWASP 安全基线、防御性编程、空指针防护、内存泄漏与性能）走查代码',
     isBuiltin: true,
     category: 'dev',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['review', '代码走查', '审查', '安全走查', 'owasp'],
     recommendedTools: ['view_file', 'code_ast_inspector'],
     prompt: `【激活技能：Code Review 专家】
@@ -263,7 +281,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '自动分析被测函数边界，生成高覆盖率的单元测试并执行验证',
     isBuiltin: true,
     category: 'dev',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['单测', '单元测试', 'unit test', '回归验证', '测试用例'],
     recommendedTools: ['run_terminal_command', 'view_file'],
     prompt: `【激活技能：单元测试与回归验证】
@@ -277,7 +295,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '遵循 SOLID 原则、设计模式与坏味道清理，提升代码可读性与模块解耦',
     isBuiltin: true,
     category: 'dev',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['重构', 'clean code', '代码坏味道', 'solid', '解耦'],
     recommendedTools: ['view_file', 'write_file', 'code_ast_inspector'],
     prompt: `【激活技能：Clean Code 架构重构】
@@ -291,7 +309,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '依据代码变更 Diff 自动归纳清晰规范的 Git 提交消息',
     isBuiltin: true,
     category: 'dev',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['git commit', '提交规范', 'commit message', 'conventional commits'],
     recommendedTools: ['git_operations', 'run_terminal_command'],
     prompt: `【激活技能：Conventional Commits 规范助手】
@@ -307,7 +325,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '针对 IDC 机房老旧数据库、CBS 系统与云主机资源盘点，出具符合华为云技术方案规范的高规格技术迁移白皮书',
     isBuiltin: true,
     category: 'office',
-    version: '1.8.2',
+    version: '2.0.1',
     triggers: ['华为云', 'idc迁移', '数据库迁移', '上云', 'cbs', 'ecu'],
     recommendedTools: ['generate_docx', 'generate_excel'],
     prompt: `【激活技能：IDC与数据库向华为云迁移专家 (自主演进技能)】
@@ -333,7 +351,7 @@ const BUILTIN_SKILLS: SkillItem[] = [
     description: '根据用户使用习惯、工作流沉淀与上下文需求，自动生成标准化 Skill (含 Frontmatter、执行规约、物理路径规划并可一键写入生效)',
     isBuiltin: true,
     category: 'custom',
-    version: '1.11.1',
+    version: '2.0.1',
     triggers: [
       '创建技能',
       '生成技能',
@@ -403,6 +421,122 @@ recommendedTools:
 3. **落地交付与确认**：
    - 完整展示生成的 Markdown 内容；
    - 询问或主动使用文件写入工具将其持久化至 \`skills/\` 目录，并告知用户“已成功生成并安装，现在你可以在输入框输入 @ 或在技能面板中直接勾选它”。`
+  },
+  // 5. 华讯（ECCOM）标准化交付与设计套件 (v2.0.1 内置官方技能)
+  {
+    id: 'huaxun_word_generator',
+    name: '华讯交付文档与Word/PDF方案专家 (huaxun-word-generator)',
+    description: '按华讯（ECCOM）知识模板格式规范 v2.3 生成高规格交付 Word（.docx）与 PDF，支持自动大纲与元数据收集、表头居中数据左对齐、版本控制、原模板品牌图文保持',
+    isBuiltin: true,
+    category: 'office',
+    version: '2.0.1',
+    triggers: [
+      '华讯word',
+      '华讯模板',
+      '华讯文档',
+      'huaxun-word',
+      'huaxun_word',
+      '华讯方案',
+      '华讯交付',
+      'eccom docx',
+      'word交付',
+      'pdf方案',
+      '知识模板'
+    ],
+    recommendedTools: ['run_terminal_command', 'write_file', 'generate_docx'],
+    prompt: `【激活官方内置技能：华讯交付文档与Word/PDF方案专家 (huaxun-word-generator)】
+- 按华讯（ECCOM）知识模板格式规范 v2.3，生成符合规范的 Word (.docx) + PDF 交付文档：
+  1. 初始化引导（前置问询与元数据收集）：
+     在生成前，可先向用户确认以下核心元数据（或使用默认值）：
+     - doc_title (文档标题)、doc_version (如 V1.0)、doc_date (日期)、project_name (项目名)、customer_name (客户名)、author (作者)、doc_type (通用知识/项目方案设计/实施验收/培训手册)；
+     - 默认值：company_name="上海华讯网络系统有限公司"，logo=技能内 assets/logo_eccom_cn.png；
+  2. 结构标准与骨架：
+     - 通用知识：背景 -> 概念/架构 -> 实施要点 -> 总结
+     - 项目方案/设计：项目概述（含项目概况表）-> 需求分析 -> 总体设计 -> 详细设计（含拓扑/配置）-> 实施计划
+     - 实施/验收报告：项目信息 -> 实施范围与记录 -> 问题与处理 -> 验收结论 -> 签字盖章
+     - 培训/操作手册：适用范围 -> 环境准备 -> 操作步骤（分步+小心/警告）-> 常见问题
+     - 必须包含标准封面横幅、版本控制历史表、自动目录 (TOC)、表头居中且数据左对齐的标准表格；
+  3. 执行方式：
+     - 若宿主具备 Python 环境，可通过调用技能脚本一键生成：
+       python "<skill_dir>/scripts/generate_huaxun_doc.py" --meta meta.json --content content.json --out <outDir> [--pdf]
+     - 也可直接结合系统内置纯 JS 原生 Word 套件 (generate_docx) 生成符合同样华讯视觉规约的交付文档。`
+  },
+  {
+    id: 'huaxun_excel_generator',
+    name: '华讯交付表格与Excel建模专家 (huaxun-excel-generator)',
+    description: '按公司《Excel模板（暂定）》生成标准化 Excel 交付文件，内置项目人员通讯录、设备清单、IP地址规划、验收检查表等标准 Sheet，自动环境预检与公式保护',
+    isBuiltin: true,
+    category: 'office',
+    version: '2.0.1',
+    triggers: [
+      '华讯excel',
+      '华讯表格',
+      'huaxun-excel',
+      'huaxun_excel',
+      '华讯模板excel',
+      'excel交付',
+      '设备清单表格',
+      'ip规划表',
+      '人员通讯录表格'
+    ],
+    recommendedTools: ['run_terminal_command', 'write_file', 'generate_excel'],
+    prompt: `【激活官方内置技能：华讯交付表格与Excel建模专家 (huaxun-excel-generator)】
+- 遵循华讯（ECCOM）标准化项目交付表格规范与企业级多 Sheet 数据建模标准：
+  1. 标准化工作表 (Sheets) 矩阵：
+     - 【版本控制】：文档版本、更新时间、修订人、修订要点；
+     - 【关于】：项目概述、客户信息、服务范围、编制依据；
+     - 【人员通讯录】：姓名、单位、职务/角色、联系方式、职责分工；
+     - 【设备清单】：设备名称、型号规格、序列号、安装位置、维保状态、责任人；
+     - 【IP地址规划】：网段、IP 地址、子网掩码、网关、VLAN、连接设备/端口、用途；
+     - 【验收检查表】：检查项、验收标准、测试方法、验收结果、确认人签字；
+  2. 排版与视觉设计：
+     - 表头采用深绿/华讯品牌色底色与纯白文字，冻结首行 (Freeze Panes)；
+     - 数据行斑马纹交替，单元格对齐（文本居左、数值与状态居中、金额与量化右对齐）；
+  3. 执行方式：
+     - 可直接通过技能脚本批量生成：
+       python "<skill_dir>/scripts/generate_huaxun_excel.py" --meta meta.json --content content.json --out <outDir>
+     - 也可直接调用内置原生 Excel 套件 (generate_excel) 写入多 Sheet 与格式化数据。`
+  },
+  {
+    id: 'asteam_ui_design',
+    name: 'ASTeam UI 视觉与前端设计系统规范 (ASTeam Design System)',
+    description: 'ASTeam 官方 UI 设计系统与视觉规范：松石绿 (#006857) 品牌主色、强调红 (#D31245)、语义状态色板、圆角/阴影/微动效规范与现代化组件排版准则',
+    isBuiltin: true,
+    category: 'dev',
+    version: '2.0.1',
+    triggers: [
+      'asteam ui',
+      'asteam ui 设计',
+      'asteam-ui',
+      'asteam 设计',
+      'asteam规范',
+      'ui规范',
+      '设计系统',
+      '前端规范',
+      'tailwind规范',
+      '品牌色'
+    ],
+    recommendedTools: ['write_file', 'view_file'],
+    prompt: `【激活官方内置技能：ASTeam UI 视觉与前端设计系统规范 (ASTeam Design System)】
+- 遵循 ASTeam 官方 UI 设计系统与现代企业级视觉设计规范：
+  1. 品牌官方色板 (严格遵守，严禁臆测):
+     - 主绿 (Pine Green): #006857 (--asteam-brand-primary)
+     - 强调红 (Accent Red): #D31245 (--asteam-brand-accent，仅用于品牌/高光徽标，【严禁】用于系统错误或警报提示！)
+     - 语义错误色 (Error Red): #B42318 (Light 模式) / #F87171 (Dark 模式)
+     - 语义成功色: #15803D (--asteam-success)
+     - 语义警告色: #B45309 (--asteam-warning)
+     - 语义信息色: #0369A1 (--asteam-info)
+     - 辅助松石浅绿: #3EB39C, #6BC39C (Dark 模式主色), #AAE4B4
+  2. 主题与背景层次:
+     - Light 模式: 背景 #F7F9F8, 卡片底色 #FFFFFF, 边框 #DDDDDD, 文本 #18181B
+     - Dark 模式: 背景 #0A0A0B, 卡片底色 #141716, 边框 #303735, 文本 #F5F7F6
+  3. 尺寸与微动效规范:
+     - 圆角: 微型组件 6px (rounded-md), 卡片/面板 12px (rounded-xl), 状态胶囊 999px (rounded-full)
+     - 阴影: 柔和精致 shadow-xs 或 shadow-sm，杜绝生硬浓黑重阴影
+     - 动效: 快速响应 120ms，抽屉过渡 180ms，曲线 cubic-bezier(0.16, 1, 0.3, 1)
+  4. 交付大屏与 HTML 生成规约:
+     - 独立 HTML 页面必须在 <style> 内联注入完整的上述 CSS 变量及 Inter / Noto Sans SC 字体栈；
+     - 数据表格必须包含横向滚动容器 (overflow-x: auto) 与最小宽度保障 (min-width: 600px)。`
   }
 ];
 
@@ -418,7 +552,53 @@ export class SkillManager {
   }
 
   getBuiltinSkills(): SkillItem[] {
-    return BUILTIN_SKILLS;
+    const candidateSkillsDirs = [
+      path.join(process.cwd(), 'skills'),
+      path.resolve('skills'),
+      'D:\\ASTeamAIProject\\Skills',
+      'D:\\AIProject\\asteam-agent\\skills'
+    ];
+
+    return BUILTIN_SKILLS
+      .filter(skill => !storageHub.isSkillUninstalled(skill.id))
+      .map(skill => {
+      if (skill.id === 'huaxun_word_generator' || skill.id === 'huaxun_excel_generator' || skill.id === 'asteam_ui_design') {
+        const folderName = skill.id === 'huaxun_word_generator' 
+          ? 'huaxun-word-generator' 
+          : skill.id === 'huaxun_excel_generator' 
+          ? 'huaxun-excel-generator' 
+          : 'asteam-ui-design';
+        
+        let foundDir = '';
+        for (const base of candidateSkillsDirs) {
+          const cand = path.join(base, folderName);
+          if (fs.existsSync(cand) && fs.statSync(cand).isDirectory()) {
+            foundDir = cand;
+            break;
+          }
+        }
+
+        if (foundDir) {
+          const scriptsDir = path.join(foundDir, 'scripts');
+          const assetsDir = path.join(foundDir, 'assets');
+          const referencesDir = path.join(foundDir, 'references');
+          const examplesDir = path.join(foundDir, 'examples');
+          const entryFile = path.join(foundDir, 'SKILL.md');
+
+          return {
+            ...skill,
+            isFolderSkill: true,
+            filePath: fs.existsSync(entryFile) ? entryFile : skill.filePath,
+            skillDir: foundDir,
+            scriptsDir: fs.existsSync(scriptsDir) ? scriptsDir : undefined,
+            assetsDir: fs.existsSync(assetsDir) ? assetsDir : undefined,
+            referencesDir: fs.existsSync(referencesDir) ? referencesDir : undefined,
+            examplesDir: fs.existsSync(examplesDir) ? examplesDir : undefined
+          };
+        }
+      }
+      return skill;
+    });
   }
 
   /**
@@ -437,6 +617,8 @@ export class SkillManager {
       // 寻找入口 Markdown 文件 (SKILL.md > skill.md > README.md)
       const candidates = ['SKILL.md', 'skill.md', 'README.md'];
       let entryFile: string | null = null;
+      let actualFolderPath = folderPath;
+
       for (const cand of candidates) {
         const p = path.join(folderPath, cand);
         if (fs.existsSync(p) && fs.statSync(p).isFile()) {
@@ -450,19 +632,70 @@ export class SkillManager {
         }
       }
 
+      // 若当前目录未直接找到入口，递归探测一级与二级非系统子目录 (应对 zip 解压或文件夹导入后带有多层同名/子目录的情况)
+      if (!entryFile) {
+        const findEntryRecursive = (dir: string, depth = 0): { entry: string; folder: string } | null => {
+          if (depth > 2) return null;
+          try {
+            const subEntries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const sub of subEntries) {
+              if (sub.isDirectory() && !sub.name.startsWith('.') && sub.name !== '__MACOSX' && sub.name !== 'node_modules' && sub.name !== 'dist' && sub.name !== '.git') {
+                const subFolder = path.join(dir, sub.name);
+                for (const cand of candidates) {
+                  const subP = path.join(subFolder, cand);
+                  if (fs.existsSync(subP) && fs.statSync(subP).isFile()) {
+                    if (cand === 'README.md') {
+                      const sample = fs.readFileSync(subP, 'utf-8').trim();
+                      if (!sample.startsWith('---')) continue;
+                    }
+                    return { entry: subP, folder: subFolder };
+                  }
+                }
+                const nested = findEntryRecursive(subFolder, depth + 1);
+                if (nested) return nested;
+              }
+            }
+          } catch {}
+          return null;
+        };
+
+        const found = findEntryRecursive(folderPath, 0);
+        if (found) {
+          entryFile = found.entry;
+          actualFolderPath = found.folder;
+        }
+      }
+
       if (!entryFile) return null;
 
       const content = fs.readFileSync(entryFile, 'utf-8');
       const parsed = parseSkillMarkdown(content);
-      const folderBaseName = path.basename(folderPath);
+      const folderBaseName = path.basename(actualFolderPath);
       const rawName = parsed.name || folderBaseName;
       const cleanId = (parsed.frontmatter?.name || folderBaseName).trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
 
-      // 探测复合资源子目录
-      const scriptsDirCandidate = path.join(folderPath, 'scripts');
-      const assetsDirCandidate = path.join(folderPath, 'assets');
-      const referencesDirCandidate = path.join(folderPath, 'references');
-      const examplesDirCandidate = path.join(folderPath, 'examples');
+      // 探测 Python 依赖声明 (requirements.txt)
+      const reqCandidate1 = path.join(actualFolderPath, 'requirements.txt');
+      const reqCandidate2 = path.join(actualFolderPath, 'scripts', 'requirements.txt');
+      let requirementsPath: string | undefined;
+      let requirements: string[] | undefined;
+      if (fs.existsSync(reqCandidate1) && fs.statSync(reqCandidate1).isFile()) {
+        requirementsPath = reqCandidate1;
+      } else if (fs.existsSync(reqCandidate2) && fs.statSync(reqCandidate2).isFile()) {
+        requirementsPath = reqCandidate2;
+      }
+      if (requirementsPath) {
+        try {
+          const reqRaw = fs.readFileSync(requirementsPath, 'utf-8');
+          requirements = reqRaw.split(/\r?\n/).map(s => s.trim()).filter(s => s && !s.startsWith('#'));
+        } catch {}
+      }
+
+      // 探测复合资源子目录 (基于真实技能实际所在目录 actualFolderPath)
+      const scriptsDirCandidate = path.join(actualFolderPath, 'scripts');
+      const assetsDirCandidate = path.join(actualFolderPath, 'assets');
+      const referencesDirCandidate = path.join(actualFolderPath, 'references');
+      const examplesDirCandidate = path.join(actualFolderPath, 'examples');
 
       const scriptsDir = fs.existsSync(scriptsDirCandidate) && fs.statSync(scriptsDirCandidate).isDirectory()
         ? scriptsDirCandidate
@@ -477,17 +710,24 @@ export class SkillManager {
         ? examplesDirCandidate
         : undefined;
 
-      // 结构化注入物理绝对路径，彻底保障 Agent 执行脚本时不迷路
+      // 结构化注入物理绝对路径与依赖规约，彻底保障 Agent 执行脚本时不迷路、不报错
       let physicalSection = '';
-      if (scriptsDir || assetsDir || referencesDir || examplesDir) {
-        physicalSection = `\n\n【复合技能本地物理资源映射 (Composite Skill Physical Resources)】\n` +
-          `- 技能物理根目录 (Skill Root): ${folderPath}\n` +
+      if (scriptsDir || assetsDir || referencesDir || examplesDir || requirementsPath) {
+        physicalSection = `\n\n【复合技能本地物理资源与运行环境规约 (Composite Skill Physical Resources & Preflight)】\n` +
+          `- 技能物理根目录 (Skill Root): ${actualFolderPath}\n` +
           (scriptsDir ? `- 脚本执行目录 (Scripts Dir): ${scriptsDir}\n` : '') +
           (assetsDir ? `- 模板与资产目录 (Assets Dir): ${assetsDir}\n` : '') +
           (referencesDir ? `- 规范与参考目录 (References Dir): ${referencesDir}\n` : '') +
           (examplesDir ? `- 样例示范目录 (Examples Dir): ${examplesDir}\n` : '') +
-          `- 调度执行硬规范: 当需要执行 Python 脚本、预检依赖或读取 Word/Excel 模板时，必须使用上述绝对物理路径直接调用，严禁臆测相对路径！\n`;
+          (requirementsPath ? `- 依赖清单路径 (Requirements): ${requirementsPath}${requirements && requirements.length > 0 ? ` [包含: ${requirements.slice(0, 5).join(', ')}${requirements.length > 5 ? ' 等' : ''}]` : ''}\n` : '') +
+          `- 调度执行硬规范: 当需要执行 Python 脚本、预检依赖或读取 Word/Excel 模板时，必须使用上述绝对物理路径直接调用，严禁臆测相对路径！\n` +
+          (requirementsPath ? `- 依赖自动装配指示: 首次执行脚本若出现 ModuleNotFoundError，请调用 run_terminal_command 执行 \`pip install -r "${requirementsPath}"\` 自动装配依赖！\n` : '');
       }
+
+      let mtimeMs = 0;
+      try {
+        mtimeMs = fs.statSync(entryFile).mtimeMs;
+      } catch {}
 
       const scopeTag = scope === 'workspace' ? '项目专属' : scope === 'extra' ? '外部技能' : '自定义';
       const prompt = `【激活${scopeTag}技能：${rawName}】${physicalSection}\n${parsed.body || content}`;
@@ -504,12 +744,15 @@ export class SkillManager {
         recommendedTools: parsed.recommendedTools,
         rawFrontmatter: parsed.frontmatter,
         isFolderSkill: true,
-        skillDir: folderPath,
+        skillDir: actualFolderPath,
         scriptsDir,
         assetsDir,
         referencesDir,
         examplesDir,
         isZipExtracted,
+        requirementsPath,
+        requirements,
+        mtimeMs,
         prompt
       };
     } catch (e) {
@@ -542,9 +785,12 @@ export class SkillManager {
 
       if (shouldExtract) {
         try {
-          if (!fs.existsSync(targetDir)) {
-            fs.mkdirSync(targetDir, { recursive: true });
+          if (fs.existsSync(targetDir)) {
+            try {
+              fs.rmSync(targetDir, { recursive: true, force: true });
+            } catch {}
           }
+          fs.mkdirSync(targetDir, { recursive: true });
           const zip = new AdmZip(zipFilePath);
           zip.extractAllTo(targetDir, true);
         } catch (err) {
@@ -607,10 +853,12 @@ export class SkillManager {
         seenIds.add(item.id.toLowerCase());
       } else {
         const existing = skillMap.get(baseKey)!;
-        // 关键升级策略：若新技能具备真实脚本或资产物理路径，而旧技能没有，则升级替换旧技能！
+        const verDiff = compareSemver(item.version, existing.version);
         const newScore = (item.isFolderSkill ? 10 : 0) + (item.scriptsDir ? 20 : 0) + (item.assetsDir ? 10 : 0);
         const oldScore = (existing.isFolderSkill ? 10 : 0) + (existing.scriptsDir ? 20 : 0) + (existing.assetsDir ? 10 : 0);
-        if (newScore > oldScore) {
+        const isNewerMtime = (item.mtimeMs || 0) > (existing.mtimeMs || 0);
+
+        if (verDiff > 0 || (verDiff === 0 && (newScore > oldScore || (newScore === oldScore && isNewerMtime)))) {
           skillMap.set(baseKey, item);
           seenIds.add(item.id.toLowerCase());
         }
@@ -646,6 +894,11 @@ export class SkillManager {
           const name = parsed.name || skillId;
           const scopeTag = scope === 'workspace' ? '项目专属' : scope === 'extra' ? '外部技能' : '自定义';
 
+          let mtimeMs = 0;
+          try {
+            mtimeMs = fs.statSync(fullPath).mtimeMs;
+          } catch {}
+
           registerSkill({
             id: `custom:${scope}:${skillId}`,
             name: `[${scopeTag}] ${name}`,
@@ -657,6 +910,7 @@ export class SkillManager {
             triggers: parsed.triggers,
             recommendedTools: parsed.recommendedTools,
             rawFrontmatter: parsed.frontmatter,
+            mtimeMs,
             prompt: `【激活${scopeTag}技能：${name}】\n${parsed.body || content}`
           });
           continue;
@@ -694,6 +948,19 @@ export class SkillManager {
           const folderSkill = this.buildSkillFromFolder(fullPath, scope);
           if (folderSkill) {
             registerSkill(folderSkill);
+          } else {
+            // 若自身未直接匹配，进一步探测内部独立子文件夹 (应对外层包裹目录或多技能包聚合仓库)
+            try {
+              const subEntries = fs.readdirSync(fullPath, { withFileTypes: true });
+              for (const sub of subEntries) {
+                if (sub.isDirectory() && !sub.name.startsWith('.') && sub.name !== '__MACOSX' && sub.name !== 'node_modules') {
+                  const subSkill = this.buildSkillFromFolder(path.join(fullPath, sub.name), scope);
+                  if (subSkill) {
+                    registerSkill(subSkill);
+                  }
+                }
+              }
+            } catch {}
           }
         }
       }
@@ -712,31 +979,54 @@ export class SkillManager {
     const globalMap = new Map<string, SkillItem>();
     const seenIds = new Set<string>();
 
-    const mergeSkills = (skills: SkillItem[]) => {
+    const mergeSkills = (skills: SkillItem[], sourcePriority: number) => {
+      // sourcePriority: 3 = primaryDir (用户在数据中枢明确导入/更新), 2 = extractedDir, 1 = extraDirs
       for (const item of skills) {
         const baseKey = (item.rawFrontmatter?.name || path.basename(item.filePath || item.id, '.md'))
           .toLowerCase().replace(/[^a-z0-9]/g, '');
         if (!globalMap.has(baseKey)) {
           globalMap.set(baseKey, item);
+          (item as any)._priority = sourcePriority;
         } else {
           const existing = globalMap.get(baseKey)!;
+          const existingPriority = (existing as any)._priority || 0;
+
+          const verDiff = compareSemver(item.version, existing.version);
           const newScore = (item.isFolderSkill ? 10 : 0) + (item.scriptsDir ? 20 : 0) + (item.assetsDir ? 10 : 0);
           const oldScore = (existing.isFolderSkill ? 10 : 0) + (existing.scriptsDir ? 20 : 0) + (existing.assetsDir ? 10 : 0);
-          if (newScore > oldScore) {
+          const isNewerMtime = (item.mtimeMs || 0) > (existing.mtimeMs || 0);
+
+          let shouldReplace = false;
+          if (verDiff > 0) {
+            shouldReplace = true;
+          } else if (verDiff === 0) {
+            if (sourcePriority > existingPriority) {
+              shouldReplace = true;
+            } else if (sourcePriority === existingPriority) {
+              if (newScore > oldScore) {
+                shouldReplace = true;
+              } else if (newScore === oldScore && isNewerMtime) {
+                shouldReplace = true;
+              }
+            }
+          }
+
+          if (shouldReplace) {
             globalMap.set(baseKey, item);
+            (item as any)._priority = sourcePriority;
           }
         }
       }
     };
 
-    // 1. 扫描外部技能目录 (如 D:\ASTeamAIProject\Skills) - 具备真实复合资源，优先级高
+    // 1. 扫描外部技能目录 (如 D:\ASTeamAIProject\Skills) (priority: 1)
     for (const extraDir of extraDirs) {
       if (!fs.existsSync(extraDir)) continue;
       const extraSkills = this.scanDirectoryForSkills(extraDir, 'extra', seenIds);
-      mergeSkills(extraSkills);
+      mergeSkills(extraSkills, 1);
     }
 
-    // 2. 扫描解压缓存区目录
+    // 2. 扫描解压缓存区目录 (priority: 2)
     if (fs.existsSync(extractedDir)) {
       try {
         const extractedEntries = fs.readdirSync(extractedDir, { withFileTypes: true });
@@ -744,16 +1034,16 @@ export class SkillManager {
           if (e.isDirectory() && !e.name.startsWith('.')) {
             const folderSkill = this.buildSkillFromFolder(path.join(extractedDir, e.name), 'global', true);
             if (folderSkill) {
-              mergeSkills([folderSkill]);
+              mergeSkills([folderSkill], 2);
             }
           }
         }
       } catch {}
     }
 
-    // 3. 扫描主全局技能目录
+    // 3. 扫描主全局技能目录 (priority: 3 - 用户明确安装在此，最高优先级)
     const primarySkills = this.scanDirectoryForSkills(primaryDir, 'global', seenIds);
-    mergeSkills(primarySkills);
+    mergeSkills(primarySkills, 3);
 
     return Array.from(globalMap.values());
   }
@@ -819,13 +1109,15 @@ export class SkillManager {
       };
     });
 
-    return [
+    const all = [
       ...this.getBuiltinSkills(),
       ...this.loadGlobalSkills(),
       ...this.loadEnterpriseSkills(),
       ...this.loadCustomWorkspaceSkills(workspacePath),
       ...projectedMcpSkills
     ];
+
+    return all.filter(s => !storageHub.isSkillUninstalled(s.id));
   }
 
   findSkill(query: string, workspacePath: string | null): SkillItem | undefined {
@@ -910,6 +1202,9 @@ export class SkillManager {
 
     fs.writeFileSync(filePath, fullContent, 'utf-8');
 
+    storageHub.unrecordUninstalledSkill(cleanId);
+    storageHub.unrecordUninstalledSkill(`custom:global:${cleanId}`);
+
     return {
       id: `custom:global:${cleanId}`,
       name: `[自定义] ${finalName}`,
@@ -931,26 +1226,55 @@ export class SkillManager {
 
     const stat = fs.statSync(sourcePath);
 
-    // 1. 如果导入的是 ZIP 压缩包
-    if (stat.isFile() && sourcePath.toLowerCase().endsWith('.zip')) {
-      const zipBaseName = path.basename(sourcePath, '.zip');
+    // 1. 如果导入的是 ZIP 或 .skill 压缩包
+    const lowerSource = sourcePath.toLowerCase();
+    const isZipOrSkill = stat.isFile() && (lowerSource.endsWith('.zip') || lowerSource.endsWith('.skill'));
+    if (isZipOrSkill) {
+      const zipBaseName = path.basename(sourcePath).replace(/\.(?:skill\.zip|skill|zip)$/i, '');
       const targetDir = path.join(this.getGlobalSkillsDir(), zipBaseName);
-      if (!fs.existsSync(targetDir)) {
-        fs.mkdirSync(targetDir, { recursive: true });
+      
+      // 关键优化：若已有同名旧目录，先全量清空，确保纯净覆盖更新，彻底杜绝僵尸陈旧脚本！
+      if (fs.existsSync(targetDir)) {
+        try {
+          fs.rmSync(targetDir, { recursive: true, force: true });
+        } catch (rmErr) {
+          console.warn(`[SkillManager] Failed to clean existing targetDir ${targetDir}:`, rmErr);
+        }
       }
+      fs.mkdirSync(targetDir, { recursive: true });
       const zip = new AdmZip(sourcePath);
       zip.extractAllTo(targetDir, true);
 
+      const unrecordTombstones = (item: SkillItem) => {
+        storageHub.unrecordUninstalledSkill(item.id);
+        const clean = item.id.replace(/^custom:(global|workspace|extra):/, '');
+        storageHub.unrecordUninstalledSkill(clean);
+        storageHub.unrecordUninstalledSkill(clean.replace(/_/g, '-'));
+        storageHub.unrecordUninstalledSkill(clean.replace(/-/g, '_'));
+        if (item.rawFrontmatter?.name) {
+          storageHub.unrecordUninstalledSkill(item.rawFrontmatter.name);
+        }
+        if (item.skillDir) {
+          storageHub.unrecordUninstalledSkill(path.basename(item.skillDir));
+        }
+      };
+
       // 探测解压后的技能包
       const directSkill = this.buildSkillFromFolder(targetDir, 'global');
-      if (directSkill) return directSkill;
+      if (directSkill) {
+        unrecordTombstones(directSkill);
+        return directSkill;
+      }
 
       // 检查是否包含子文件夹
       const subEntries = fs.readdirSync(targetDir, { withFileTypes: true });
       for (const sub of subEntries) {
         if (sub.isDirectory() && !sub.name.startsWith('.')) {
           const subSkill = this.buildSkillFromFolder(path.join(targetDir, sub.name), 'global');
-          if (subSkill) return subSkill;
+          if (subSkill) {
+            unrecordTombstones(subSkill);
+            return subSkill;
+          }
         }
       }
       throw new Error(`ZIP 包中未找到包含 SKILL.md 或有效技能元数据的入口`);
@@ -971,12 +1295,34 @@ export class SkillManager {
         }
       }
 
+      const unrecordTombstones = (item: SkillItem) => {
+        storageHub.unrecordUninstalledSkill(item.id);
+        const clean = item.id.replace(/^custom:(global|workspace|extra):/, '');
+        storageHub.unrecordUninstalledSkill(clean);
+        storageHub.unrecordUninstalledSkill(clean.replace(/_/g, '-'));
+        storageHub.unrecordUninstalledSkill(clean.replace(/-/g, '_'));
+        if (item.rawFrontmatter?.name) {
+          storageHub.unrecordUninstalledSkill(item.rawFrontmatter.name);
+        }
+        if (item.skillDir) {
+          storageHub.unrecordUninstalledSkill(path.basename(item.skillDir));
+        }
+      };
+
       if (hasRootSkill) {
         if (path.normalize(sourcePath) !== path.normalize(targetDir)) {
+          if (fs.existsSync(targetDir)) {
+            try {
+              fs.rmSync(targetDir, { recursive: true, force: true });
+            } catch {}
+          }
           fs.cpSync(sourcePath, targetDir, { recursive: true });
         }
         const folderSkill = this.buildSkillFromFolder(targetDir, 'global');
-        if (folderSkill) return folderSkill;
+        if (folderSkill) {
+          unrecordTombstones(folderSkill);
+          return folderSkill;
+        }
       }
 
       // 若根目录没有直接包含 SKILL.md，探测其子目录是否包含复合技能 (例如选择的是外部合集仓库目录，如 D:\ASTeamAIProject\Skills)
@@ -994,6 +1340,7 @@ export class SkillManager {
             const subPath = path.join(sourcePath, sub.name);
             const subSkill = this.buildSkillFromFolder(subPath, 'extra');
             if (subSkill) {
+              unrecordTombstones(subSkill);
               foundSubSkills.push(subSkill);
             }
           }
@@ -1010,6 +1357,11 @@ export class SkillManager {
 
       // 兜底策略：若无任何 SKILL.md，但用户明确选中了该文件夹作为技能，自动为其生成基础 SKILL.md 骨架并注册
       if (path.normalize(sourcePath) !== path.normalize(targetDir)) {
+        if (fs.existsSync(targetDir)) {
+          try {
+            fs.rmSync(targetDir, { recursive: true, force: true });
+          } catch {}
+        }
         fs.cpSync(sourcePath, targetDir, { recursive: true });
       }
       const scaffoldSkillMd = path.join(targetDir, 'SKILL.md');
@@ -1018,7 +1370,10 @@ export class SkillManager {
         fs.writeFileSync(scaffoldSkillMd, defaultContent, 'utf-8');
       }
       const scaffoldSkill = this.buildSkillFromFolder(targetDir, 'global');
-      if (scaffoldSkill) return scaffoldSkill;
+      if (scaffoldSkill) {
+        unrecordTombstones(scaffoldSkill);
+        return scaffoldSkill;
+      }
 
       throw new Error(`所选目录中未找到有效技能入口`);
     }
@@ -1040,13 +1395,31 @@ export class SkillManager {
   deleteCustomSkill(skillId: string): boolean {
     const dir = this.getGlobalSkillsDir();
     const cleanId = skillId.replace(/^custom:(global|workspace|extra):/, '');
+    let deleted = false;
 
-    // 1. 尝试删除 md 文件
+    // 0. 尝试通过 findSkill 探测实际物理文件或文件夹路径并实施物理删除
+    const targetSkill = this.findSkill(skillId, null);
+    if (targetSkill) {
+      if (targetSkill.filePath && fs.existsSync(targetSkill.filePath)) {
+        try {
+          fs.unlinkSync(targetSkill.filePath);
+          deleted = true;
+        } catch {}
+      }
+      if (targetSkill.skillDir && fs.existsSync(targetSkill.skillDir)) {
+        try {
+          fs.rmSync(targetSkill.skillDir, { recursive: true, force: true });
+          deleted = true;
+        } catch {}
+      }
+    }
+
+    // 1. 尝试删除全局 md 文件
     const targetFile = path.join(dir, `${cleanId}.md`);
     if (fs.existsSync(targetFile)) {
       try {
         fs.unlinkSync(targetFile);
-        return true;
+        deleted = true;
       } catch {}
     }
 
@@ -1055,7 +1428,7 @@ export class SkillManager {
     if (fs.existsSync(targetFolder) && fs.statSync(targetFolder).isDirectory()) {
       try {
         fs.rmSync(targetFolder, { recursive: true, force: true });
-        return true;
+        deleted = true;
       } catch {}
     }
 
@@ -1064,11 +1437,16 @@ export class SkillManager {
     if (fs.existsSync(extractedFolder)) {
       try {
         fs.rmSync(extractedFolder, { recursive: true, force: true });
-        return true;
+        deleted = true;
       } catch {}
     }
 
-    return false;
+    // 4. 无论物理落盘状态如何（即使是外部只读目录或内置技能），一律登记卸载墓碑，确保重启时绝不再次出现
+    storageHub.recordUninstalledSkill(skillId);
+    storageHub.recordUninstalledSkill(cleanId);
+    storageHub.recordUninstalledSkill(cleanId.replace(/_/g, '-'));
+    storageHub.recordUninstalledSkill(cleanId.replace(/-/g, '_'));
+    return true;
   }
 
   /**
@@ -1118,9 +1496,24 @@ export class SkillManager {
       return id;
     });
 
-    const selected = all.filter(s =>
-      enabledSkillIds!.includes(s.id) || normalizedEnabled.includes(s.id)
-    );
+    const selected = all.filter(s => {
+      if (enabledSkillIds!.includes(s.id) || normalizedEnabled.includes(s.id)) return true;
+      const sClean = s.id.replace(/^custom:(?:global|workspace|extra):/, '').toLowerCase();
+      const sCleanNorm = sClean.replace(/[^a-z0-9]/g, '');
+      const sName = (s.rawFrontmatter?.name || s.name).replace(/^\[.*?\]\s*/, '').toLowerCase();
+      const sNameNorm = sName.replace(/[^a-z0-9]/g, '');
+
+      return enabledSkillIds!.some(eid => {
+        const eClean = eid.replace(/^custom:(?:global|workspace|extra):/, '').toLowerCase();
+        const eCleanNorm = eClean.replace(/[^a-z0-9]/g, '');
+        return (
+          eClean === sClean ||
+          (eCleanNorm.length >= 3 && eCleanNorm === sCleanNorm) ||
+          eClean === sName ||
+          (eCleanNorm.length >= 3 && eCleanNorm === sNameNorm)
+        );
+      });
+    });
     if (selected.length === 0) return '';
 
     return '\n\n' + selected.map(s => {

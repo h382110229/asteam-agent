@@ -133,6 +133,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Skills state
   const [allSkills, setAllSkills] = useState<any[]>([]);
+  const [appVersion, setAppVersion] = useState<string>('2.0.2');
   const [showInstallSkillModal, setShowInstallSkillModal] = useState(false);
   const [installMode, setInstallMode] = useState<'file' | 'url' | 'custom'>('file');
   const [skillUrl, setSkillUrl] = useState('');
@@ -347,8 +348,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
         }).catch(() => {});
       }
+      if (window.electronAPI?.getAppVersion) {
+        window.electronAPI.getAppVersion().then(v => {
+          if (v) setAppVersion(v);
+        }).catch(() => {});
+      }
     }
   }, [isOpen, workspacePath]);
+
+  useEffect(() => {
+    if (!window.electronAPI?.onSkillsChanged) return;
+    return window.electronAPI.onSkillsChanged(() => {
+      refreshSkills();
+    });
+  }, [workspacePath]);
 
   useEffect(() => {
     if (activeMemSubTab === 'project') {
@@ -463,7 +476,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleAddCustomFallback = () => {
     const newId = `fb-custom-${Date.now()}`;
-    const defaultModel = 'deepseek-chat';
+    const defaultModel = 'mimo-v2.5';
     const newProvider: FallbackProviderConfig = {
       id: newId,
       name: '自定义备用服务商',
@@ -508,7 +521,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         method: 'POST',
         headers,
         body: JSON.stringify({
-          model: fb.model || 'deepseek-chat',
+          model: fb.model || 'mimo-v2.5',
           messages: [{ role: 'user', content: 'Ping' }],
           max_tokens: 5,
           stream: false
@@ -608,18 +621,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
   };
 
-  // Skill Installation Handlers
+  // Skill Installation Handlers (v2.0.1: 安装后即时自动激活与持久化保存)
   const handleInstallFromFile = async () => {
     if (!window.electronAPI) return;
     try {
       const installed = await window.electronAPI.installSkillFromFile();
       if (installed) {
         await refreshSkills();
-        setForm(prev => ({
-          ...prev,
-          enabledSkills: [...(prev.enabledSkills || []), installed.id]
-        }));
-        setSkillInstallMsg({ type: 'success', text: `成功安装技能: ${installed.name}` });
+        const nextEnabled = Array.from(new Set([...(form.enabledSkills || []), installed.id]));
+        setForm(prev => ({ ...prev, enabledSkills: nextEnabled }));
+        onSave({ ...form, enabledSkills: nextEnabled });
+        setSkillInstallMsg({ type: 'success', text: `成功安装并已全局启用技能: ${installed.name}` });
         setTimeout(() => {
           setShowInstallSkillModal(false);
           setSkillInstallMsg(null);
@@ -636,11 +648,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const installed = await window.electronAPI.installSkillFromFolder();
       if (installed) {
         await refreshSkills();
-        setForm(prev => ({
-          ...prev,
-          enabledSkills: [...(prev.enabledSkills || []), installed.id]
-        }));
-        setSkillInstallMsg({ type: 'success', text: `成功导入复合文件夹技能: ${installed.name}` });
+        const nextEnabled = Array.from(new Set([...(form.enabledSkills || []), installed.id]));
+        setForm(prev => ({ ...prev, enabledSkills: nextEnabled }));
+        onSave({ ...form, enabledSkills: nextEnabled });
+        setSkillInstallMsg({ type: 'success', text: `成功导入复合文件夹技能并已全局启用: ${installed.name}` });
         setTimeout(() => {
           setShowInstallSkillModal(false);
           setSkillInstallMsg(null);
@@ -659,8 +670,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         await refreshExtraSkillDirs();
         await refreshSkills();
       }
-    } catch (err: any) {
-      console.warn('添加外部技能目录失败:', err);
+    } catch (err) {
+      console.warn('Failed to add extra skill dir:', err);
     }
   };
 
@@ -672,8 +683,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         await refreshExtraSkillDirs();
         await refreshSkills();
       }
-    } catch (err: any) {
-      console.warn('移除外部技能目录失败:', err);
+    } catch (err) {
+      console.warn('Failed to remove extra skill dir:', err);
     }
   };
 
@@ -683,11 +694,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const installed = await window.electronAPI.installSkillFromUrl(skillUrl.trim());
       if (installed) {
         await refreshSkills();
-        setForm(prev => ({
-          ...prev,
-          enabledSkills: [...(prev.enabledSkills || []), installed.id]
-        }));
-        setSkillInstallMsg({ type: 'success', text: `成功从 URL 安装: ${installed.name}` });
+        const nextEnabled = Array.from(new Set([...(form.enabledSkills || []), installed.id]));
+        setForm(prev => ({ ...prev, enabledSkills: nextEnabled }));
+        onSave({ ...form, enabledSkills: nextEnabled });
+        setSkillInstallMsg({ type: 'success', text: `成功从 URL 安装并启用: ${installed.name}` });
         setSkillUrl('');
         setTimeout(() => {
           setShowInstallSkillModal(false);
@@ -708,11 +718,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const installed = await window.electronAPI.installSkillFromContent(newSkillForm);
       if (installed) {
         await refreshSkills();
-        setForm(prev => ({
-          ...prev,
-          enabledSkills: [...(prev.enabledSkills || []), installed.id]
-        }));
-        setSkillInstallMsg({ type: 'success', text: `成功创建自定义技能: ${installed.name}` });
+        const nextEnabled = Array.from(new Set([...(form.enabledSkills || []), installed.id]));
+        setForm(prev => ({ ...prev, enabledSkills: nextEnabled }));
+        onSave({ ...form, enabledSkills: nextEnabled });
+        setSkillInstallMsg({ type: 'success', text: `成功创建自定义技能并启用: ${installed.name}` });
         setNewSkillForm({ id: '', name: '', description: '', prompt: '' });
         setTimeout(() => {
           setShowInstallSkillModal(false);
@@ -736,10 +745,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       await window.electronAPI.deleteSkill(skillId);
       await refreshSkills();
+      const nextEnabled = (form.enabledSkills || []).filter(id => id !== skillId);
       setForm(prev => ({
         ...prev,
-        enabledSkills: (prev.enabledSkills || []).filter(id => id !== skillId)
+        enabledSkills: nextEnabled
       }));
+      onSave({ ...form, enabledSkills: nextEnabled });
     } catch {}
   };
 
@@ -794,7 +805,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </span>
             <h2 className="text-base font-semibold text-[var(--foreground)] flex items-center space-x-2">
               <span>ASTeam Agent 设置</span>
-              <span className="text-xs font-normal text-[var(--muted-foreground)]">v1.11.3</span>
+              <span className="text-xs font-normal text-[var(--muted-foreground)]">v{appVersion}</span>
             </h2>
           </div>
           <button
@@ -961,7 +972,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="text"
                     value={form.model}
                     onChange={e => setForm(prev => ({ ...prev, model: e.target.value }))}
-                    placeholder="输入模型标识，如 deepseek-chat / gpt-4o"
+                    placeholder="输入模型标识，如 mimo-v2.5 / mimo-v2.5-pro / gpt-4o"
                     className="w-full rounded-lg border border-[var(--input)] bg-[var(--card)] px-3 py-2 text-[var(--foreground)] focus:border-[var(--primary)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] font-mono text-xs"
                   />
                 )}
@@ -1188,7 +1199,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="text"
                               value={fb.model}
                               onChange={e => handleUpdateFallback(fb.id, 'model', e.target.value)}
-                              placeholder="deepseek-chat"
+                              placeholder="mimo-v2.5"
                               className="w-full rounded border border-[var(--input)] bg-[var(--background)] px-2 py-1 text-xs font-mono text-[var(--foreground)]"
                             />
                           </div>
@@ -2159,7 +2170,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <div className="text-right">
                     <span className="rounded-full bg-[var(--primary)]/15 px-2.5 py-1 text-xs font-mono font-semibold text-[var(--primary)]">
-                      v1.11.2 (当前版本)
+                      v{appVersion} (当前版本)
                     </span>
                     <p className="text-[10px] text-[var(--muted-foreground)] mt-1">
                       通道: 企业私有云端中枢 (Stable)
@@ -2244,7 +2255,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       } else if (res) {
                         setUpdateCheckMsg({
                           type: 'info',
-                          text: `当前已是最新版本 (v${res.currentVersion || '1.11.2'})。`
+                          text: `当前已是最新版本 (v${res.currentVersion || appVersion || '2.0.2'})。`
                         });
                       } else {
                         setUpdateCheckMsg({

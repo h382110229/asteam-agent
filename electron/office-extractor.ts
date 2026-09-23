@@ -5,6 +5,8 @@ import crypto from 'node:crypto';
 import AdmZip from 'adm-zip';
 import ExcelJS from 'exceljs';
 import { PDFDocument } from 'pdf-lib';
+import { nativeImage } from 'electron';
+import { storageHub } from './storage-hub';
 
 export interface ExtractedImageItem {
   id: string;
@@ -22,6 +24,9 @@ export interface OfficeExtractResult {
   charCount: number;
   type: 'word' | 'excel' | 'powerpoint' | 'pdf' | 'unknown';
   extractedImages?: ExtractedImageItem[];
+  diagramAssetIndex?: string;
+  contactSheet?: ExtractedImageItem;
+  localPath?: string;
 }
 
 /**
@@ -45,6 +50,103 @@ function getMimeTypeByExt(filePath: string): string {
   if (ext === '.webp') return 'image/webp';
   if (ext === '.svg') return 'image/svg+xml';
   return 'image/png';
+}
+
+/**
+ * [Level 0 算法] 生成文档核心图纸与架构拓扑资产清单 (零图像 Token 消耗)
+ */
+export function buildDiagramAssetIndex(images: ExtractedImageItem[]): string {
+  if (!images || images.length === 0) return '';
+  const rows = images.map((img, idx) => {
+    const kb = Math.round(img.size / 1024);
+    const loc = img.locationHint || '正文章节';
+    return `| #${idx + 1} | \`${img.name}\` | ${loc} | ${kb} KB | \`${img.localPath}\` |`;
+  });
+
+  return [
+    `\n### 📑 [Level 0] 文档核心图纸与架构拓扑资产清单 (共 ${images.length} 项)`,
+    `> 💡 **审图提示**: 如下为本技术方案中抽取的拓扑图/架构图索引。已为您准备了包含全体子图编号的 **复合画幅 (Contact Sheet)**。若需针对某一特定图纸进行超高清微距审计，请调用 \`inspect_image_detail(imagePath)\` 工具获取超高清原图。`,
+    '',
+    `| 编号 | 图像标识 | 所属章节 / 原文位置 | 体积 | 本地存储路径 |`,
+    `|:---:|:---|:---|:---:|:---|`,
+    ...rows,
+    ''
+  ].join('\n');
+}
+
+/**
+ * [Level 1 算法] 智能网格切片拼图 (Mosaic Contact Sheet)
+ * 4~16 张拓扑小图自动拼合成一张 2x2 或 3x3 的高分辨率复合画幅，
+ * 附带 ASTeam 标志性品牌绿 (#006857) 编号水印，让大模型消耗单张图片 Token 即一览全局全貌。
+ */
+export function generateMosaicContactSheet(images: ExtractedImageItem[], docHash: string): ExtractedImageItem | null {
+  if (!images || images.length < 2) return null;
+  const targetImages = images.slice(0, 16);
+  const count = targetImages.length;
+  const cols = count <= 4 ? 2 : count <= 9 ? 3 : 4;
+  const rows = Math.ceil(count / cols);
+  const cellWidth = 600;
+  const cellHeight = 450;
+  const totalWidth = cols * cellWidth;
+  const totalHeight = rows * cellHeight;
+
+  let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="${totalHeight}" viewBox="0 0 ${totalWidth} ${totalHeight}">`;
+  svgContent += `<rect width="${totalWidth}" height="${totalHeight}" fill="#141f1c"/>`;
+
+  for (let i = 0; i < count; i++) {
+    const img = targetImages[i];
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    const x = c * cellWidth;
+    const y = r * cellHeight;
+
+    svgContent += `<rect x="${x + 4}" y="${y + 4}" width="${cellWidth - 8}" height="${cellHeight - 8}" rx="8" fill="#1a2824" stroke="#22332e" stroke-width="2"/>`;
+
+    let imgDataUrl = img.base64;
+    if (!imgDataUrl && fs.existsSync(img.localPath)) {
+      try {
+        const buf = fs.readFileSync(img.localPath);
+        imgDataUrl = `data:${img.mimeType || 'image/png'};base64,${buf.toString('base64')}`;
+      } catch {}
+    }
+
+    if (imgDataUrl) {
+      svgContent += `<image href="${imgDataUrl}" x="${x + 8}" y="${y + 8}" width="${cellWidth - 16}" height="${cellHeight - 50}" preserveAspectRatio="xMidYMid meet"/>`;
+    }
+
+    // ASTeam Primary Badge (#006857) 水印
+    svgContent += `<rect x="${x + 12}" y="${y + 12}" width="70" height="28" rx="6" fill="#006857"/>`;
+    svgContent += `<text x="${x + 47}" y="${y + 31}" fill="#ffffff" font-family="sans-serif" font-weight="bold" font-size="14" text-anchor="middle">#${i + 1}</text>`;
+
+    const title = (img.locationHint || img.name || `图纸 #${i + 1}`).replace(/[<>&"]/g, '');
+    const cleanTitle = title.length > 28 ? title.slice(0, 27) + '...' : title;
+    svgContent += `<rect x="${x + 8}" y="${y + cellHeight - 40}" width="${cellWidth - 16}" height="32" rx="4" fill="#0d1412" fill-opacity="0.85"/>`;
+    svgContent += `<text x="${x + 20}" y="${y + cellHeight - 19}" fill="#edf3f0" font-family="sans-serif" font-size="13">${cleanTitle}</text>`;
+  }
+
+  svgContent += `</svg>`;
+
+  try {
+    const cacheDir = getExtractedImagesCacheDir();
+    const diskFileName = `mosaic_${docHash}_grid.png`;
+    const diskPath = path.join(cacheDir, diskFileName);
+
+    const nImg = nativeImage.createFromBuffer(Buffer.from(svgContent));
+    const pngBuf = nImg.toPNG();
+    fs.writeFileSync(diskPath, pngBuf);
+
+    return {
+      id: `mosaic_${docHash}`,
+      name: `全文档图纸资产复合切片画幅 (共 ${count} 张图纸汇总)`,
+      localPath: diskPath,
+      mimeType: 'image/png',
+      size: pngBuf.length,
+      base64: `data:image/png;base64,${pngBuf.toString('base64')}`,
+      locationHint: '全篇架构/拓扑图复合全景索引'
+    };
+  } catch (e) {
+    return null;
+  }
 }
 
 /**
@@ -532,28 +634,80 @@ export async function extractPdfContent(buffer: Buffer): Promise<{ text: string;
  */
 export async function extractOfficeDocumentContent(
   fileName: string,
-  buffer: Buffer
+  buffer: Buffer,
+  workspacePath?: string
 ): Promise<OfficeExtractResult> {
+  let localPath: string | undefined;
+  try {
+    const attachmentsDir = path.join(storageHub.getDataRootDir(), 'attachments');
+    if (!fs.existsSync(attachmentsDir)) {
+      fs.mkdirSync(attachmentsDir, { recursive: true });
+    }
+    const safeName = `${Date.now()}_${path.basename(fileName)}`;
+    const savedPath = path.join(attachmentsDir, safeName);
+    fs.writeFileSync(savedPath, buffer);
+    localPath = savedPath;
+
+    // 若有工作区路径且有效，同时在工作区根目录同步放置一份同名文件，使相对路径与绝对路径均立即可用
+    if (workspacePath && fs.existsSync(workspacePath)) {
+      try {
+        const wsDest = path.join(workspacePath, path.basename(fileName));
+        fs.writeFileSync(wsDest, buffer);
+        localPath = wsDest;
+      } catch {}
+    }
+  } catch (err) {
+    console.warn('[OfficeExtractor] Failed to persist physical attachment:', err);
+  }
+
   const ext = fileName.split('.').pop()?.toLowerCase() || '';
 
   if (ext === 'docx') {
     const res = extractDocxContent(buffer);
-    return { ...res, type: 'word' };
+    const docHash = crypto.createHash('md5').update(buffer.slice(0, 4096)).digest('hex').slice(0, 8);
+    const assetIndex = res.extractedImages && res.extractedImages.length > 0 ? buildDiagramAssetIndex(res.extractedImages) : '';
+    const contactSheet = res.extractedImages && res.extractedImages.length >= 2 ? generateMosaicContactSheet(res.extractedImages, docHash) : null;
+    let fullText = res.text;
+    if (assetIndex) {
+      fullText = `${assetIndex}\n\n---\n\n${fullText}`;
+    }
+    return {
+      ...res,
+      text: fullText,
+      type: 'word',
+      diagramAssetIndex: assetIndex || undefined,
+      contactSheet: contactSheet || undefined,
+      localPath
+    };
   }
 
   if (ext === 'pptx') {
     const res = extractPptxContent(buffer);
-    return { ...res, type: 'powerpoint' };
+    const docHash = crypto.createHash('md5').update(buffer.slice(0, 4096)).digest('hex').slice(0, 8);
+    const assetIndex = res.extractedImages && res.extractedImages.length > 0 ? buildDiagramAssetIndex(res.extractedImages) : '';
+    const contactSheet = res.extractedImages && res.extractedImages.length >= 2 ? generateMosaicContactSheet(res.extractedImages, docHash) : null;
+    let fullText = res.text;
+    if (assetIndex) {
+      fullText = `${assetIndex}\n\n---\n\n${fullText}`;
+    }
+    return {
+      ...res,
+      text: fullText,
+      type: 'powerpoint',
+      diagramAssetIndex: assetIndex || undefined,
+      contactSheet: contactSheet || undefined,
+      localPath
+    };
   }
 
   if (ext === 'xlsx' || ext === 'xls') {
     const res = await extractXlsxContent(buffer);
-    return { ...res, type: 'excel' };
+    return { ...res, type: 'excel', localPath };
   }
 
   if (ext === 'pdf') {
     const res = await extractPdfContent(buffer);
-    return { ...res, type: 'pdf' };
+    return { ...res, type: 'pdf', localPath };
   }
 
   const asText = buffer.toString('utf-8');
@@ -562,6 +716,7 @@ export async function extractOfficeDocumentContent(
     summary: `常规文本文件 (${Math.round(buffer.length / 1024)} KB)`,
     charCount: asText.length,
     type: 'unknown',
-    extractedImages: []
+    extractedImages: [],
+    localPath
   };
 }

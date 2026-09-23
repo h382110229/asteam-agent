@@ -235,7 +235,7 @@ export const UpdateModal: React.FC<UpdateModalProps> = ({
                 当前客户端已是最新版本
               </h3>
               <p className="text-xs text-[var(--muted-foreground)] max-w-xs">
-                当前版本为 v{updateInfo?.currentVersion || '1.11.3'}，已全面支持执行循环内核防早退自驱动、任务类型自适应与 Office 文档拓扑图图文同位还原多模态审图。
+                当前版本为 v{updateInfo?.currentVersion || '2.0.2'}，已全面搭载 ASTeam 自研工业级 Harness 状态机、小米 MiMo 全模态适配与 Office 金字塔视觉审图管线。
               </p>
               <button
                 type="button"

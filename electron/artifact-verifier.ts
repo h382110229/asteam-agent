@@ -154,21 +154,27 @@ export class ArtifactVerifier {
     if (!text) return [];
     const results = new Set<string>();
 
-    // 匹配 Windows 绝对路径：例如 C:\Users\xxx\Desktop\xxx.docx
-    const winAbsRegex = /(?:[A-Za-z]:[\\/][^"'\n\r<>|*?`]+?\.(?:docx|xlsx|xls|pptx|pdf|zip|md|json|csv|html))/gi;
+    // 匹配 Windows 绝对路径：例如 C:\Users\xxx\Desktop\xxx.docx, D:\xxx\xxx.xlsx, D:\xxx\xxx.txt
+    const winAbsRegex = /(?:[A-Za-z]:[\\/][^"'\n\r<>|*?`]+?\.(?:docx|xlsx|xls|pptx|pdf|zip|md|json|csv|html|txt|cfg))/gi;
     let m: RegExpExecArray | null;
     while ((m = winAbsRegex.exec(text)) !== null) {
       results.add(m[0].trim());
     }
 
     // 匹配 ~ 或 Desktop 相对路径：例如 ~/Desktop/xxx.docx 或 Desktop/xxx.docx
-    const aliasRegex = /(?:~?\/Desktop[\\/][^"'\n\r<>|*?`]+?\.(?:docx|xlsx|xls|pptx|pdf|zip|md|json|csv|html))/gi;
+    const aliasRegex = /(?:~?\/Desktop[\\/][^"'\n\r<>|*?`]+?\.(?:docx|xlsx|xls|pptx|pdf|zip|md|json|csv|html|txt|cfg))/gi;
     while ((m = aliasRegex.exec(text)) !== null) {
       results.add(m[0].trim());
     }
 
+    // 匹配 pipeline_<timestamp>/xxx.xlsx 等子目录相对路径
+    const relSubdirRegex = /(?:(?:pipeline_[a-zA-Z0-9_-]+|[a-zA-Z0-9_-]+)[\\/][^"'\n\r<>|*?`]+?\.(?:docx|xlsx|xls|pptx|pdf|zip|txt|cfg))/gi;
+    while ((m = relSubdirRegex.exec(text)) !== null) {
+      results.add(m[0].trim());
+    }
+
     // 匹配 Markdown 链接或反引号中的路径：`xxx.docx`
-    const codeSpanRegex = /`([^`\n\r]+?\.(?:docx|xlsx|xls|pptx|pdf|zip))`(?:\s*(?:已生成|成功生成|生成成功|文件已就绪|交付完成))/gi;
+    const codeSpanRegex = /`([^`\n\r]+?\.(?:docx|xlsx|xls|pptx|pdf|zip|txt|cfg|html|md))`(?:\s*(?:已生成|成功生成|生成成功|文件已就绪|交付完成|已落地|已导出))/gi;
     while ((m = codeSpanRegex.exec(text)) !== null) {
       results.add(m[1].trim());
     }

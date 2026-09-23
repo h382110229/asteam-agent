@@ -253,22 +253,31 @@ export const App: React.FC = () => {
   const [runStartTime, setRunStartTime] = useState<number>(0);
   const [updateWelcomeToast, setUpdateWelcomeToast] = useState<string | null>(null);
 
-  // v1.11.2: 版本更新后欢迎提示与版本记忆
+  // v2.0.2: 版本更新后欢迎提示与版本记忆
   useEffect(() => {
-    const CURRENT_VERSION = '1.11.2';
-    try {
-      const prevVer = localStorage.getItem('asteam_installed_version');
-      if (prevVer && prevVer !== CURRENT_VERSION) {
-        setUpdateWelcomeToast(`🎉 欢迎体验 ASTeam Agent v${CURRENT_VERSION}！客户端已成功平滑升级并自动唤醒。`);
-        const timer = setTimeout(() => {
-          setUpdateWelcomeToast(null);
-        }, 6000);
-        localStorage.setItem('asteam_installed_version', CURRENT_VERSION);
-        return () => clearTimeout(timer);
-      } else if (!prevVer) {
-        localStorage.setItem('asteam_installed_version', CURRENT_VERSION);
+    const initVersion = async () => {
+      let currentVer = '2.0.2';
+      if (window.electronAPI?.getAppVersion) {
+        try {
+          const v = await window.electronAPI.getAppVersion();
+          if (v) currentVer = v;
+        } catch {}
       }
-    } catch {}
+      try {
+        const prevVer = localStorage.getItem('asteam_installed_version');
+        if (prevVer && prevVer !== currentVer) {
+          setUpdateWelcomeToast(`🎉 欢迎体验 ASTeam Agent v${currentVer}！客户端已成功平滑升级并自动唤醒。`);
+          const timer = setTimeout(() => {
+            setUpdateWelcomeToast(null);
+          }, 6000);
+          localStorage.setItem('asteam_installed_version', currentVer);
+          return () => clearTimeout(timer);
+        } else if (!prevVer) {
+          localStorage.setItem('asteam_installed_version', currentVer);
+        }
+      } catch {}
+    };
+    initVersion();
   }, []);
 
   // v1.9.0: 自动更新状态检测与实时事件监听
@@ -321,6 +330,13 @@ export const App: React.FC = () => {
       const { sessionId } = payload;
       if (!sessionId) return;
 
+      // 任务完成或异常时，在顶层直接退出运行状态与等待状态，杜绝在 React state updater 纯函数内部调用导致的副作用失效或时序竞争
+      if (type === 'done' || type === 'error') {
+        setIsRunning(false);
+        setIsWaitingForUser(false);
+        refreshGitStatus();
+      }
+
       setMessagesMap(prevMap => {
         const list = [...(prevMap[sessionId] || [])];
         if (list.length === 0) return prevMap;
@@ -367,9 +383,6 @@ export const App: React.FC = () => {
         } else if (type === 'error') {
           lastMsg.content += `\n\n⚠️ **执行遇到错误**: ${payload.error}`;
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
-          setIsRunning(false);
-          setIsWaitingForUser(false);
-          refreshGitStatus();
         } else if (type === 'terminalData') {
           const { chunk, stepId, sessionId: sid } = payload;
           setTerminalOutputs(prev => {
@@ -410,10 +423,10 @@ export const App: React.FC = () => {
               lastMsg.content = doneSummary.trim();
             }
           }
+          if ((payload as any)?.tokenStats) {
+            lastMsg.tokenStats = (payload as any).tokenStats;
+          }
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
-          setIsRunning(false);
-          setIsWaitingForUser(false);
-          refreshGitStatus();
         }
 
         list[lastIdx] = lastMsg;
@@ -552,7 +565,15 @@ export const App: React.FC = () => {
         }
       }
 
-      return { ...prev, [activeSessionId]: list };
+      // 生成用户答复气泡，确保用户在对话流中直观看到自己的选项决定
+      const replyUserMsg: ChatMessageItem = {
+        id: `msg-user-reply-${Date.now()}`,
+        role: 'user',
+        content: `【我的答复 / 决策选项】\n${answer}`,
+        timestamp: Date.now()
+      };
+
+      return { ...prev, [activeSessionId]: [...list, replyUserMsg] };
     });
 
     if (window.electronAPI) {
@@ -641,15 +662,39 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
   const handleSendMessage = async (text: string, mode: ExecutionMode, attachments?: any[], activeSkillIds?: string[]) => {
     if (isWaitingForUser) {
       const currentList = messagesMap[activeSessionId] || [];
-      const lastMsg = currentList[currentList.length - 1];
-      if (lastMsg?.question) {
-        await handleReplyQuestion(lastMsg.question.questionId, text);
+      let foundQuestionId = '';
+      for (let i = currentList.length - 1; i >= 0; i--) {
+        if (currentList[i].question && !currentList[i].question?.answered) {
+          foundQuestionId = currentList[i].question!.questionId;
+          break;
+        }
+      }
+      if (foundQuestionId) {
+        await handleReplyQuestion(foundQuestionId, text);
         return;
       }
     }
 
     if (!text.trim() && (!attachments || attachments.length === 0)) return;
-    if (isRunning && !isWaitingForUser) return;
+
+    // 若 Agent 当前处于运行中，用户的打字直接作为实时 Steering 协作插话注入！
+    if (isRunning && !isWaitingForUser) {
+      const trimmed = text.trim();
+      const userSteerMsg: ChatMessageItem = {
+        id: `msg-user-steer-${Date.now()}`,
+        role: 'user',
+        content: `【实时协作插话】\n${trimmed}`,
+        timestamp: Date.now()
+      };
+      setMessagesMap(prev => ({
+        ...prev,
+        [activeSessionId]: [...(prev[activeSessionId] || []), userSteerMsg]
+      }));
+      if (window.electronAPI?.steerAgent) {
+        await window.electronAPI.steerAgent(activeSessionId, trimmed);
+      }
+      return;
+    }
 
     const trimmedInput = text.trim();
 
@@ -700,11 +745,15 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
     let fullContent = text.trim();
     if (attachments && attachments.length > 0) {
       const attachSnippets = attachments.map(att => {
+        const pathNotice = att.localPath
+          ? `\n- 物理文件本地绝对路径: \`${att.localPath}\`\n*(注: 若需要调用 Python 脚本、命令行或工具处理此文件，请直接使用该物理绝对路径！)*`
+          : '';
+
         if (att.type?.startsWith('image/') && att.content) {
-          return `\n\n【用户附件图片: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n![${att.name}](${att.content})`;
+          return `\n\n【用户附件图片: ${att.name} (${Math.round(att.size / 1024)} KB)】:${pathNotice}\n![${att.name}](${att.content})`;
         }
         if (att.type?.startsWith('document/') && att.content) {
-          let docSnippet = `\n\n【用户附件文档: ${att.name} (已智能脱壳解析正文与大纲，原文件 ${Math.round(att.size / 1024)} KB)】:\n---\n${att.content}\n---`;
+          let docSnippet = `\n\n【用户附件文档已就位: ${att.name} (已智能脱壳，原文件 ${Math.round(att.size / 1024)} KB)】:${pathNotice}\n---\n${att.content}\n---`;
           if (att.extractedImages && att.extractedImages.length > 0) {
             docSnippet += `\n\n【该文档内嵌关键架构/拓扑图 (${att.extractedImages.length} 项，已精准原位定位还原)】:\n` +
               att.extractedImages.map((img: any, idx: number) => {
@@ -716,9 +765,9 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
         }
         if (att.content && !att.content.startsWith('data:')) {
           const ext = att.name.split('.').pop() || '';
-          return `\n\n【附件代码/文件: ${att.name} (${Math.round(att.size / 1024)} KB)】:\n\`\`\`${ext}\n${att.content}\n\`\`\``;
+          return `\n\n【附件代码/文件: ${att.name} (${Math.round(att.size / 1024)} KB)】:${pathNotice}\n\`\`\`${ext}\n${att.content}\n\`\`\``;
         }
-        return `\n\n【附件文件: ${att.name} (${Math.round(att.size / 1024)} KB)】\n*(注: 该二进制文件建议通过工具或针对性脚本直接读取)*`;
+        return `\n\n【用户物理文件已就绪: ${att.name} (${Math.round(att.size / 1024)} KB)】:${pathNotice}\n*(注: 该二进制文件建议通过工具或底层 Python 脚本直接读取处理)*`;
       }).join('');
       fullContent = fullContent ? `${fullContent}\n${attachSnippets}` : attachSnippets.trim();
     }
@@ -771,12 +820,13 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
       setIsRunning(true);
       setRunStartTime(Date.now());
 
-      // Prepare history for LLM
+      // Prepare history for LLM (智能历史净化：过滤由于网络中断产生的异常报错信息，避免污染后续重试轮次的上下文)
       const history = nextList
         .slice(0, -1)
+        .filter(m => m.content && !m.content.startsWith('启动异常:'))
         .map(m => ({
           role: m.role,
-          content: m.content
+          content: m.content.replace(/\n\n⚠️ \*\*执行遇到错误\*\*:[\s\S]*$/, '').trim() || m.content
         }));
 
       // 合并全局已启用技能与用户本轮勾选/挂载的技能 (v1.11.0)
@@ -1095,6 +1145,7 @@ ${fileSet.size > 0 ? Array.from(fileSet).slice(0, 10).map(f => `- \`${f}\``).joi
           onCompactSession={() => handleCompactSession(activeSessionId)}
           onOpenScheduler={handleOpenScheduler}
           onOpenSwarm={handleOpenSwarm}
+          enabledSkills={settings.enabledSkills}
         />
 
         {/* Right Split-Pane Workbench (Zero-overlay, side-by-side with ChatArea) */}
