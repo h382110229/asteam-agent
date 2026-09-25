@@ -1,0 +1,20 @@
+{
+  "doc_title": "新建数据中心全IT系统集成场景研发交付表",
+  "doc_version": "V1.0",
+  "doc_date": "2026-02-14",
+  "project_name": "新建数据中心全IT系统集成场景研发",
+  "author": "张三",
+  "reviewer": "李四",
+  "purpose": "这份表格用于汇总项目人员通讯录、设备清单、IP规划与验收检查信息，便于项目组协同与交付管控。",
+  "maintainer": "张三",
+  "maintainer_email": "zhangsan@eccom.example",
+  "maintainer_phone": "13800000000",
+  "changes": [
+    {
+      "version": "V1.0",
+      "date": "2026-02-14",
+      "author": "张三",
+      "summary": "初稿创建：通讯录/设备/IP/验收表"
+    }
+  ]
+}

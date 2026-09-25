@@ -89,16 +89,32 @@ export interface PptxOptions {
   slides: PptxSlide[];
 }
 
+export const ECCOM_BRAND_COLORS = {
+  primary: '006857',      // 松石主绿 RGB 0/104/87
+  accent: 'D31245',       // 品牌强调红 RGB 211/18/69
+  secondary1: '017260',   // 深青绿 RGB 1/114/96
+  secondary2: '349182',   // 灰青绿 RGB 52/145/130
+  secondary3: '3EB39C',   // 翡翠绿 RGB 62/179/156
+  secondary4: '6BC39C',   // 薄荷绿 RGB 107/195/156
+  secondary5: 'AAE4B4',   // 浅草绿 RGB 170/228/180
+  neutralGray: 'A5A5A5',  // 中性灰 RGB 165/165/165
+  borderGray: 'DDDDDD',   // 边框灰 RGB 221/221/221
+  white: 'FFFFFF',        // 纯白 RGB 255/255/255
+  darkText: '121C19',     // 深墨黑文字
+  mutedText: '556B64',    // 辅助文字
+  zebraBg: 'F7F9F8'       // 极浅斑马纹底色
+};
+
 /**
  * Generates an Enterprise-Grade Microsoft Word (.docx) document
  * Features:
- * - Huawei Cloud / Gov Enterprise Cover Page with accent bars, versioning, confidentiality
+ * - ECCOM Official Enterprise Cover Page with pine-green accent bars and brand red highlight
  * - Automatic Table of Contents (TOC)
  * - Dynamic Header & Footer with PageNumber.CURRENT of PageNumber.TOTAL_PAGES
- * - Multi-level headings outline with enterprise color palette
+ * - Multi-level headings outline with ECCOM pine-green brand palette
  * - Complex multi-table layout (10~20+ tables) with auto column widths, zebra striping, cantSplit and tableHeader
  */
-function parseFormattedTextRuns(text: string, defaultColor = '1E293B', defaultSize = 21): TextRun[] {
+function parseFormattedTextRuns(text: string, defaultColor = ECCOM_BRAND_COLORS.darkText, defaultSize = 21): TextRun[] {
   const runs: TextRun[] = [];
   const parts = text.split(/(\*\*.*?\*\*)/g);
   for (const part of parts) {
@@ -137,7 +153,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
   const docTitle = options.title || '企业级技术方案白皮书';
   const docSubtitle = options.subtitle || '系统架构迁移与数字化转型演进方案';
   const docVersion = options.version || 'V1.0';
-  const docAuthor = options.author || '华为云联合技术架构团队 & ASTeam';
+  const docAuthor = options.author || '华讯网络 (ECCOM) & ASTeam 联合架构团队';
   const docConfidentiality = options.confidentiality || '商业秘密 · 内部技术资料';
   const currentDateStr = new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
 
@@ -147,13 +163,18 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
   // Top spacing
   coverElements.push(new Paragraph({ spacing: { before: 1200 } }));
 
-  // Accent Line
+  // ECCOM Brand Accent Bars (Pine Green + Accent Red)
   coverElements.push(
     new Paragraph({
       children: [
         new TextRun({
-          text: '■'.repeat(32),
-          color: '1E3A8A', // Huawei Cloud / Enterprise Blue
+          text: '■'.repeat(26),
+          color: ECCOM_BRAND_COLORS.primary, // 松石主绿 RGB 0/104/87
+          size: 16
+        }),
+        new TextRun({
+          text: '■'.repeat(6),
+          color: ECCOM_BRAND_COLORS.accent, // 华讯强调红 RGB 211/18/69
           size: 16
         })
       ],
@@ -169,7 +190,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
           text: docTitle,
           bold: true,
           size: 48, // 24pt
-          color: '0F172A',
+          color: ECCOM_BRAND_COLORS.darkText,
           font: 'Microsoft YaHei'
         })
       ],
@@ -292,7 +313,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
             text: '目  录',
             bold: true,
             size: 32,
-            color: '1E3A8A',
+            color: ECCOM_BRAND_COLORS.primary,
             font: 'Microsoft YaHei'
           })
         ],
@@ -309,7 +330,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: h.text,
                 bold: true,
                 size: 22,
-                color: '1E3A8A',
+                color: ECCOM_BRAND_COLORS.primary,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -323,7 +344,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
               new TextRun({
                 text: `•  ${h.text}`,
                 size: 20,
-                color: '334155',
+                color: ECCOM_BRAND_COLORS.darkText,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -338,7 +359,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
               new TextRun({
                 text: `-  ${h.text}`,
                 size: 18,
-                color: '64748B',
+                color: ECCOM_BRAND_COLORS.mutedText,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -402,7 +423,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                         text: cleaned,
                         bold: isHeader,
                         size: isHeader ? 19 : 18,
-                        color: isHeader ? 'FFFFFF' : '1E293B',
+                        color: isHeader ? ECCOM_BRAND_COLORS.white : ECCOM_BRAND_COLORS.darkText,
                         font: 'Microsoft YaHei'
                       })
                     ],
@@ -415,15 +436,15 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 ],
                 width: { size: normalizedWidths[cIdx] || 20, type: WidthType.PERCENTAGE },
                 shading: {
-                  fill: isHeader ? '1E3A8A' : rIdx % 2 === 1 ? 'F8FAFC' : 'FFFFFF',
+                  fill: isHeader ? ECCOM_BRAND_COLORS.primary : rIdx % 2 === 1 ? ECCOM_BRAND_COLORS.zebraBg : ECCOM_BRAND_COLORS.white,
                   type: ShadingType.CLEAR
                 },
                 margins: { top: 120, bottom: 120, left: 140, right: 140 },
                 borders: {
-                  top: { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
-                  bottom: { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
-                  left: { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' },
-                  right: { style: BorderStyle.SINGLE, size: 2, color: 'CBD5E1' }
+                  top: { style: BorderStyle.SINGLE, size: 2, color: ECCOM_BRAND_COLORS.borderGray },
+                  bottom: { style: BorderStyle.SINGLE, size: 2, color: ECCOM_BRAND_COLORS.borderGray },
+                  left: { style: BorderStyle.SINGLE, size: 2, color: ECCOM_BRAND_COLORS.borderGray },
+                  right: { style: BorderStyle.SINGLE, size: 2, color: ECCOM_BRAND_COLORS.borderGray }
                 }
               });
             })
@@ -539,7 +560,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: line.slice(2).trim(),
                 bold: true,
                 size: 32, // 16pt
-                color: '1E3A8A',
+                color: ECCOM_BRAND_COLORS.primary,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -555,7 +576,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: line.slice(3).trim(),
                 bold: true,
                 size: 26, // 13pt
-                color: '0F172A',
+                color: ECCOM_BRAND_COLORS.darkText,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -571,7 +592,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: line.slice(4).trim(),
                 bold: true,
                 size: 22, // 11pt
-                color: '334155',
+                color: ECCOM_BRAND_COLORS.secondary2,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -589,10 +610,10 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: '•  ',
                 bold: true,
                 size: 21,
-                color: '1E3A8A',
+                color: ECCOM_BRAND_COLORS.primary,
                 font: 'Microsoft YaHei'
               }),
-              ...parseFormattedTextRuns(textContent, '334155', 21)
+              ...parseFormattedTextRuns(textContent, ECCOM_BRAND_COLORS.darkText, 21)
             ],
             spacing: { after: 80 },
             indent: { left: 360 }
@@ -610,10 +631,10 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: prefix,
                 bold: true,
                 size: 21,
-                color: '1E3A8A',
+                color: ECCOM_BRAND_COLORS.primary,
                 font: 'Microsoft YaHei'
               }),
-              ...parseFormattedTextRuns(textContent, '334155', 21)
+              ...parseFormattedTextRuns(textContent, ECCOM_BRAND_COLORS.darkText, 21)
             ],
             spacing: { after: 80 },
             indent: { left: 360 }
@@ -624,12 +645,12 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
         const quoteContent = line.replace(/^>\s*/, '').trim();
         bodyElements.push(
           new Paragraph({
-            children: parseFormattedTextRuns(quoteContent, '1E3A8A', 20),
+            children: parseFormattedTextRuns(quoteContent, ECCOM_BRAND_COLORS.primary, 20),
             spacing: { before: 100, after: 120 },
             indent: { left: 400, right: 400 },
-            shading: { fill: 'F0F7FF', type: ShadingType.CLEAR },
+            shading: { fill: ECCOM_BRAND_COLORS.zebraBg, type: ShadingType.CLEAR },
             border: {
-              left: { style: BorderStyle.SINGLE, size: 16, color: '1E3A8A' }
+              left: { style: BorderStyle.SINGLE, size: 16, color: ECCOM_BRAND_COLORS.primary }
             }
           })
         );
@@ -637,7 +658,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
         // Standard Paragraph
         bodyElements.push(
           new Paragraph({
-            children: parseFormattedTextRuns(line, '1E293B', 21),
+            children: parseFormattedTextRuns(line, ECCOM_BRAND_COLORS.darkText, 21),
             spacing: { after: 140, line: 360 },
             alignment: AlignmentType.BOTH
           })
@@ -660,7 +681,7 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                 text: sec.heading,
                 bold: true,
                 size: sec.level === 1 ? 30 : 24,
-                color: '1E3A8A',
+                color: ECCOM_BRAND_COLORS.primary,
                 font: 'Microsoft YaHei'
               })
             ],
@@ -712,18 +733,18 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
                   new TextRun({
                     text: docTitle,
                     size: 16,
-                    color: '94A3B8',
+                    color: ECCOM_BRAND_COLORS.neutralGray,
                     font: 'Microsoft YaHei'
                   }),
                   new TextRun({
                     text: `\t${docConfidentiality}`,
                     size: 16,
-                    color: '94A3B8',
+                    color: ECCOM_BRAND_COLORS.neutralGray,
                     font: 'Microsoft YaHei'
                   })
                 ],
                 border: {
-                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' }
+                  bottom: { style: BorderStyle.SINGLE, size: 4, color: ECCOM_BRAND_COLORS.borderGray }
                 },
                 spacing: { after: 200 }
               })
@@ -736,27 +757,27 @@ export async function createWordDocx(options: DocxOptions): Promise<string> {
               new Paragraph({
                 children: [
                   new TextRun({
-                    text: '华为云联合技术方案交付白皮书\t第 ',
+                    text: '华讯网络 (ECCOM) 专业技术方案交付白皮书\t第 ',
                     size: 16,
-                    color: '94A3B8',
+                    color: ECCOM_BRAND_COLORS.neutralGray,
                     font: 'Microsoft YaHei'
                   }),
                   new TextRun({
                     children: [PageNumber.CURRENT],
                     size: 16,
-                    color: '1E3A8A',
+                    color: ECCOM_BRAND_COLORS.primary,
                     bold: true
                   }),
                   new TextRun({
                     text: ' 页 / 共 ',
                     size: 16,
-                    color: '94A3B8',
+                    color: ECCOM_BRAND_COLORS.neutralGray,
                     font: 'Microsoft YaHei'
                   }),
                   new TextRun({
                     children: [PageNumber.TOTAL_PAGES],
                     size: 16,
-                    color: '94A3B8',
+                    color: ECCOM_BRAND_COLORS.neutralGray,
                     bold: true
                   }),
                   new TextRun({
@@ -832,7 +853,7 @@ export async function createExcelXlsx(options: ExcelOptions): Promise<string> {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: '1E3A8A' } // Dark Enterprise Blue
+          fgColor: { argb: ECCOM_BRAND_COLORS.primary } // ECCOM Pine Green RGB 0/104/87
         };
         cell.font = {
           name: 'Microsoft YaHei',
@@ -845,10 +866,10 @@ export async function createExcelXlsx(options: ExcelOptions): Promise<string> {
           horizontal: 'center'
         };
         cell.border = {
-          top: { style: 'thin', color: { argb: 'CBD5E1' } },
-          bottom: { style: 'thin', color: { argb: 'CBD5E1' } },
-          left: { style: 'thin', color: { argb: 'CBD5E1' } },
-          right: { style: 'thin', color: { argb: 'CBD5E1' } }
+          top: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } },
+          bottom: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } },
+          left: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } },
+          right: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } }
         };
       });
 
@@ -858,7 +879,7 @@ export async function createExcelXlsx(options: ExcelOptions): Promise<string> {
           row.height = 22;
           const isOdd = rowNumber % 2 === 1;
           row.eachCell((cell) => {
-            cell.font = { name: 'Microsoft YaHei', size: 10 };
+            cell.font = { name: 'Microsoft YaHei', size: 10, color: { argb: ECCOM_BRAND_COLORS.darkText } };
             cell.alignment = {
               vertical: 'middle',
               horizontal: typeof cell.value === 'number' ? 'right' : 'left'
@@ -867,14 +888,14 @@ export async function createExcelXlsx(options: ExcelOptions): Promise<string> {
               cell.fill = {
                 type: 'pattern',
                 pattern: 'solid',
-                fgColor: { argb: 'F8FAFC' }
+                fgColor: { argb: ECCOM_BRAND_COLORS.zebraBg }
               };
             }
             cell.border = {
-              top: { style: 'thin', color: { argb: 'E2E8F0' } },
-              bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
-              left: { style: 'thin', color: { argb: 'E2E8F0' } },
-              right: { style: 'thin', color: { argb: 'E2E8F0' } }
+              top: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } },
+              bottom: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } },
+              left: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } },
+              right: { style: 'thin', color: { argb: ECCOM_BRAND_COLORS.borderGray } }
             };
           });
         }
@@ -921,7 +942,7 @@ export async function createExcelXlsx(options: ExcelOptions): Promise<string> {
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
-          fgColor: { argb: '1E3A8A' }
+          fgColor: { argb: ECCOM_BRAND_COLORS.primary }
         };
         cell.font = { name: 'Microsoft YaHei', color: { argb: 'FFFFFF' }, bold: true, size: 11 };
         cell.alignment = { vertical: 'middle', horizontal: 'center' };
@@ -1019,26 +1040,36 @@ export async function createPowerPointPptx(options: PptxOptions): Promise<string
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
 
-  // Define brand colors
-  const primaryColor = '1E3A8A'; // Tech Navy Blue
-  const darkNavy = '0F172A';     // Slate 900
-  const lightBg = 'F8FAFC';      // Slate 50
+  // Define ECCOM brand colors
+  const primaryColor = ECCOM_BRAND_COLORS.primary;    // 松石主绿 006857
+  const accentRed = ECCOM_BRAND_COLORS.accent;        // 品牌强调红 D31245
+  const deepGreen = ECCOM_BRAND_COLORS.secondary1;    // 深青绿 017260
+  const emeraldGreen = ECCOM_BRAND_COLORS.secondary3; // 翡翠绿 3EB39C
+  const lightBg = ECCOM_BRAND_COLORS.zebraBg;         // 浅背景 F7F9F8
+  const darkText = ECCOM_BRAND_COLORS.darkText;
 
   // 1. Cover Slide
   const coverSlide = pptx.addSlide();
-  coverSlide.background = { color: darkNavy };
+  coverSlide.background = { color: deepGreen };
 
-  // Cover Accent Top Bar
+  // Cover Accent Top Bar (Pine Green + Brand Red Accent)
   coverSlide.addShape(pptx.ShapeType.rect, {
     x: 0,
     y: 0,
-    w: '100%',
+    w: '80%',
     h: 0.15,
     fill: { color: primaryColor }
   });
+  coverSlide.addShape(pptx.ShapeType.rect, {
+    x: '80%',
+    y: 0,
+    w: '20%',
+    h: 0.15,
+    fill: { color: accentRed }
+  });
 
   // Cover Title
-  coverSlide.addText(options.title || 'ASTeam 智能方案汇报', {
+  coverSlide.addText(options.title || '华讯网络 (ECCOM) 智能方案汇报', {
     x: 1.0,
     y: 2.2,
     w: 11.3,
@@ -1057,19 +1088,19 @@ export async function createPowerPointPptx(options: PptxOptions): Promise<string
       w: 11.3,
       h: 0.8,
       fontSize: 20,
-      color: '94A3B8',
+      color: ECCOM_BRAND_COLORS.secondary4, // 薄荷浅绿
       fontFace: 'Microsoft YaHei'
     });
   }
 
   // Cover Footer Info
-  coverSlide.addText(`汇报日期：${new Date().toLocaleDateString('zh-CN')}  |  制作：${options.author || 'ASTeam Agent'}`, {
+  coverSlide.addText(`汇报日期：${new Date().toLocaleDateString('zh-CN')}  |  制作：${options.author || '华讯网络 (ECCOM) 架构团队'}`, {
     x: 1.0,
     y: 6.2,
     w: 11.3,
     h: 0.5,
     fontSize: 14,
-    color: '64748B',
+    color: ECCOM_BRAND_COLORS.secondary5,
     fontFace: 'Microsoft YaHei'
   });
 
@@ -1079,14 +1110,23 @@ export async function createPowerPointPptx(options: PptxOptions): Promise<string
     const slide = pptx.addSlide();
     slide.background = { color: lightBg };
 
-    // Header bar
+    // Header bar with Pine Green bottom border
     slide.addShape(pptx.ShapeType.rect, {
       x: 0,
       y: 0,
       w: '100%',
       h: 1.0,
       fill: { color: 'FFFFFF' },
-      line: { color: 'E2E8F0', width: 1 }
+      line: { color: ECCOM_BRAND_COLORS.borderGray, width: 1 }
+    });
+
+    // Top Brand Accent Line
+    slide.addShape(pptx.ShapeType.rect, {
+      x: 0,
+      y: 0,
+      w: '100%',
+      h: 0.05,
+      fill: { color: primaryColor }
     });
 
     // Slide Number & Tag
@@ -1109,7 +1149,7 @@ export async function createPowerPointPptx(options: PptxOptions): Promise<string
       h: 0.5,
       fontSize: 22,
       bold: true,
-      color: darkNavy,
+      color: darkText,
       fontFace: 'Microsoft YaHei'
     });
 
@@ -1121,8 +1161,8 @@ export async function createPowerPointPptx(options: PptxOptions): Promise<string
         y: contentTop,
         w: 11.7,
         h: 0.85,
-        fill: { color: 'EFF6FF' },
-        line: { color: 'BFDBFE', width: 1 },
+        fill: { color: 'F0FDF4' }, // Light Emerald Tint
+        line: { color: emeraldGreen, width: 1 },
         rectRadius: 0.1
       });
 
@@ -1146,7 +1186,7 @@ export async function createPowerPointPptx(options: PptxOptions): Promise<string
         text: b,
         options: {
           fontSize: 16,
-          color: '334155',
+          color: darkText,
           bullet: { type: 'bullet' as const, code: '2022' },
           fontFace: 'Microsoft YaHei',
           spacing: { line: 360 }

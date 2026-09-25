@@ -275,12 +275,14 @@ export class TurnMachine {
       }
 
       // 正常交付完成
-      this.setState('COMPLETED', callbacks, { finalSummary, tokenStats: sessionTokens });
+      const verifiedList = gateReport.checkedArtifacts?.filter(a => a.verified) || [];
+      this.setState('COMPLETED', callbacks, { finalSummary, tokenStats: sessionTokens, artifacts: verifiedList });
       return {
         summary: finalSummary,
         messages,
         state: 'COMPLETED',
-        tokenStats: sessionTokens
+        tokenStats: sessionTokens,
+        artifacts: verifiedList
       };
     }
 
@@ -290,7 +292,8 @@ export class TurnMachine {
       summary: finalSummary || '任务已达最大迭代轮次限制并安全退出。',
       messages,
       state: 'COMPLETED',
-      tokenStats: sessionTokens
+      tokenStats: sessionTokens,
+      artifacts: []
     };
   }
 }

@@ -1,0 +1,34 @@
+/* ECCOM Brand Color System & Tokens */
+:root {
+  --eccom-brand-primary: #006857;    /* 松石主绿 RGB 0/104/87 */
+  --eccom-brand-accent: #D31245;     /* 华讯强调红 RGB 211/18/69 (仅用于高光徽标与核心强调，不用于错误) */
+  --eccom-brand-green-700: #017260;  /* 深青绿 RGB 1/114/96 */
+  --eccom-brand-green-600: #349182;  /* 灰青绿 RGB 52/145/130 */
+  --eccom-brand-green-500: #3EB39C;  /* 翡翠绿 RGB 62/179/156 */
+  --eccom-brand-green-400: #6BC39C;  /* 薄荷绿 RGB 107/195/156 */
+  --eccom-brand-green-200: #AAE4B4;  /* 浅草绿 RGB 170/228/180 */
+  --eccom-neutral-gray: #A5A5A5;     /* 中灰 RGB 165/165/165 */
+  --eccom-border-gray: #DDDDDD;      /* 边框灰 RGB 221/221/221 */
+  --eccom-bg-light: #F7F9F8;         /* 浅色底衬 RGB 247/249/248 */
+  --eccom-white: #FFFFFF;
+}
+
+/* Template typography and chrome only. No body layout rules. */
+[data-eccom-role] {
+  position: relative; width: 1280px; height: 720px; overflow: hidden;
+  color: #000; font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Source Han Sans CN", "思源黑体 CN", Arial, sans-serif;
+  font-size: 26.6667px; line-height: 1.4;
+}
+[data-eccom-role] *, [data-eccom-role] *::before, [data-eccom-role] *::after { box-sizing: border-box; }
+[data-eccom-role] [data-eccom-shell] { position: absolute; inset: 0; width: 1280px; height: 720px; max-width: none; margin: 0; padding: 0; border: 0; opacity: 1; object-fit: fill; pointer-events: none; z-index: 0; }
+[data-eccom-role] [data-eccom-slot] { position: absolute; margin: 0; padding: 4.8px 9.6px; z-index: 1; line-height: 1.2; text-align:left; letter-spacing:0; background: transparent; border: 0; }
+[data-eccom-role="body"] [data-eccom-slot="title"] { left:145.8027px; top:12.204px; width:988.3955px; height:114.9495px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:48px; font-weight:700; letter-spacing:8px; color:#404040; }
+[data-eccom-role="cover"] [data-eccom-slot="title"] { left:96.3677px; top:215.0993px; width:916.4323px; height:96.9375px; font-size:72px; font-weight:700; color:#fff; }
+[data-eccom-role="cover"] [data-eccom-slot="subtitle"] { left:96.3677px; top:320.6383px; width:518.7079px; height:54.9312px; font-size:37.3333px; font-weight:700; letter-spacing:8px; color:#fff; }
+[data-eccom-role="cover"] [data-eccom-slot="strapline"] { left:107.4424px; top:457.6087px; width:459.73px; height:47.2775px; font-size:20px; font-weight:400; letter-spacing:4px; color:#fff; }
+[data-eccom-role="section"] [data-eccom-slot="title"] { left:194.07px; top:296.44px; width:884.93px; height:74.32px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:53.3333px; font-weight:700; letter-spacing:4px; color:#404040; }
+[data-eccom-role="closing"] [data-eccom-slot="title"], [data-eccom-role="closing"] [data-eccom-slot="subtitle"] { left:484.86px; top:287.73px; width:582.9px; height:54.93px; font-size:37.3333px; font-weight:400; letter-spacing:4px; color:#fff; }
+[data-eccom-role="closing"] [data-eccom-slot="subtitle"] { top:342.66px; width:556.29px; }
+[data-eccom-role] [data-eccom-slot="page-number"] { left:867.7639px; top:676.9475px; width:44.0843px; height:38.3333px; font-family:Arial, sans-serif; font-size:12px; font-weight:400; letter-spacing:0; color:var(--eccom-brand-primary, #006857); display:flex; align-items:center; justify-content:center; text-align:center; }
+[data-eccom-role] [data-eccom-content] { position:absolute; z-index:1; margin:0; }
+[data-eccom-role] [lang="en"] { font-family:Arial, sans-serif; }

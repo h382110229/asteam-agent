@@ -422,20 +422,24 @@ recommendedTools:
    - 完整展示生成的 Markdown 内容；
    - 询问或主动使用文件写入工具将其持久化至 \`skills/\` 目录，并告知用户“已成功生成并安装，现在你可以在输入框输入 @ 或在技能面板中直接勾选它”。`
   },
-  // 5. 华讯（ECCOM）标准化交付与设计套件 (v2.0.1 内置官方技能)
+  // 5. 华讯（ECCOM）标准化交付与设计套件 (v2.1.0 官方内置技能)
   {
-    id: 'huaxun_word_generator',
-    name: '华讯交付文档与Word/PDF方案专家 (huaxun-word-generator)',
-    description: '按华讯（ECCOM）知识模板格式规范 v2.3 生成高规格交付 Word（.docx）与 PDF，支持自动大纲与元数据收集、表头居中数据左对齐、版本控制、原模板品牌图文保持',
+    id: 'eccom_word_skill',
+    name: '华讯交付文档与Word/PDF方案专家 (eccom-word-skill)',
+    description: '按华讯网络（ECCOM）知识模板格式规范 v2.3 生成高规格交付 Word（.docx）与 PDF，支持自动大纲与元数据收集、表头居中数据左对齐、版本控制、原模板品牌图文保持，松石绿 (#006857) 品牌色规范',
     isBuiltin: true,
     category: 'office',
-    version: '2.0.1',
+    version: '2.1.0',
     triggers: [
       '华讯word',
       '华讯模板',
       '华讯文档',
       'huaxun-word',
       'huaxun_word',
+      'eccom word',
+      'eccom-word',
+      'eccom_word',
+      'eccom-word-skill',
       '华讯方案',
       '华讯交付',
       'eccom docx',
@@ -444,8 +448,8 @@ recommendedTools:
       '知识模板'
     ],
     recommendedTools: ['run_terminal_command', 'write_file', 'generate_docx'],
-    prompt: `【激活官方内置技能：华讯交付文档与Word/PDF方案专家 (huaxun-word-generator)】
-- 按华讯（ECCOM）知识模板格式规范 v2.3，生成符合规范的 Word (.docx) + PDF 交付文档：
+    prompt: `【激活官方内置技能：华讯交付文档与Word/PDF方案专家 (eccom-word-skill)】
+- 按华讯（ECCOM）知识模板格式规范 v2.3 与官方品牌规范，生成符合规范的 Word (.docx) + PDF 交付文档：
   1. 初始化引导（前置问询与元数据收集）：
      在生成前，可先向用户确认以下核心元数据（或使用默认值）：
      - doc_title (文档标题)、doc_version (如 V1.0)、doc_date (日期)、project_name (项目名)、customer_name (客户名)、author (作者)、doc_type (通用知识/项目方案设计/实施验收/培训手册)；
@@ -457,22 +461,26 @@ recommendedTools:
      - 培训/操作手册：适用范围 -> 环境准备 -> 操作步骤（分步+小心/警告）-> 常见问题
      - 必须包含标准封面横幅、版本控制历史表、自动目录 (TOC)、表头居中且数据左对齐的标准表格；
   3. 执行方式：
-     - 若宿主具备 Python 环境，可通过调用技能脚本一键生成：
-       python "<skill_dir>/scripts/generate_huaxun_doc.py" --meta meta.json --content content.json --out <outDir> [--pdf]
-     - 也可直接结合系统内置纯 JS 原生 Word 套件 (generate_docx) 生成符合同样华讯视觉规约的交付文档。`
+     - 优先结合系统内置纯 JS 原生 Word 套件 (generate_docx) 生成符合华讯视觉规约 (#006857 松石绿) 的交付文档；
+     - 若宿主具备 Python 环境，也可调用技能脚本生成：
+       python "<skill_dir>/scripts/generate_huaxun_doc.py" --meta meta.json --content content.json --out <outDir> [--pdf]`
   },
   {
-    id: 'huaxun_excel_generator',
-    name: '华讯交付表格与Excel建模专家 (huaxun-excel-generator)',
-    description: '按公司《Excel模板（暂定）》生成标准化 Excel 交付文件，内置项目人员通讯录、设备清单、IP地址规划、验收检查表等标准 Sheet，自动环境预检与公式保护',
+    id: 'eccom_excel_skill',
+    name: '华讯交付表格与Excel建模专家 (eccom-excel-skill)',
+    description: '按公司《Excel模板（暂定）》与华讯品牌色 (#006857) 生成标准化 Excel 交付文件，内置项目人员通讯录、设备清单、IP地址规划、验收检查表等标准 Sheet，自动环境预检与公式保护',
     isBuiltin: true,
     category: 'office',
-    version: '2.0.1',
+    version: '2.1.0',
     triggers: [
       '华讯excel',
       '华讯表格',
       'huaxun-excel',
       'huaxun_excel',
+      'eccom excel',
+      'eccom-excel',
+      'eccom_excel',
+      'eccom-excel-skill',
       '华讯模板excel',
       'excel交付',
       '设备清单表格',
@@ -480,7 +488,7 @@ recommendedTools:
       '人员通讯录表格'
     ],
     recommendedTools: ['run_terminal_command', 'write_file', 'generate_excel'],
-    prompt: `【激活官方内置技能：华讯交付表格与Excel建模专家 (huaxun-excel-generator)】
+    prompt: `【激活官方内置技能：华讯交付表格与Excel建模专家 (eccom-excel-skill)】
 - 遵循华讯（ECCOM）标准化项目交付表格规范与企业级多 Sheet 数据建模标准：
   1. 标准化工作表 (Sheets) 矩阵：
      - 【版本控制】：文档版本、更新时间、修订人、修订要点；
@@ -490,12 +498,44 @@ recommendedTools:
      - 【IP地址规划】：网段、IP 地址、子网掩码、网关、VLAN、连接设备/端口、用途；
      - 【验收检查表】：检查项、验收标准、测试方法、验收结果、确认人签字；
   2. 排版与视觉设计：
-     - 表头采用深绿/华讯品牌色底色与纯白文字，冻结首行 (Freeze Panes)；
-     - 数据行斑马纹交替，单元格对齐（文本居左、数值与状态居中、金额与量化右对齐）；
+     - 表头采用华讯官方松石墨绿 (#006857) 底色与纯白文字，冻结首行 (Freeze Panes)；
+     - 数据行斑马纹交替 (#F7F9F8)，单元格对齐（文本居左、数值与状态居中、金额与量化右对齐）；
   3. 执行方式：
-     - 可直接通过技能脚本批量生成：
-       python "<skill_dir>/scripts/generate_huaxun_excel.py" --meta meta.json --content content.json --out <outDir>
-     - 也可直接调用内置原生 Excel 套件 (generate_excel) 写入多 Sheet 与格式化数据。`
+     - 直接调用内置原生 Excel 套件 (generate_excel) 写入多 Sheet 与格式化数据（零环境依赖）；
+     - 或通过技能脚本批量生成：
+       python "<skill_dir>/scripts/generate_huaxun_excel.py" --meta meta.json --content content.json --out <outDir>`
+  },
+  {
+    id: 'eccom_ppt_skill',
+    name: '华讯企业级演示文稿与幻灯片设计专家 (eccom-ppt-skill)',
+    description: '按华讯网络 (ECCOM) 官方母版与品牌色规范（松石主绿 #006857、品牌强调红 #D31245）生成高保真商务汇报、技术演说 PPT 与 HTML 演示大屏，免 LibreOffice 外部依赖',
+    isBuiltin: true,
+    category: 'office',
+    version: '2.1.0',
+    triggers: [
+      '华讯ppt',
+      '华讯幻灯片',
+      'eccom ppt',
+      'eccom-ppt',
+      'eccom_ppt',
+      'eccom-ppt-skill',
+      '华讯演说',
+      '华讯汇报',
+      '商业提案ppt',
+      '技术方案汇报'
+    ],
+    recommendedTools: ['ask_question', 'write_file', 'generate_pptx', 'export_html_to_pdf'],
+    prompt: `【激活官方内置技能：华讯企业级演示文稿与幻灯片设计专家 (eccom-ppt-skill)】
+- 遵循华讯网络 (ECCOM) 官方母版背景与品牌色彩规范：
+  1. 品牌规约：
+     - 品牌主色：松石墨绿 #006857 (RGB 0/104/87)；
+     - 品牌强调红：#D31245 (RGB 211/18/69，仅用于高光微标、核心论点，禁止用于系统错误)；
+     - 辅助色系：#017260, #349182, #3EB39C, #6BC39C, #AAE4B4；
+     - 母版底壳：复用 eccom/assets/shells/ 中的 cover, contents, section, body, closing 原装母版；
+  2. 交付与免 LibreOffice 渲染：
+     - HTML 交付模式：输出至 designs/<project>/ 并在客户端内置 Webview 优雅呈现，完全免除外部 LibreOffice 依赖；
+     - PPTX 导出：支持原生可编辑 PowerPoint (.pptx) 对象输出；
+  3. 交互与提问：若对汇报大纲或关键论点有疑问，优先调用 ask_question 进行卡片式决策确认。`
   },
   {
     id: 'asteam_ui_design',
@@ -562,11 +602,20 @@ export class SkillManager {
     return BUILTIN_SKILLS
       .filter(skill => !storageHub.isSkillUninstalled(skill.id))
       .map(skill => {
-      if (skill.id === 'huaxun_word_generator' || skill.id === 'huaxun_excel_generator' || skill.id === 'asteam_ui_design') {
-        const folderName = skill.id === 'huaxun_word_generator' 
-          ? 'huaxun-word-generator' 
-          : skill.id === 'huaxun_excel_generator' 
-          ? 'huaxun-excel-generator' 
+      if (
+        skill.id === 'eccom_word_skill' ||
+        skill.id === 'eccom_excel_skill' ||
+        skill.id === 'eccom_ppt_skill' ||
+        skill.id === 'huaxun_word_generator' ||
+        skill.id === 'huaxun_excel_generator' ||
+        skill.id === 'asteam_ui_design'
+      ) {
+        const folderName = (skill.id === 'eccom_word_skill' || skill.id === 'huaxun_word_generator')
+          ? 'eccom-word-skill'
+          : (skill.id === 'eccom_excel_skill' || skill.id === 'huaxun_excel_generator')
+          ? 'eccom-excel-skill'
+          : (skill.id === 'eccom_ppt_skill')
+          ? 'eccom-ppt-skill'
           : 'asteam-ui-design';
         
         let foundDir = '';

@@ -154,7 +154,8 @@ export class AgentSession {
     return {
       summary: result.summary,
       state: result.state,
-      tokenStats: result.tokenStats
+      tokenStats: result.tokenStats,
+      artifacts: result.artifacts || []
     };
   }
 

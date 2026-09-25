@@ -101,13 +101,20 @@ export async function createPdfDocument(options: PdfOptions): Promise<string> {
   const coverPage = pdfDoc.addPage([595.28, 841.89]); // A4 尺寸 (pt)
   const { width, height } = coverPage.getSize();
 
-  // 顶部装饰条 (科技深蓝)
+  // 顶部装饰条 (华讯松石绿 + 品牌强调红)
   coverPage.drawRectangle({
     x: 0,
     y: height - 16,
-    width: width,
+    width: width * 0.8,
     height: 16,
-    color: rgb(0.12, 0.23, 0.54)
+    color: rgb(0, 104 / 255, 87 / 255) // #006857 松石主绿
+  });
+  coverPage.drawRectangle({
+    x: width * 0.8,
+    y: height - 16,
+    width: width * 0.2,
+    height: 16,
+    color: rgb(211 / 255, 18 / 255, 69 / 255) // #D31245 品牌强调红
   });
 
   // 密级标识
@@ -125,7 +132,7 @@ export async function createPdfDocument(options: PdfOptions): Promise<string> {
     y: height - 200,
     size: 22,
     font: fontBold,
-    color: rgb(0.06, 0.09, 0.16)
+    color: rgb(18 / 255, 28 / 255, 25 / 255)
   });
 
   // 副标题
@@ -134,7 +141,7 @@ export async function createPdfDocument(options: PdfOptions): Promise<string> {
     y: height - 235,
     size: 13,
     font: fontRegular,
-    color: rgb(0.39, 0.45, 0.55)
+    color: rgb(85 / 255, 107 / 255, 100 / 255)
   });
 
   // 分隔线
@@ -142,7 +149,7 @@ export async function createPdfDocument(options: PdfOptions): Promise<string> {
     start: { x: 50, y: height - 260 },
     end: { x: width - 50, y: height - 260 },
     thickness: 1.5,
-    color: rgb(0.85, 0.88, 0.92)
+    color: rgb(221 / 255, 221 / 255, 221 / 255)
   });
 
   // 编制元信息
@@ -187,7 +194,7 @@ export async function createPdfDocument(options: PdfOptions): Promise<string> {
         y: currentY,
         size: 16,
         font: fontBold,
-        color: rgb(0.12, 0.23, 0.54)
+        color: rgb(0, 104 / 255, 87 / 255)
       });
       currentY -= 25;
     } else if (line.startsWith('## ')) {

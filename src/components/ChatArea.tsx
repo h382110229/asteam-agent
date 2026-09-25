@@ -37,8 +37,13 @@ import {
   Video,
   Volume2,
   Gauge,
-  Users
+  Users,
+  FileSpreadsheet,
+  Download,
+  ExternalLink,
+  ChevronRight
 } from 'lucide-react';
+import { MarkdownRenderer } from './MarkdownRenderer';
 import { AgentTrajectory, AgentStep } from './AgentTrajectory';
 import { InteractiveQuestionCard, QuestionCardData } from './InteractiveQuestionCard';
 import { LiveTerminalCard } from './LiveTerminalCard';
@@ -82,6 +87,14 @@ export interface ChatMessageItem {
     completionTokens: number;
     totalTokens: number;
   };
+  artifacts?: Array<{
+    filePath: string;
+    sizeBytes: number;
+    mtimeMs: number;
+    verified?: boolean;
+    title?: string;
+    type?: string;
+  }>;
 }
 
 interface ChatAreaProps {
@@ -123,6 +136,88 @@ const SLASH_COMMANDS = [
   { cmd: '/skill', title: '智能生成与固化技能 (Skill Generator)', desc: '调用技能架构师，根据当前对话与使用偏好自动设计、生成并安装专属 Skill' },
   { cmd: '/grill-me', title: 'Grill-me 互动问答', desc: '进入采访决策模式：Agent 逐一向您抛出架构选型卡片' }
 ];
+
+export interface DetectedArtifactItem {
+  id: string;
+  title: string;
+  filePath: string;
+  sizeBytes?: number;
+  type: 'excel' | 'text' | 'html' | 'svg' | 'image' | 'video' | 'audio' | 'docx' | 'pptx' | 'pdf' | 'file';
+}
+
+export function extractAllArtifactsFromMessage(msg: ChatMessageItem): DetectedArtifactItem[] {
+  const items: DetectedArtifactItem[] = [];
+  const seen = new Set<string>();
+
+  const getCleanExt = (p: string) => {
+    return p.split('.').pop()?.toLowerCase() || '';
+  };
+
+  const getArtifactType = (p: string): DetectedArtifactItem['type'] => {
+    const ext = getCleanExt(p);
+    if (['xlsx', 'xls', 'csv'].includes(ext)) return 'excel';
+    if (['txt', 'json', 'py', 'sh', 'sql', 'cfg', 'log', 'yaml', 'yml', 'md'].includes(ext)) return 'text';
+    if (['html', 'htm'].includes(ext)) return 'html';
+    if (['svg'].includes(ext)) return 'svg';
+    if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) return 'image';
+    if (['mp4', 'webm', 'mov'].includes(ext)) return 'video';
+    if (['mp3', 'wav', 'm4a', 'aac', 'flac'].includes(ext)) return 'audio';
+    if (['docx', 'doc'].includes(ext)) return 'docx';
+    if (['pptx', 'ppt'].includes(ext)) return 'pptx';
+    if (['pdf'].includes(ext)) return 'pdf';
+    return 'file';
+  };
+
+  // 1. 优先使用后端物理探针核验通过的真实落盘结构化数据
+  if (msg.artifacts && msg.artifacts.length > 0) {
+    for (const a of msg.artifacts) {
+      if (a.filePath && !seen.has(a.filePath.toLowerCase())) {
+        seen.add(a.filePath.toLowerCase());
+        const fileName = a.filePath.split(/[\\/]/).pop() || '交付物';
+        items.push({
+          id: `art-${items.length}`,
+          title: a.title || fileName,
+          filePath: a.filePath,
+          sizeBytes: a.sizeBytes,
+          type: getArtifactType(a.filePath)
+        });
+      }
+    }
+  }
+
+  // 2. 从消息文本与思考流中智能正则扫描落盘文件路径 (彻底解决控制台脚本生成物与历史消息)
+  const fullText = (msg.content || '') + '\n' + (msg.thought || '');
+  const pathRegex = /(?:[a-zA-Z]:[\\/][^"'\r\n<>|*?`\s\uff0c\u3002]+?\.(?:xlsx|xls|csv|txt|cfg|docx|doc|pdf|pptx|zip|html|json|py|sh|sql))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pathRegex.exec(fullText)) !== null) {
+    const rawPath = match[0].trim();
+    if (!seen.has(rawPath.toLowerCase())) {
+      seen.add(rawPath.toLowerCase());
+      const fileName = rawPath.split(/[\\/]/).pop() || '';
+      items.push({
+        id: `art-regex-${items.length}`,
+        title: fileName,
+        filePath: rawPath,
+        type: getArtifactType(rawPath)
+      });
+    }
+  }
+
+  // 3. 兜底旧版单项提取器
+  if (items.length === 0) {
+    const fallback = extractPreviewableArtifact(msg.content || msg.thought || '', msg.steps);
+    if (fallback && fallback.filePath && !seen.has(fallback.filePath.toLowerCase())) {
+      items.push({
+        id: `art-fallback-0`,
+        title: fallback.title || '交付物',
+        filePath: fallback.filePath,
+        type: getArtifactType(fallback.filePath)
+      });
+    }
+  }
+
+  return items;
+}
 
 export function extractPreviewableArtifact(content: string, steps?: AgentStep[]): PreviewData | null {
   // 1. 优先从规划执行步骤 (AgentStep[]) 中直接提取 write_file 生成的真实交付产物
@@ -422,11 +517,7 @@ function renderContentWithMedia(content: string, onOpenPreview?: (data: PreviewD
   const mediaRegex = /(?:!\[(.*?)\]\(((?:https?:\/\/[^\s)]+|data:image\/[^\s)]+|[^\s)]+\.(?:png|jpg|jpeg|webp|gif|mp4|webm|mov|mp3|wav|m4a|aac|flac|ogg)))\)|\[(?:视频|video|音频|audio|播放音频|语音)?[：:]?\s*(.*?)\]\(((?:https?:\/\/[^\s)]+|[^\s)]+)\.(?:mp4|webm|mov|mp3|wav|m4a|aac|flac|ogg))\))/gi;
 
   if (!mediaRegex.test(cleanContent)) {
-    return (
-      <div className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-        {cleanContent}
-      </div>
-    );
+    return <MarkdownRenderer content={cleanContent} onOpenPreview={onOpenPreview} />;
   }
 
   mediaRegex.lastIndex = 0;
@@ -437,9 +528,11 @@ function renderContentWithMedia(content: string, onOpenPreview?: (data: PreviewD
   while ((match = mediaRegex.exec(cleanContent)) !== null) {
     if (match.index > lastIdx) {
       elements.push(
-        <div key={`text-${lastIdx}`} className="whitespace-pre-wrap break-words leading-relaxed text-[13px] select-text">
-          {cleanContent.slice(lastIdx, match.index)}
-        </div>
+        <MarkdownRenderer
+          key={`text-${lastIdx}`}
+          content={cleanContent.slice(lastIdx, match.index)}
+          onOpenPreview={onOpenPreview}
+        />
       );
     }
 
@@ -578,10 +671,11 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
     checkpoint: CheckpointItem | null;
   }>({ isOpen: false, checkpoint: null });
 
-  // 技能动态挂载与快速勾选状态 (v1.11.0 / v1.11.1 / v2.0.2)
+  // 技能动态挂载与快速勾选状态 (v1.11.0 / v1.11.1 / v2.0.2 / v2.2.0)
   const [mountedSkillIds, setMountedSkillIds] = useState<string[]>([]);
   const [showSkillPicker, setShowSkillPicker] = useState(false);
   const [skillPickerSearch, setSkillPickerSearch] = useState('');
+  const [isSkillsBarExpanded, setIsSkillsBarExpanded] = useState(false);
   const [isImportingFolder, setIsImportingFolder] = useState(false);
   const [appVersion, setAppVersion] = useState<string>('2.0.2');
 
@@ -1545,46 +1639,127 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
       {/* Messages Stream */}
       <div className="flex-1 overflow-y-auto px-4 py-6 md:px-8 space-y-6 select-text">
         {messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center max-w-lg mx-auto space-y-6 my-auto pt-16 select-none">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--primary)] text-white shadow-lg">
-              <span className="font-bold text-2xl">A</span>
-              <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)] ml-0.5" />
+          <div className="flex h-full flex-col items-center justify-center text-center max-w-3xl mx-auto space-y-7 my-auto pt-6 pb-12 select-none animate-in fade-in-50 duration-300">
+            {/* Ambient Glow Brand Emblem */}
+            <div className="relative inline-flex items-center justify-center">
+              <div className="absolute -inset-1.5 rounded-3xl bg-gradient-to-r from-[var(--primary)] via-emerald-500 to-[var(--accent)] opacity-20 blur-xl animate-pulse" />
+              <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-[var(--primary)] text-white shadow-xl shadow-[var(--primary)]/25">
+                <span className="font-extrabold text-2xl tracking-tight">A</span>
+                <span className="h-2.5 w-2.5 rounded-full bg-[var(--accent)] ml-0.5 shadow-xs" />
+              </div>
             </div>
 
-            <div className="space-y-2">
-              <h1 className="text-xl font-bold tracking-tight text-[var(--foreground)]">
-                ASTeam Agent (v{appVersion})
-              </h1>
+            {/* Hero Header */}
+            <div className="space-y-2.5 max-w-xl mx-auto">
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <h1 className="text-2xl font-bold tracking-tight text-[var(--foreground)]">
+                  ASTeam Agent
+                </h1>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--primary)]/10 text-[var(--primary)] border border-[var(--primary)]/20">
+                  v{appVersion}
+                </span>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20">
+                  ECCOM 品牌级
+                </span>
+              </div>
               <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">
-                ASTeam 自研工业级 <code className="font-semibold text-[var(--foreground)]">Harness</code> 确定性状态机与企业级通用网关。全新支持 <strong>⚡ 确定性指令队列与协作插话</strong>、<strong>👁️ Office 金字塔多模态原位审图</strong>、<strong>🛡️ 交付物物理探针硬门禁</strong> 与 <strong>📑 全能 Office 排版套件</strong>。
+                企业级多智能体协同终端 · 专注高质量 ECCOM 品牌规范 Office 文档生成、全自主架构设计与研发工程自动化
               </p>
             </div>
 
-            {/* Quick Prompt Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full text-left">
+            {/* Feature Capability Badges */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
+                ECCOM 品牌松柏绿规范
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                免外部环境原生排版
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] shadow-2xs">
+                <span className="h-1.5 w-1.5 rounded-full bg-teal-500" />
+                交付物物理探针门禁
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] shadow-2xs">
+                <Zap className="h-3 w-3 fill-[var(--primary)] text-[var(--primary)]" />
+                {mountedSkillIds.length || 10} 项企业技能待命
+              </span>
+            </div>
+
+            {/* Bento Grid Scenario Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 w-full text-left pt-1">
               {[
-                { title: '🎨 现代网页与架构拓扑图生成', prompt: '请为我们编写一个高颜值的数据监控大屏 HTML 页面（内置 Tailwind CSS），并在其后使用 Mermaid 绘制完整的系统高可用流式架构拓扑图。' },
-                { title: '⚡ 实时运行系统巡检与交互命令', prompt: '请在终端执行网络连通性与本地开发环境巡检命令，并在控制台实时输出执行过程。' },
-                { title: '📄 一键生成 Word (.docx) 方案白皮书', prompt: '请使用【公文方案与深度报告专家】技能，为我们团队撰写一份严谨规范的技术方案，并直接生成为 Word 文档保存在我的桌面上（文件名：企业级Agent架构白皮书.docx）。' },
-                { title: '📊 一键生成 PPT (.pptx) 演说幻灯片', prompt: '请使用【商业提案与演说 PPT 架构师】技能，为我们生成一份 16:9 比例的商业路演幻灯片，包含核心金句与讲者逐字稿，并直接保存至桌面（文件名：AI智能底座路演汇报.pptx）。' }
-              ].map((item, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => {
-                    setInput(item.prompt);
-                    textareaRef.current?.focus();
-                  }}
-                  className="rounded-xl border border-[var(--border)] bg-[var(--card)] p-3 text-xs text-[var(--foreground)] hover:border-[var(--primary)] hover:bg-[var(--muted)]/50 transition-all text-left shadow-2xs group select-none"
-                >
-                  <span className="font-semibold block mb-1 group-hover:text-[var(--primary)] transition-colors">
-                    {item.title}
-                  </span>
-                  <span className="text-[11px] text-[var(--muted-foreground)] line-clamp-2">
-                    {item.prompt}
-                  </span>
-                </button>
-              ))}
+                {
+                  badge: 'ECCOM 规范',
+                  badgeColor: 'text-[var(--primary)] bg-[var(--primary)]/10 border-[var(--primary)]/20',
+                  icon: FileText,
+                  iconColor: 'text-[var(--primary)] bg-[var(--primary)]/10',
+                  title: '企业级 Word 方案白皮书',
+                  subtitle: '内置封面、自动目录与三线表规范，一键输出标准技术方案或研报',
+                  prompt: '请使用【eccom-word-skill】为我们团队撰写一份严谨规范的技术方案白皮书，包含项目背景、系统架构设计、三线表参数与交付里程碑，并生成 Word 文档保存在我的桌面上（文件名：企业级Agent架构白皮书.docx）。'
+                },
+                {
+                  badge: '免外部依赖',
+                  badgeColor: 'text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-400',
+                  icon: Layers,
+                  iconColor: 'text-amber-600 bg-amber-500/10 dark:text-amber-400',
+                  title: '商业演说 PPT 幻灯片',
+                  subtitle: '16:9 原生矢量排版引擎，内嵌松柏绿/赤红经典商业路演版式与演讲稿',
+                  prompt: '请使用【eccom-ppt-skill】为我们生成一份 16:9 商业提案路演幻灯片，包含引言、核心痛点、解决方案、商业价值与讲者逐字稿，并直接保存至桌面（文件名：AI智能底座路演汇报.pptx）。'
+                },
+                {
+                  badge: '自动计算度量',
+                  badgeColor: 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-400',
+                  icon: FileSpreadsheet,
+                  iconColor: 'text-emerald-600 bg-emerald-500/10 dark:text-emerald-400',
+                  title: '智能 Excel 财务与分析表',
+                  subtitle: '自动设计冻结表头、数据透视与汇总公式，松柏绿专业商务配色',
+                  prompt: '请使用【eccom-excel-skill】为我们生成一份项目成本预算与ROI效益测算表，包含研发人力、基础设施投入与三年预期收益核算公式，并保存至桌面（文件名：项目ROI效益测算.xlsx）。'
+                },
+                {
+                  badge: 'Swarm 协同',
+                  badgeColor: 'text-teal-600 bg-teal-500/10 border-teal-500/20 dark:text-teal-400',
+                  icon: Terminal,
+                  iconColor: 'text-teal-600 bg-teal-500/10 dark:text-teal-400',
+                  title: '高可用拓扑与全自主研发',
+                  subtitle: 'Mermaid/SVG 实时矢量架构图渲染、系统自动化巡检与多智能体分工协同',
+                  prompt: '请为我们编写一个高颜值的数据监控大屏 HTML 页面（内置 Tailwind CSS），并在其后使用 Mermaid 绘制完整的系统高可用流式架构拓扑图。'
+                }
+              ].map((item, idx) => {
+                const IconComponent = item.icon;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setInput(item.prompt);
+                      textareaRef.current?.focus();
+                    }}
+                    className="relative flex flex-col justify-between p-4 rounded-2xl border border-[var(--border)] bg-[var(--card)] hover:border-[var(--primary)] hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 text-left group cursor-pointer"
+                  >
+                    <div className="space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${item.iconColor} group-hover:scale-105 transition-transform`}>
+                          <IconComponent className="h-5 w-5" />
+                        </div>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${item.badgeColor}`}>
+                          {item.badge}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-xs text-[var(--foreground)] group-hover:text-[var(--primary)] transition-colors flex items-center justify-between">
+                          <span>{item.title}</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all" />
+                        </h3>
+                        <p className="text-[11px] text-[var(--muted-foreground)] mt-1 line-clamp-2 leading-relaxed">
+                          {item.subtitle}
+                        </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -1628,18 +1803,34 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   </button>
                 )}
 
-                {/* Thought Stream if available */}
-                {msg.thought && (
-                  <details className="rounded-lg bg-[var(--muted)]/60 p-2 text-[11px] text-[var(--muted-foreground)] border border-[var(--border)]/50">
-                    <summary className="cursor-pointer font-medium hover:text-[var(--foreground)] flex items-center space-x-1 select-none">
-                      <Sparkles className="h-3 w-3 text-[var(--primary)]" />
-                      <span>查看 Agent 深度思考与调度日志</span>
-                    </summary>
-                    <div className="mt-2 whitespace-pre-wrap font-mono text-[11px] max-h-48 overflow-y-auto select-text">
-                      {msg.thought}
-                    </div>
-                  </details>
-                )}
+                {/* 现代化深度思考折叠胶囊 (Deep Thinking Capsule - v2.1.0) */}
+                {msg.thought && (() => {
+                  const isThinking = effectiveIsRunning && msg.id === lastMsg?.id && !msg.content?.trim();
+                  return (
+                    <details
+                      className="group/thought my-2 rounded-xl border border-[var(--border)] bg-[var(--muted)]/30 overflow-hidden transition-all text-xs"
+                      open={isThinking}
+                    >
+                      <summary className="flex items-center justify-between px-3 py-2 cursor-pointer select-none hover:bg-[var(--muted)]/50 transition-colors list-none">
+                        <div className="flex items-center space-x-2">
+                          <div className="flex h-5 w-5 items-center justify-center rounded-md bg-[var(--primary)]/15 text-[var(--primary)]">
+                            <Sparkles className={`h-3 w-3 ${isThinking ? 'animate-spin' : ''}`} />
+                          </div>
+                          <span className="font-medium text-[var(--foreground)] text-[12px]">
+                            {isThinking ? '正在深度思考与规划调度中...' : '已完成深度思考与分析决策'}
+                          </span>
+                          <span className="text-[10px] text-[var(--muted-foreground)] font-mono">
+                            ({msg.thought.length} 字符)
+                          </span>
+                        </div>
+                        <ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)] transition-transform duration-200 group-open/thought:rotate-180" />
+                      </summary>
+                      <div className="px-3.5 py-3 border-t border-[var(--border)]/40 bg-[var(--card)]/50 font-mono text-[11.5px] leading-relaxed text-[var(--muted-foreground)] whitespace-pre-wrap max-h-56 overflow-y-auto select-text scrollbar-thin">
+                        {msg.thought}
+                      </div>
+                    </details>
+                  );
+                })()}
 
                 {/* Swarm Multi-Agent Collaboration Dashboard */}
                 {msg.swarmState && (
@@ -1799,74 +1990,126 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   );
                 })()}
 
-                {/* Multimodal Artifact Preview Card (置于结论最下方，突出交付物) */}
+                {/* 交付物清单聚合看板 (Multi-Artifacts Delivery Board - v2.1.0) */}
                 {msg.role === 'assistant' && (() => {
-                  const artifact = extractPreviewableArtifact(msg.content || msg.thought || '', msg.steps);
-                  if (!artifact || !onOpenPreview) return null;
+                  const detectedArtifacts = extractAllArtifactsFromMessage(msg);
+                  if (detectedArtifacts.length === 0) return null;
+
                   return (
-                    <div className="mt-3 flex items-center justify-between rounded-xl border border-[var(--primary)]/40 bg-[var(--primary)]/5 p-3 shadow-xs hover:border-[var(--primary)] transition-all">
-                      <div className="flex items-center space-x-2.5 min-w-0">
-                        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--primary)]/15 text-[var(--primary)]">
-                          {artifact.type === 'image' ? <ImageIcon className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-xs font-semibold text-[var(--foreground)] truncate">
-                            交付物就绪：{artifact.title}
+                    <div className="mt-3.5 rounded-2xl border border-[var(--primary)]/30 bg-[var(--card)] p-3.5 shadow-sm select-none">
+                      <div className="flex items-center justify-between pb-2.5 mb-2.5 border-b border-[var(--border)]/60">
+                        <div className="flex items-center space-x-2">
+                          <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[var(--primary)]/15 text-[var(--primary)]">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
                           </div>
-                          <div className="text-[11px] text-[var(--muted-foreground)]">
-                            类型: {artifact.type.toUpperCase()} · 点击即可在工作台独立分栏中查看高保真效果
-                          </div>
+                          <span className="text-xs font-semibold text-[var(--foreground)]">
+                            本轮任务交付物清单 ({detectedArtifacts.length} 个落盘制品)
+                          </span>
                         </div>
+                        <span className="text-[11px] text-[var(--muted-foreground)]">
+                          物理落盘验证通过 · 支持一键定位与工作台分屏预览
+                        </span>
                       </div>
-                      <div className="flex items-center space-x-1.5 shrink-0 ml-2">
-                        {artifact.filePath && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.electronAPI?.showItemInFolder) {
-                                const rawPath = artifact.filePath!;
-                                const isAbs = rawPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(rawPath);
-                                const fullPath = (isAbs || !workspacePath) ? rawPath : `${workspacePath.replace(/[\\/]+$/, '')}/${rawPath.replace(/^[\\/]+/, '')}`;
-                                window.electronAPI.showItemInFolder(fullPath);
-                              }
-                            }}
-                            title="在系统文件资源管理器中定位"
-                            className="flex items-center space-x-1 rounded-lg border border-[var(--primary)]/40 bg-white/80 dark:bg-[var(--card)] text-[var(--primary)] hover:bg-[var(--primary)]/10 px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-2xs"
-                          >
-                            <FolderOpen className="h-3.5 w-3.5" />
-                            <span className="hidden sm:inline">资源管理器定位</span>
-                          </button>
-                        )}
-                        {artifact.type === 'html' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (window.electronAPI?.openInBrowser) {
-                                const rawPath = artifact.filePath || '';
-                                const isAbs = rawPath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(rawPath);
-                                const fullPath = (isAbs || !workspacePath) ? rawPath : `${workspacePath.replace(/[\\/]+$/, '')}/${rawPath.replace(/^[\\/]+/, '')}`;
-                                window.electronAPI.openInBrowser({
-                                  content: artifact.content,
-                                  title: artifact.title,
-                                  defaultPath: fullPath
-                                });
-                              }
-                            }}
-                            title="在系统默认浏览器中打开全屏真实大屏 (Chrome/Edge)"
-                            className="flex items-center space-x-1 rounded-lg border border-[var(--primary)]/40 bg-white/80 dark:bg-[var(--card)] text-[var(--primary)] hover:bg-[var(--primary)]/10 px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-2xs"
-                          >
-                            <Globe className="h-3.5 w-3.5" />
-                            <span className="hidden sm:inline">浏览器打开</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => onOpenPreview(artifact)}
-                          className="flex items-center space-x-1.5 rounded-lg bg-[var(--primary)] hover:bg-[var(--primary-hover)] text-white px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer shadow-xs"
-                        >
-                          <Eye className="h-3.5 w-3.5" />
-                          <span>打开实时预览</span>
-                        </button>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {detectedArtifacts.map((art) => {
+                          const isExcel = art.type === 'excel';
+                          const isText = art.type === 'text';
+                          const isHtml = art.type === 'html';
+                          const isImage = art.type === 'image';
+
+                          const formatSize = (bytes?: number) => {
+                            if (!bytes) return '';
+                            if (bytes > 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+                            return `${(bytes / 1024).toFixed(1)} KB`;
+                          };
+
+                          return (
+                            <div
+                              key={art.id}
+                              className="flex items-center justify-between p-2.5 rounded-xl border border-[var(--border)]/70 bg-[var(--muted)]/25 hover:bg-[var(--muted)]/50 hover:border-[var(--primary)]/40 transition-all group/item"
+                            >
+                              <div className="flex items-center space-x-2.5 min-w-0 mr-2">
+                                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                                  isExcel ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' :
+                                  isText ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400' :
+                                  isHtml ? 'bg-cyan-500/15 text-cyan-600' :
+                                  isImage ? 'bg-fuchsia-500/15 text-fuchsia-600' :
+                                  'bg-zinc-500/15 text-zinc-400'
+                                }`}>
+                                  {isExcel ? <FileSpreadsheet className="h-4 w-4" /> :
+                                   isText ? <FileCode className="h-4 w-4" /> :
+                                   isHtml ? <Globe className="h-4 w-4" /> :
+                                   isImage ? <ImageIcon className="h-4 w-4" /> :
+                                   <FileText className="h-4 w-4" />}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-xs font-medium text-[var(--foreground)] truncate max-w-[200px]" title={art.title}>
+                                    {art.title}
+                                  </div>
+                                  <div className="flex items-center space-x-1.5 text-[10px] text-[var(--muted-foreground)]">
+                                    <span className="uppercase font-mono font-semibold">
+                                      {art.filePath.split('.').pop() || art.type}
+                                    </span>
+                                    {art.sizeBytes ? (
+                                      <span>· {formatSize(art.sizeBytes)}</span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center space-x-1 shrink-0">
+                                {/* 工作台预览按钮 */}
+                                {onOpenPreview && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      onOpenPreview({
+                                        type: (isExcel ? 'excel' : isText ? 'text' : isHtml ? 'html' : isImage ? 'image' : 'text') as any,
+                                        title: art.title,
+                                        filePath: art.filePath,
+                                        content: ''
+                                      });
+                                    }}
+                                    title="在右侧工作台独立分栏中查看预览"
+                                    className="flex items-center space-x-1 px-2 py-1 text-xs font-medium rounded-lg bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors cursor-pointer shadow-2xs"
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                    <span className="hidden sm:inline">预览</span>
+                                  </button>
+                                )}
+
+                                {/* 定位 */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (window.electronAPI?.showItemInFolder) {
+                                      window.electronAPI.showItemInFolder(art.filePath);
+                                    }
+                                  }}
+                                  title="在 Windows 资源管理器中高亮定位"
+                                  className="p-1 rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--primary)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                                >
+                                  <FolderOpen className="h-3.5 w-3.5" />
+                                </button>
+
+                                {/* 外部打开 */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (window.electronAPI?.openPath) {
+                                      window.electronAPI.openPath(art.filePath);
+                                    }
+                                  }}
+                                  title="调用系统默认软件打开"
+                                  className="p-1 rounded-lg border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors cursor-pointer"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
@@ -2221,50 +2464,116 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
             </div>
           )}
 
-          {/* Active Mounted Skills Chips Bar (v1.11.0 / v2.0.2) */}
-          {mountedSkillIds.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-amber-500/5 border border-amber-500/20 text-xs animate-in fade-in-50">
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 mr-1 shrink-0">
-                <Zap className="h-3.5 w-3.5 fill-amber-500 text-amber-500" />
-                <span>已挂载技能 ({mountedSkillIds.length})</span>
-              </span>
-              {mountedSkillIds.map(id => {
-                const idCanon = getCanonicalSkillId(id);
-                const s = availableSkills.find(item => item.id === id || (idCanon && getCanonicalSkillId(item.id) === idCanon));
-                const isFolder = s?.isFolderSkill;
-                const cleanName = s ? s.name.replace(/^\[.*?\]\s*/, '') : id.replace(/^custom:(?:global|workspace|extra):/, '');
-                return (
-                  <span
-                    key={id}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-[var(--card)] border border-amber-500/30 text-[var(--foreground)] shadow-2xs group"
-                  >
-                    <span className={`h-1.5 w-1.5 rounded-full ${isFolder ? 'bg-indigo-500' : 'bg-amber-500'}`} />
-                    <span className="max-w-[140px] truncate" title={s?.description || id}>
-                      {cleanName}
-                    </span>
-                    {isFolder && (
-                      <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                        复合包
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setMountedSkillIds(prev => prev.filter(x => x !== id && (!idCanon || getCanonicalSkillId(x) !== idCanon)))}
-                      className="text-[var(--muted-foreground)] hover:text-rose-500 transition-colors ml-0.5 cursor-pointer"
-                      title="取消挂载此技能"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+          {/* Active Mounted Skills - Compact Pill Bar (v2.2.0) */}
+          {mountedSkillIds.length > 0 && !isSkillsBarExpanded && (
+            <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-[var(--primary)]/8 border border-[var(--primary)]/20 text-xs select-none transition-all shadow-2xs">
+              <div className="flex items-center space-x-2 min-w-0">
+                <Zap className="h-3.5 w-3.5 fill-[var(--primary)] text-[var(--primary)] shrink-0" />
+                <span className="text-[11px] font-medium text-[var(--foreground)] truncate">
+                  已就绪 <strong className="text-[var(--primary)] font-semibold">{mountedSkillIds.length}</strong> 项企业技能
+                  <span className="text-[10px] text-[var(--muted-foreground)] ml-1 font-normal hidden sm:inline">
+                    (含 ECCOM Word/Excel/PPT 办公套件)
                   </span>
-                );
-              })}
-              <button
-                type="button"
-                onClick={() => setMountedSkillIds([])}
-                className="text-[10px] text-[var(--muted-foreground)] hover:text-rose-500 underline ml-auto cursor-pointer"
-              >
-                清除全部
-              </button>
+                </span>
+              </div>
+              <div className="flex items-center space-x-2.5 shrink-0 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setIsSkillsBarExpanded(true)}
+                  className="font-medium text-[var(--primary)] hover:underline cursor-pointer flex items-center gap-0.5"
+                  title="展开查看所有已就绪技能标签"
+                >
+                  <span>展开明细</span>
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+                <span className="text-[var(--border)]">|</span>
+                <button
+                  type="button"
+                  onClick={() => setShowSkillPicker(true)}
+                  className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer"
+                  title="打开技能挂载与勾选调度面板"
+                >
+                  管理
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMountedSkillIds([])}
+                  className="text-[var(--muted-foreground)] hover:text-rose-500 cursor-pointer"
+                  title="本轮清空已挂载技能"
+                >
+                  清空
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Active Mounted Skills - Expanded Chips View (v2.2.0) */}
+          {mountedSkillIds.length > 0 && isSkillsBarExpanded && (
+            <div className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-[var(--primary)]/5 border border-[var(--primary)]/20 text-xs animate-in fade-in-50">
+              <div className="flex items-center justify-between pb-1.5 border-b border-[var(--border)]/40">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--primary)]">
+                  <Zap className="h-3.5 w-3.5 fill-[var(--primary)] text-[var(--primary)]" />
+                  <span>已就绪企业技能 ({mountedSkillIds.length})</span>
+                </div>
+                <div className="flex items-center space-x-2.5 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setShowSkillPicker(true)}
+                    className="text-[var(--primary)] hover:underline cursor-pointer"
+                  >
+                    + 挂载管理
+                  </button>
+                  <span className="text-[var(--border)]">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setIsSkillsBarExpanded(false)}
+                    className="font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] cursor-pointer flex items-center gap-0.5"
+                  >
+                    <span>收起明细</span>
+                    <ChevronDown className="h-3 w-3 rotate-180" />
+                  </button>
+                  <span className="text-[var(--border)]">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setMountedSkillIds([])}
+                    className="text-[var(--muted-foreground)] hover:text-rose-500 cursor-pointer"
+                  >
+                    清除全部
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                {mountedSkillIds.map(id => {
+                  const idCanon = getCanonicalSkillId(id);
+                  const s = availableSkills.find(item => item.id === id || (idCanon && getCanonicalSkillId(item.id) === idCanon));
+                  const isFolder = s?.isFolderSkill;
+                  const cleanName = s ? s.name.replace(/^\[.*?\]\s*/, '') : id.replace(/^custom:(?:global|workspace|extra):/, '');
+                  return (
+                    <span
+                      key={id}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-[var(--card)] border border-[var(--primary)]/25 text-[var(--foreground)] shadow-2xs group hover:border-[var(--primary)]/50 transition-colors"
+                    >
+                      <span className={`h-1.5 w-1.5 rounded-full ${isFolder ? 'bg-indigo-500' : 'bg-[var(--primary)]'}`} />
+                      <span className="max-w-[150px] truncate" title={s?.description || id}>
+                        {cleanName}
+                      </span>
+                      {isFolder && (
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                          复合包
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setMountedSkillIds(prev => prev.filter(x => x !== id && (!idCanon || getCanonicalSkillId(x) !== idCanon)))}
+                        className="text-[var(--muted-foreground)] hover:text-rose-500 transition-colors ml-0.5 cursor-pointer"
+                        title="取消挂载此技能"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -2340,15 +2649,15 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   onClick={() => setShowSkillPicker(prev => !prev)}
                   className={`flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors border cursor-pointer ${
                     mountedSkillIds.length > 0
-                      ? 'border-amber-500/40 bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold shadow-2xs'
+                      ? 'border-[var(--primary)]/30 bg-[var(--primary)]/10 text-[var(--primary)] font-semibold shadow-2xs'
                       : 'border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
                   }`}
-                  title="选择/勾选本轮要执行的技能包 (支持华讯 Excel/Word 复合技能与自定义包)"
+                  title="选择/勾选本轮要执行的技能包 (支持 ECCOM 办公套件与自定义技能)"
                 >
-                  <Zap className={`h-3 w-3 ${mountedSkillIds.length > 0 ? 'fill-amber-500 text-amber-500' : 'text-[var(--muted-foreground)]'}`} />
+                  <Zap className={`h-3 w-3 ${mountedSkillIds.length > 0 ? 'fill-[var(--primary)] text-[var(--primary)]' : 'text-[var(--muted-foreground)]'}`} />
                   <span>技能挂载</span>
                   {mountedSkillIds.length > 0 && (
-                    <span className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white px-0.5">
+                    <span className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-[var(--primary)] text-[9px] font-bold text-white px-0.5">
                       {mountedSkillIds.length}
                     </span>
                   )}
@@ -2359,9 +2668,9 @@ export const ChatArea: React.FC<ChatAreaProps> = ({
                   <div className="absolute bottom-full left-0 mb-2 w-84 sm:w-96 rounded-xl border border-[var(--border)] bg-[var(--card)]/98 backdrop-blur-md p-3 shadow-2xl z-50 flex flex-col gap-2 animate-in slide-in-from-bottom-2 select-none">
                     <div className="flex items-center justify-between border-b border-[var(--border)] pb-2">
                       <div className="flex items-center gap-1.5">
-                        <Zap className="h-4 w-4 text-amber-500 fill-amber-500" />
+                        <Zap className="h-4 w-4 text-[var(--primary)] fill-[var(--primary)]" />
                         <span className="font-semibold text-xs text-[var(--foreground)]">
-                          技能挂载与勾选调度面板
+                          技能挂载与调度中心
                         </span>
                       </div>
                       <button

@@ -631,6 +631,74 @@ function setupIPC() {
     }
   });
 
+  ipcMain.handle('artifact:getPreviewData', async (_event, filePath: string) => {
+    try {
+      if (!filePath || !fs.existsSync(filePath)) {
+        return { success: false, error: '文件不存在或路径无效' };
+      }
+      const ext = path.extname(filePath).toLowerCase();
+      const stat = fs.statSync(filePath);
+
+      // 1. Excel 表格文件 (.xlsx, .xls, .csv)
+      if (ext === '.xlsx' || ext === '.xls' || ext === '.csv') {
+        const ExcelJS = await import('exceljs');
+        const workbook = new ExcelJS.Workbook();
+        if (ext === '.csv') {
+          await workbook.csv.readFile(filePath);
+        } else {
+          await workbook.xlsx.readFile(filePath);
+        }
+        const sheets = workbook.worksheets.map(ws => {
+          const rows: any[][] = [];
+          ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+            if (rowNumber <= 300) {
+              const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+              rows.push(values.map(v => (v !== null && v !== undefined ? (typeof v === 'object' && 'result' in v ? String(v.result) : String(v)) : '')));
+            }
+          });
+          return {
+            name: ws.name,
+            rowCount: ws.rowCount,
+            columnCount: ws.columnCount,
+            rows
+          };
+        });
+        return {
+          success: true,
+          type: 'excel',
+          fileName: path.basename(filePath),
+          filePath,
+          sizeBytes: stat.size,
+          sheets
+        };
+      }
+
+      // 2. 文本/配置/脚本文件 (.txt, .json, .py, .sh, .sql, .md, .cfg, .log 等)
+      if (/\.(txt|json|yaml|yml|py|sh|sql|md|cfg|log|conf|ini|env)$/i.test(ext) || stat.size < 1024 * 1024) {
+        const content = fs.readFileSync(filePath, 'utf-8');
+        return {
+          success: true,
+          type: 'text',
+          fileName: path.basename(filePath),
+          filePath,
+          sizeBytes: stat.size,
+          content: content.length > 500000 ? content.slice(0, 500000) + '\n\n... [ASTeam: 内容已截断]' : content
+        };
+      }
+
+      return {
+        success: true,
+        type: 'binary',
+        fileName: path.basename(filePath),
+        filePath,
+        sizeBytes: stat.size
+      };
+    } catch (err: any) {
+      console.error('Failed to get artifact preview:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
   ipcMain.handle('shell:openPath', async (_event, targetPath: string) => {
     try {
       if (targetPath && fs.existsSync(targetPath)) {
@@ -693,10 +761,10 @@ function setupIPC() {
           payload: { sessionId, error }
         });
       },
-      onDone: (summary, tokenStats) => {
+      onDone: (summary, tokenStats, artifacts) => {
         mainWindow?.webContents.send('agent:event', {
           type: 'done',
-          payload: { sessionId, summary, tokenStats }
+          payload: { sessionId, summary, tokenStats, artifacts }
         });
       },
       onQuestion: (data) => {

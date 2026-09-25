@@ -518,44 +518,81 @@ export class ToolScheduler {
   private async executeTerminal(command: string, context: ToolExecutionContext): Promise<string> {
     if (!command.trim()) return '终端执行错误: 命令不能为空。';
     const { spawn } = await import('node:child_process');
+    const { StringDecoder } = await import('node:string_decoder');
 
     return new Promise((resolve) => {
       const isWin = process.platform === 'win32';
       const shell = isWin ? 'powershell.exe' : '/bin/bash';
-      const args = isWin ? ['-NoProfile', '-Command', command] : ['-c', command];
+      // 关键修复：强制在 Windows PowerShell 下切换 UTF-8 控制台输入/输出编码，彻底根除中文乱码
+      const winCmdPrefix = `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; [Console]::InputEncoding = [System.Text.Encoding]::UTF8; $OutputEncoding = [System.Text.Encoding]::UTF8; `;
+      const args = isWin 
+        ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `${winCmdPrefix}${command}`] 
+        : ['-c', command];
 
       let output = '';
+      const stdoutDecoder = new StringDecoder('utf8');
+      const stderrDecoder = new StringDecoder('utf8');
+
       const proc = spawn(shell, args, {
         cwd: context.workspacePath || process.cwd(),
-        env: { ...process.env }
+        env: {
+          ...process.env,
+          PYTHONIOENCODING: 'utf-8',
+          PYTHONUTF8: '1',
+          LANG: 'zh_CN.UTF-8',
+          LC_ALL: 'zh_CN.UTF-8'
+        }
       });
 
       context.registerProcess?.(proc);
 
-      proc.stdout.on('data', (d) => {
-        const str = d.toString();
-        output += str;
-        context.onTerminalData?.(str);
-      });
-
-      proc.stderr.on('data', (d) => {
-        const str = d.toString();
-        output += str;
-        context.onTerminalData?.(str);
-      });
-
       const cmdStartTime = Date.now();
-      const timer = setTimeout(() => {
-        try {
-          if (!proc.killed) {
-            proc.kill('SIGKILL');
-            output += '\n[命令执行超时，已由系统安全终止]';
+      let lastActivity = Date.now();
+
+      // 活动保活检测：长任务（如数据转换管线、打流测试）只要有持续日志输出，自动延长保活时间
+      let timer: NodeJS.Timeout;
+      const MAX_INACTIVITY_MS = 60000; // 单次无响应超时 60s
+      const MAX_TOTAL_RUNTIME_MS = 300000; // 最长单命令总超时 5 分钟
+
+      const scheduleTimeoutCheck = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          const now = Date.now();
+          const totalElapsed = now - cmdStartTime;
+          const inactiveElapsed = now - lastActivity;
+
+          if (totalElapsed >= MAX_TOTAL_RUNTIME_MS || inactiveElapsed >= MAX_INACTIVITY_MS) {
+            try {
+              if (!proc.killed) {
+                proc.kill('SIGKILL');
+                output += '\n[命令执行超时或无输出响应，已由系统安全终止]';
+              }
+            } catch {}
+          } else {
+            scheduleTimeoutCheck();
           }
-        } catch {}
-      }, 60000);
+        }, 10000);
+      };
+
+      scheduleTimeoutCheck();
+
+      proc.stdout.on('data', (chunk) => {
+        lastActivity = Date.now();
+        const str = stdoutDecoder.write(chunk);
+        output += str;
+        context.onTerminalData?.(str);
+      });
+
+      proc.stderr.on('data', (chunk) => {
+        lastActivity = Date.now();
+        const str = stderrDecoder.write(chunk);
+        output += str;
+        context.onTerminalData?.(str);
+      });
 
       proc.on('close', (code) => {
         clearTimeout(timer);
+        output += stdoutDecoder.end() + stderrDecoder.end();
 
         // 智能探针：自动捕捉终端执行过程中落地生成的目标物理交付物
         try {

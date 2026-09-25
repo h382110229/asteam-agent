@@ -34,13 +34,16 @@ import {
   Volume2,
   CalendarClock,
   Users,
-  PanelRightClose
+  PanelRightClose,
+  FileSpreadsheet
 } from 'lucide-react';
 import { GitStatusSummary, GitFileStatus, CheckpointItem, SwarmState } from '../types/project';
-import { ChatMessageItem, extractPreviewableArtifact } from './ChatArea';
+import { ChatMessageItem, extractPreviewableArtifact, extractAllArtifactsFromMessage } from './ChatArea';
 import { HtmlPreview } from './preview/HtmlPreview';
 import { MermaidPreview } from './preview/MermaidPreview';
 import { SvgPreview } from './preview/SvgPreview';
+import { ExcelPreview } from './preview/ExcelPreview';
+import { TextPreview } from './preview/TextPreview';
 import { LiveTerminalCard } from './LiveTerminalCard';
 import { ConfirmModal } from './ConfirmModal';
 import { SchedulerTab } from './SchedulerTab';
@@ -49,7 +52,7 @@ import { SwarmTab } from './SwarmTab';
 export type WorkspaceDrawerTab = 'preview' | 'artifacts' | 'diff' | 'timeline' | 'terminal' | 'scheduler' | 'swarm';
 
 export interface PreviewData {
-  type: 'html' | 'mermaid' | 'svg' | 'image' | 'video' | 'audio';
+  type: 'html' | 'mermaid' | 'svg' | 'image' | 'video' | 'audio' | 'excel' | 'text';
   title?: string;
   content: string;
   filePath?: string;
@@ -57,7 +60,7 @@ export interface PreviewData {
 
 export interface ArtifactItem {
   id: string;
-  type: 'html' | 'svg' | 'mermaid' | 'docx' | 'pptx' | 'image' | 'video' | 'audio' | 'file';
+  type: 'html' | 'svg' | 'mermaid' | 'docx' | 'pptx' | 'image' | 'video' | 'audio' | 'excel' | 'text' | 'file';
   title: string;
   content?: string;
   filePath?: string;
@@ -281,7 +284,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
   const [discardSuccess, setDiscardSuccess] = useState<string | null>(null);
 
   // Artifacts Shelf state & collection
-  const [artifactFilter, setArtifactFilter] = useState<'all' | 'html' | 'svg' | 'image' | 'video' | 'audio' | 'mermaid' | 'docs'>('all');
+  const [artifactFilter, setArtifactFilter] = useState<'all' | 'excel' | 'text' | 'html' | 'svg' | 'image' | 'video' | 'audio' | 'mermaid' | 'docs'>('all');
   const [artifactSearch, setArtifactSearch] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -523,7 +526,29 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
         }
       }
 
-      // Check extracted previewable artifact from content/thought
+      // 提取本条消息中通过物理探针核验落盘或由命令脚本生成的所有真实交付物 (v2.1.0)
+      const allDetected = extractAllArtifactsFromMessage(msg);
+      for (const dArt of allDetected) {
+        const key = getAssetKey(dArt.type, dArt.title, dArt.filePath);
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          items.push({
+            id: `msg-${mIdx}-${dArt.id}`,
+            type: dArt.type as any,
+            title: dArt.title,
+            filePath: dArt.filePath,
+            timestamp: msg.timestamp,
+            previewData: {
+              type: dArt.type as any,
+              title: dArt.title,
+              filePath: dArt.filePath,
+              content: ''
+            }
+          });
+        }
+      }
+
+      // 兼容旧版提取器
       const artifact = extractPreviewableArtifact(msg.content || msg.thought || '', msg.steps);
       if (artifact) {
         const key = getAssetKey(artifact.type, artifact.title, artifact.filePath);
@@ -531,7 +556,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
           seenKeys.add(key);
           items.push({
             id: `msg-${mIdx}`,
-            type: artifact.type,
+            type: artifact.type as any,
             title: artifact.title || (artifact.type === 'html' ? 'HTML 页面预览' : artifact.type === 'svg' ? 'SVG 矢量设计' : artifact.type === 'video' ? 'AI 视频' : artifact.type === 'audio' ? 'AI 语音' : 'Mermaid 架构图'),
             content: artifact.content,
             filePath: artifact.filePath,
@@ -547,13 +572,15 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
 
   const filteredArtifacts = useMemo(() => {
     return artifacts.filter(item => {
+      if (artifactFilter === 'excel' && item.type !== 'excel') return false;
+      if (artifactFilter === 'text' && item.type !== 'text') return false;
       if (artifactFilter === 'html' && item.type !== 'html') return false;
       if (artifactFilter === 'svg' && item.type !== 'svg') return false;
       if (artifactFilter === 'image' && item.type !== 'image') return false;
       if (artifactFilter === 'video' && item.type !== 'video') return false;
       if (artifactFilter === 'audio' && item.type !== 'audio') return false;
       if (artifactFilter === 'mermaid' && item.type !== 'mermaid') return false;
-      if (artifactFilter === 'docs' && item.type !== 'docx' && item.type !== 'pptx') return false;
+      if (artifactFilter === 'docs' && item.type !== 'docx' && item.type !== 'pptx' && item.type !== 'pdf') return false;
       if (artifactSearch.trim()) {
         const q = artifactSearch.toLowerCase();
         return item.title.toLowerCase().includes(q) || (item.filePath && item.filePath.toLowerCase().includes(q));
@@ -1020,6 +1047,10 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     </div>
                   </div>
                 </div>
+              ) : previewData.type === 'excel' ? (
+                <ExcelPreview filePath={previewData.filePath} title={previewData.title} />
+              ) : previewData.type === 'text' ? (
+                <TextPreview filePath={previewData.filePath} title={previewData.title} initialContent={previewData.content} />
               ) : (
                 <HtmlPreview content={previewData.content} title={previewData.title} filePath={previewData.filePath} />
               )
@@ -1064,13 +1095,15 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               <div className="flex items-center space-x-1 overflow-x-auto text-xs py-0.5">
                 {[
                   { id: 'all', label: '全部产物', count: artifacts.length },
+                  { id: 'excel', label: 'Excel 表格', count: artifacts.filter(a => a.type === 'excel').length },
+                  { id: 'text', label: '代码/文本', count: artifacts.filter(a => a.type === 'text').length },
                   { id: 'html', label: 'HTML 大屏', count: artifacts.filter(a => a.type === 'html').length },
                   { id: 'svg', label: 'SVG 设计', count: artifacts.filter(a => a.type === 'svg').length },
                   { id: 'image', label: 'AI 图像', count: artifacts.filter(a => a.type === 'image').length },
                   { id: 'video', label: 'AI 视频', count: artifacts.filter(a => a.type === 'video').length },
                   { id: 'audio', label: 'AI 语音', count: artifacts.filter(a => a.type === 'audio').length },
                   { id: 'mermaid', label: 'Mermaid 拓扑', count: artifacts.filter(a => a.type === 'mermaid').length },
-                  { id: 'docs', label: '商业公文', count: artifacts.filter(a => a.type === 'docx' || a.type === 'pptx').length },
+                  { id: 'docs', label: '文档报告', count: artifacts.filter(a => a.type === 'docx' || a.type === 'pptx' || a.type === 'pdf').length },
                 ].map(chip => (
                   <button
                     key={chip.id}
@@ -1124,6 +1157,8 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   {filteredArtifacts.map(art => {
+                    const isExcel = art.type === 'excel' || (art.filePath && /\.(xlsx|xls|csv)$/i.test(art.filePath));
+                    const isText = art.type === 'text' || (art.filePath && /\.(txt|json|py|sh|sql|cfg|log|yaml|yml|md)$/i.test(art.filePath));
                     const isHtml = art.type === 'html';
                     const isSvg = art.type === 'svg';
                     const isImage = art.type === 'image';
@@ -1132,6 +1167,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                     const isMermaid = art.type === 'mermaid';
                     const isDocx = art.type === 'docx';
                     const isPptx = art.type === 'pptx';
+                    const isPdf = art.type === 'pdf' || (art.filePath && /\.pdf$/i.test(art.filePath));
 
                     return (
                       <div
@@ -1142,7 +1178,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                         <div className="flex items-start justify-between gap-2 mb-2.5">
                           <div className="flex items-center space-x-2.5">
                             <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${
-                              isHtml ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                              isExcel ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
+                              isText ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
+                              isHtml ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' :
                               isSvg ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' :
                               isImage ? 'bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400' :
                               isVideo ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400' :
@@ -1150,8 +1188,11 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                               isMermaid ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400' :
                               isDocx ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' :
                               isPptx ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400' :
+                              isPdf ? 'bg-rose-500/10 text-rose-600' :
                               'bg-purple-500/10 text-purple-600'
                             }`}>
+                              {isExcel && <FileSpreadsheet className="h-5 w-5" />}
+                              {isText && <FileCode className="h-5 w-5" />}
                               {isHtml && <Globe className="h-5 w-5" />}
                               {isSvg && <Sparkles className="h-5 w-5" />}
                               {isImage && <ImageIcon className="h-5 w-5" />}
@@ -1160,6 +1201,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                               {isMermaid && <GitBranch className="h-5 w-5" />}
                               {isDocx && <FileText className="h-5 w-5" />}
                               {isPptx && <Presentation className="h-5 w-5" />}
+                              {isPdf && <FileText className="h-5 w-5" />}
                             </div>
 
                             <div className="overflow-hidden">
@@ -1168,7 +1210,9 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                               </h4>
                               <div className="flex items-center space-x-1.5 text-[10px] text-[var(--muted-foreground)] mt-0.5">
                                 <span className={`px-1.5 py-0.2 rounded font-medium ${
-                                  isHtml ? 'bg-blue-500/10 text-blue-600' :
+                                  isExcel ? 'bg-emerald-500/10 text-emerald-600' :
+                                  isText ? 'bg-blue-500/10 text-blue-600' :
+                                  isHtml ? 'bg-cyan-500/10 text-cyan-600' :
                                   isSvg ? 'bg-emerald-500/10 text-emerald-600' :
                                   isImage ? 'bg-fuchsia-500/10 text-fuchsia-600' :
                                   isVideo ? 'bg-rose-500/10 text-rose-600' :
@@ -1177,7 +1221,7 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                                   isDocx ? 'bg-indigo-500/10 text-indigo-600' :
                                   'bg-amber-500/10 text-amber-600'
                                 }`}>
-                                  {isHtml ? 'HTML 页面' : isSvg ? 'SVG 矢量' : isImage ? 'AI 图像' : isVideo ? 'AI 视频' : isAudio ? 'AI 语音' : isMermaid ? 'Mermaid' : isDocx ? 'Word 文档' : isPptx ? 'PPT 幻灯片' : '文件'}
+                                  {isExcel ? 'Excel 表格' : isText ? '代码/文本' : isHtml ? 'HTML 页面' : isSvg ? 'SVG 矢量' : isImage ? 'AI 图像' : isVideo ? 'AI 视频' : isAudio ? 'AI 语音' : isMermaid ? 'Mermaid' : isDocx ? 'Word 文档' : isPptx ? 'PPT 幻灯片' : isPdf ? 'PDF 文档' : '文件'}
                                 </span>
                                 {art.timestamp && (
                                   <span className="flex items-center space-x-0.5">
@@ -1246,12 +1290,12 @@ export const WorkspaceDrawer: React.FC<WorkspaceDrawerProps> = ({
                               </button>
                             )}
 
-                            {/* External action for docx/pptx/image */}
-                            {(isDocx || isPptx || isImage) && art.filePath && (
+                            {/* External action for docx/pptx/image/excel/text/pdf */}
+                            {(isDocx || isPptx || isImage || isExcel || isText || isPdf) && art.filePath && (
                               <button
                                 type="button"
                                 onClick={() => handleOpenArtifactPath(art.filePath)}
-                                className="flex items-center space-x-1 rounded-md bg-[var(--primary)] px-2.5 py-1 text-xs font-medium text-white hover:bg-[var(--primary)]/90 transition-colors shadow-2xs cursor-pointer"
+                                className="flex items-center space-x-1 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:border-[var(--primary)] hover:text-[var(--primary)] transition-colors shadow-2xs cursor-pointer"
                               >
                                 <ExternalLink className="h-3.5 w-3.5" />
                                 <span>系统打开</span>

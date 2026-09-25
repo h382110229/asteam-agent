@@ -66,7 +66,7 @@ export interface AgentEventCallbacks {
   onToken: (token: string, type?: 'content' | 'thought') => void;
   onPlan: (steps: AgentStep[]) => void;
   onStepUpdate: (step: AgentStep) => void;
-  onDone: (finalSummary: string, tokenStats?: any) => void;
+  onDone: (finalSummary: string, tokenStats?: any, artifacts?: any[]) => void;
   onError: (err: string) => void;
   onQuestion?: (data: InteractiveQuestionData) => void;
   onTerminalData?: (data: TerminalDataEvent) => void;
@@ -292,7 +292,7 @@ export async function runHarnessAgent(
       if (s.status === 'running') s.status = 'completed';
     }
     callbacks.onPlan([...steps]);
-    callbacks.onDone(result.summary, result.tokenStats);
+    callbacks.onDone(result.summary, result.tokenStats, (result as any).artifacts);
   } catch (err: any) {
     for (const s of steps) {
       if (s.status === 'running') {

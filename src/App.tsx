@@ -426,6 +426,9 @@ export const App: React.FC = () => {
           if ((payload as any)?.tokenStats) {
             lastMsg.tokenStats = (payload as any).tokenStats;
           }
+          if ((payload as any)?.artifacts) {
+            lastMsg.artifacts = (payload as any).artifacts;
+          }
           lastMsg.durationMs = Date.now() - (lastMsg.timestamp || Date.now());
         }
 

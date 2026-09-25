@@ -71,6 +71,7 @@ export interface ElectronAPI {
   showItemInFolder: (filePath: string) => Promise<boolean>;
   openPath: (targetPath: string) => Promise<boolean>;
   openInBrowser: (options: { content: string; title?: string; defaultPath?: string }) => Promise<{ success: boolean; filePath?: string; error?: string }>;
+  getArtifactPreview: (filePath: string) => Promise<{ success: boolean; type?: 'excel' | 'text' | 'binary'; fileName?: string; filePath?: string; sizeBytes?: number; sheets?: any[]; content?: string; error?: string }>;
 
   // Storage Hub (v1.3.0)
   getStorageStats: () => Promise<any>;

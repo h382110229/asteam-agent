@@ -1,0 +1,80 @@
+{
+  "kind": "pptx-template-shell-extraction",
+  "source": {
+    "path": "PPT模板.pptx",
+    "requestedNameInSpecification": "2021PPT模板-浅色(1).pptx",
+    "actualSuppliedName": "PPT模板.pptx",
+    "sha256": "8108b1c1c2ca20f1548911c5799771faabdc3c52eed55cba9b0137a91d13026c",
+    "slideCount": 5,
+    "slideSizeInches": [
+      13.333,
+      7.5
+    ],
+    "masters": 1,
+    "layouts": 7
+  },
+  "extraction": {
+    "sourceSlides": {
+      "cover": 1,
+      "contents": 2,
+      "section": 3,
+      "body": 4,
+      "closing": 5
+    },
+    "render": "Bundled LibreOffice headless, then bundled pdftoppm at 1280 x 720; production-time extraction only. Source copy retains all fixed shapes, green overlay, strapline decoration, closing divider and page arrows. Body placeholders are kept empty to retain master rendering.",
+    "dynamicPlaceholdersRemoved": [
+      "cover title, subtitle, and strapline",
+      "contents example entries and sample page number",
+      "section sample title",
+      "body sample title, body copy, and sample page number",
+      "closing sample tagline"
+    ],
+    "fixedElementsRetained": [
+      "ECCOM Logo artwork",
+      "dark and light wave backgrounds",
+      "contents left panel and role label",
+      "body curved gray field and green title rule",
+      "footer company name where present",
+      "page-number slot and fixed decorative treatment",
+      "source green cover/closing overlay",
+      "cover strapline parallelogram",
+      "closing divider",
+      "both page-number arrows"
+    ],
+    "runtimeTemplateLoaded": false,
+    "fontSubstitution": "Contents Chinese label rendered using Arial Unicode MS on this host; CONTENTS run explicitly Arial to prevent substitution wrapping. Original template unchanged. Other authored text removed from shell and rendered natively at runtime."
+  },
+  "artifacts": [
+    {
+      "path": "eccom/assets/logo-color.png",
+      "sha256": "b523aabdeab16d665a719b3c547d0d765b64f0da374a48c4a2e7f0ccb07c627c",
+      "sourcePart": "ppt/media/image1.png"
+    },
+    {
+      "path": "eccom/assets/logo-white.png",
+      "sha256": "b31d72054e09557cb2a78141287225e8f2734695438d4246e5aab26e99af8611",
+      "sourcePart": "ppt/media/image5.png"
+    },
+    {
+      "path": "eccom/assets/shells/cover.png",
+      "sha256": "e59bd781e63cbe754e50353e5331756b4e5bd0cc525d60071b9c9ada441faa2d"
+    },
+    {
+      "path": "eccom/assets/shells/contents.png",
+      "sha256": "98b4765ef5868e7d7f27bb03b19309e96feaf7d06e2c3294a91ac882fd6be75c"
+    },
+    {
+      "path": "eccom/assets/shells/section.png",
+      "sha256": "0ac9c75ba0c81335b05598d77195b323ec964b299e65bbf69e637d8fc8e15c39"
+    },
+    {
+      "path": "eccom/assets/shells/body.png",
+      "sha256": "27959b75b41fcdc36956a5d50188ce78821b42bcd069348d46194635bcaacaaa"
+    },
+    {
+      "path": "eccom/assets/shells/closing.png",
+      "sha256": "a79419efcd82d1229536d57f17fe902cc0477bb00da96987f34dc1900db63b89"
+    }
+  ],
+  "powerpointGate": "NOT_RUN"
+}
