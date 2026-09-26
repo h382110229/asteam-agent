@@ -22,7 +22,7 @@ import {
   PageBreak
 } from 'docx';
 
-const excelPath = 'E:\\WeChat\\xwechat_files\\h382110229_df18\\msg\\file\\2026-07\\资源盘点.xlsx';
+const excelPath = process.env.TEST_EXCEL_PATH || path.join(os.tmpdir(), '资源盘点.xlsx');
 const desktopPath = path.join(os.homedir(), 'Desktop', 'IDC数据库与CBS系统迁移至华为云技术方案_V1.0.docx');
 
 async function main() {

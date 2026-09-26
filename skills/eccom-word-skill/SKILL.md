@@ -63,7 +63,7 @@ recommended_tools:
 ### Step 0 — 环境预检（必做）
 
 ```powershell
-& $env:MIMO_PYTHON "C:\Users\<你>\.claude\skills\huaxun-word-generator\scripts\precheck_env.py"
+python "<skill_dir>\scripts\precheck_env.py"
 ```
 
 生成脚本默认也会跑预检（可用 `--skip-precheck` 跳过）。
@@ -109,7 +109,7 @@ recommended_tools:
 始终通过技能脚本（使用 `MIMO_PYTHON`）：
 
 ```powershell
-& $env:MIMO_PYTHON "C:\Users\<你>\.claude\skills\huaxun-word-generator\scripts\generate_huaxun_doc.py" `
+python "<skill_dir>\scripts\generate_huaxun_doc.py" `
   --meta meta.json --content content.json --out <输出目录> --pdf
 ```
 

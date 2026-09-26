@@ -12,10 +12,10 @@ Module.prototype.require = function(request) {
       app: {
         getVersion: () => '2.0.2',
         requestSingleInstanceLock: () => true,
-        getAppPath: () => 'd:\\AIProject\\asteam-agent',
+        getAppPath: () => process.cwd(),
         getPath: (name) => {
-          if (name === 'userData') return 'C:\\Users\\h3821\\AppData\\Roaming\\asteam-agent';
-          return 'C:\\Users\\h3821';
+          if (name === 'userData') return path.join(os.homedir(), 'AppData', 'Roaming', 'asteam-agent');
+          return os.homedir();
         },
         whenReady: () => Promise.resolve(),
         on: () => {},

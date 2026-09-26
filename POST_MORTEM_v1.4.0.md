@@ -173,7 +173,7 @@ flowchart LR
 | 2 | **[`POST_MORTEM_v1.4.0.md`](file:///d:/AIProject/asteam-agent/POST_MORTEM_v1.4.0.md)** | **NEW** | 本次技术复盘专题分析报告，完整记录故障 5 Whys、架构加固与 FAQ |
 | 3 | **[`README.md`](file:///d:/AIProject/asteam-agent/README.md)** | **UPDATED** | 技术架构同步补齐 Chromium `net.fetch` 网络引擎、`tsc` 编译门禁与容错工具解析器 |
 | 4 | **[`ROADMAP.md`](file:///d:/AIProject/asteam-agent/ROADMAP.md)** | **UPDATED** | 将阶段三 (v1.4.0) 标记为已全面交付基线，并记录生产加固成果与发布产物 |
-| 5 | **[`walkthrough.md`](file:///C:/Users/h3821/.gemini/antigravity/brain/907b2bb4-1087-4b56-a63b-0a24e7598b11/walkthrough.md)** | **UPDATED** | 记录全量变更、工程构建数据、自动化验证日志及 Auto 路由与视频落盘问答 |
+| 5 | **`walkthrough.md`** | **UPDATED** | 记录全量变更、工程构建数据、自动化验证日志及 Auto 路由与视频落盘问答 |
 
 ---
 
